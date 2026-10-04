@@ -4,7 +4,8 @@
 // structure (Timeline / Assets / Review + Settings gear) and the restore chevrons for a hidden top bar / column header,
 // and (v4) the guided flow: the stage rail, the new-project wizard (lyrics only, then the song added), the lyrics stage,
 // and (v5) stage 2: the script draft (intake, scenes, beats, sketches inline + copy/paste, gaps, notes, versions, the
-// timeline Scenes column).
+// timeline Scenes column), and (v6) stage 3: the breakdown (suggest from script, versions, the matrix, merge, drop, context
+// menus, Create entity, the agent extracting live, the timeline markers).
 //   node tools/verify.mjs [--project <id>] [outDir]     (default project: the server's default; npm run verify = demo)
 // Copies data/<project> (and data/_template) into a scratch data folder under the OS temp dir and starts serve.mjs
 // on free ports with WORKBENCH_DATA = that folder, so nothing under data/ is written and several runs (or a running
@@ -935,6 +936,174 @@ try {
   check('script project deleted', del.status === 200 && !fs.existsSync(ND), del.status);
   v5.pass = Object.values(v5.checks).every(c => c.pass);
 } catch (e) { v5.checks.aborted = blockFailed('v5', e); v5.pass = false; }
+// ---------------------------------------------------------------- v6: the guided flow, phase 3 (stage 3: the breakdown)
+// On a new project scripted by the agent: "Suggest from script" (the page's own pre-pass), save as a version, an item
+// edited in place, the matrix (a click links a scene), merge (selection bar + pick), drop / restore, the context menus,
+// "Create entity" (a character and a wardrobe look; Assets shows it), "Ask the agent to extract" and the agent's
+// answer live, the agent rules (no ok, no entity), the timeline scenes column markers and the scene menu entry.
+// Screenshots v6_*.png.
+const v6 = report.v6 = { checks: {} };
+try {
+  const check = (name, ok, detail) => { v6.checks[name] = { pass: !!ok, ...(detail !== undefined ? { detail } : {}) }; console.log(`v6 ${name}: ${ok ? 'PASS' : 'FAIL'}${detail !== undefined ? ' ' + JSON.stringify(detail) : ''}`); };
+  const NP = 'breakdown-verify', ND = path.join(DATA, NP);
+  if (fs.existsSync(ND)) await post('/api/projects/delete', { id: NP });
+  const pg = await browser.newPage();
+  await pg.setViewport({ width: 1500, height: 850, deviceScaleFactor: 1 });
+  pg.on('pageerror', e => console.error('pageerror', e.message));
+  pg.on('console', m => { if (m.type() === 'error') console.error('console', m.text()); });
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  const frames = (n = 2) => pg.evaluate((k) => new Promise(r => { const f = () => (k-- > 0 ? requestAnimationFrame(f) : r()); f(); }), n);
+  const ready = async () => { await pg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 }); await frames(); };
+  const combo = async (mods, key) => { for (const m of mods) await pg.keyboard.down(m); await pg.keyboard.press(key); for (const m of mods.slice().reverse()) await pg.keyboard.up(m); };
+  const until = async (fn, arg, ms = 6000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pg.evaluate(fn, arg)) return true; await wait(100); } return false; };
+  const readJ = (p, f) => { try { return JSON.parse(fs.readFileSync(path.join(DATA, p, f), 'utf8')); } catch (e) { return null; } };
+  const fileUntil = async (p, f, fn, ms = 5000) => { const t0 = Date.now(); let j = null; while (Date.now() - t0 < ms) { j = readJ(p, f); try { if (j && fn(j)) return j; } catch (e) { /* not there yet */ } await wait(100); } return j; };
+  const click = async (sel) => { const r = await pg.evaluate((s) => { const e = document.querySelector(s); if (!e) return null; e.scrollIntoView({ block: 'center' }); const b = e.getBoundingClientRect(); return { x: b.left + Math.min(8, b.width / 2), y: b.top + b.height / 2 }; }, sel); if (!r) throw new Error('no element ' + sel); await pg.mouse.click(r.x, r.y); await wait(120); };
+  const menuOf = async (sel) => { const r = await pg.evaluate((s) => { const b = document.querySelector(s).getBoundingClientRect(); return { x: b.left + 10, y: b.top + b.height / 2 }; }, sel); await pg.mouse.click(r.x, r.y, { button: 'right' }); await wait(120);
+    const m = await pg.evaluate(() => [...document.querySelectorAll('.pop .pi .lb')].map(x => x.childNodes[0]?.textContent.trim())); await pg.keyboard.press('Escape'); return m; };
+  const itemId = (name) => pg.evaluate((n) => window.WB.breakdown.ws.draft.find(i => i.name === n)?.id, name);
+
+  // 1. a scripted project (lyrics, intake, four scenes written by the agent); the breakdown stage starts empty
+  const POEM = '[Verse 1]\nThe night bus hums along the coast\nI count the lights I loved the most\nYour coat is red against the rain\n\n[Chorus]\nRide, ride, the window glows\nRide, ride, nobody knows\n\n[Verse 2]\nAt the pier the old boats creak\nYou hand me a letter, you don\'t speak\n\n[Outro]\nThe bus is gone, the road is grey';
+  const cr = await post('/api/projects/new', { id: NP, title: 'Breakdown Verify', lyrics: POEM });
+  const H = await writeHeaders(BASE, NP), op = async (name, body) => post(`/api/op/${name}?project=${NP}`, body, BASE, H);
+  const { origin: _o, ...HA } = H, agent = async (name, body) => post(`/api/op/${name}?project=${NP}`, body, BASE, HA);   // the agent surface: no page Origin
+  await op('intake_answer', { answers: { who: 'Mara, Theo, the bus driver', where: 'a night bus; the old pier' }, by: 'director' });
+  const sg = (await op('song_get', { words: false })).body, L = sg.lines, sec = (id) => sg.sections.find(s => s.id === id);
+  const sc = await op('scenes_update', { scenes: [
+    { t0: 0, t1: sec('chorus').t0, title: 'The night bus', text: 'Mara rides the night bus along the coast road, wearing a red raincoat. Rain on the window.', beats: [{ t: L[0].t0, text: 'Mara at the window' }, { t: L[2].t0, text: 'Mara writes a name on the glass' }] },
+    { t0: sec('chorus').t0, t1: sec('verse-2').t0, title: 'Chorus ride', text: 'The Bus Driver watches Mara in the mirror. Neon flicker.', beats: [{ t: L[3].t0, text: 'the Bus Driver glances up' }] },
+    { t0: sec('verse-2').t0, t1: sec('outro').t0, title: 'The pier', text: 'At the old pier Theo waits under a lamp. He hands Mara a letter; she keeps it in her coat.', beats: [{ t: L[5].t0, text: 'Theo hands Mara the letter' }] },
+    { t0: sec('outro').t0, t1: sg.duration_ms, title: 'Morning', text: 'Dawn. Mara alone with the ticket.', beats: [] },
+  ], snap: 'lines', message: 'verify: four scenes' });
+  await pg.goto(`${BASE}/?project=${NP}`, { waitUntil: 'domcontentloaded' });
+  await pg.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
+  await pg.reload({ waitUntil: 'domcontentloaded' }); await ready();
+  await combo(['Alt', 'Shift'], 'Digit3'); await wait(400);
+  const empty = await pg.evaluate(() => ({ stage: window.WB.stages.current(), empty: !!document.querySelector('.bdws .scempty [data-a=suggest]'), bar: !!document.querySelector('.bdbar [data-a=extract]') }));
+  await pg.screenshot({ path: path.join(OUT, 'v6_breakdown_empty.png') });
+  check('a scripted project: the breakdown stage (Alt+Shift+3) starts empty, offering "Suggest from script" and "Ask the agent to extract"', cr.status === 200 && sc.status === 200 && empty.stage === 'breakdown' && empty.empty && empty.bar, { empty, scenes: sc.body });
+
+  // 2. Suggest from script (no agent): characters from capitalised names and the intake, locations, props, wardrobe, FX, linked to scenes and beats
+  await click('.bdbar [data-a=suggest]'); await wait(200);
+  const sug = await pg.evaluate(() => { const d = window.WB.breakdown.ws.draft, f = (n) => d.find(i => i.name === n);
+    return { n: d.length, kinds: [...new Set(d.map(i => i.kind))].sort(), mara: f('Mara') && { kind: f('Mara').kind, scenes: f('Mara').links.map(l => l.scene), beats: f('Mara').links[0]?.beats.length }, theo: f('Theo')?.kind, driver: f('Bus Driver')?.kind,
+      pier: f('Old pier')?.kind, raincoat: f('Red raincoat') && { kind: f('Red raincoat').kind, for: f('Red raincoat').for }, rows: document.querySelectorAll('.bdws .bdrow').length, dirty: window.WB.breakdown.ws.dirty }; });
+  await pg.evaluate(() => document.querySelector('.bdbar .lymsg')?.focus()); await pg.keyboard.type('verify: first pass');
+  await combo(['Control'], 'Enter');
+  const V1 = await fileUntil(NP, 'breakdown.json', (j) => j.current === 'v1');
+  await until(() => !window.WB.breakdown.ws.dirty);
+  await pg.screenshot({ path: path.join(OUT, 'v6_breakdown_list.png') });
+  const ST1 = readJ(NP, 'stages.json')?.stages?.find(s => s.id === 'breakdown');
+  check('Suggest from script: characters (names + intake), locations, props, wardrobe (with its owner), FX, each linked to scenes and beats; Ctrl+Enter saves v1 (director / page, script version recorded); the stage moves to in progress',
+    sug.n >= 8 && sug.kinds.length === 5 && sug.mara?.kind === 'character' && sug.mara.scenes.length === 4 && sug.mara.beats === 2 && sug.theo === 'character' && sug.driver === 'character' && sug.pier === 'location'
+    && sug.raincoat?.kind === 'wardrobe' && !!sug.raincoat.for && sug.rows === sug.n && sug.dirty && V1?.versions?.[0]?.via === 'page' && V1.versions[0].message === 'verify: first pass' && V1.versions[0].script === 'v1'
+    && V1.versions[0].items.every(i => i.source === 'director') && ST1?.status === 'in_progress',
+    { sug, v1: V1?.versions?.[0] && { via: V1.versions[0].via, items: V1.versions[0].items.length, script: V1.versions[0].script }, stage: ST1?.status });
+
+  // 3. an item edited in place: open it (click), status ok saved at once, a beat chip and a link note
+  const mara = await itemId('Mara');
+  await click(`.bdrow[data-item="${mara}"] .bdnm`);
+  await click(`.bded [data-st=ok]`);
+  await until((id) => window.WB.store.breakdown.states?.[id]?.status === 'ok', mara);
+  await pg.evaluate(() => { const i = document.querySelector('.bded .bdlk[data-scene=sc04] .bdin-lnote'); i.focus(); });
+  await pg.keyboard.type('verify: alone at dawn'); await pg.keyboard.press('Enter');
+  await pg.screenshot({ path: path.join(OUT, 'v6_breakdown_item.png') });
+  const ed = await pg.evaluate((id) => { const it = window.WB.breakdown.ws.item(id); return { open: window.WB.breakdown.ws.open, note: it.links.find(l => l.scene === 'sc04')?.note, editor: !!document.querySelector(`.bded[data-item="${id}"] .bdin-desc`) }; }, mara);
+  const S1 = (await fileUntil(NP, 'breakdown.json', (j) => j.states?.[mara]?.status === 'ok'))?.states?.[mara];
+  check('an item opens in place (name, kind, status, description, scenes with beats and a note); status ok is saved at once (director / page)', ed.open === mara && ed.editor && ed.note === 'verify: alone at dawn' && S1?.via === 'page' && S1.by === 'director', { ed, state: S1 });
+
+  // 4. the matrix: items x scenes; a click on an empty cell links the item to that scene
+  await click('.bdbar [data-view=matrix]');
+  const theo = await itemId('Theo');
+  const mx0 = await pg.evaluate(() => ({ rows: document.querySelectorAll('.bdmx tr.bdmxr').length, cols: document.querySelectorAll('.bdmx th.bdmxs').length }));
+  await click(`.bdmx tr[data-item="${theo}"] td.bdc[data-scene=sc04]`);
+  const mx1 = await pg.evaluate((id) => ({ linked: window.WB.breakdown.ws.item(id).links.some(l => l.scene === 'sc04'), on: document.querySelector(`.bdmx tr[data-item="${id}"] td.bdc[data-scene=sc04]`)?.classList.contains('on') }), theo);
+  await pg.screenshot({ path: path.join(OUT, 'v6_breakdown_matrix.png') });
+  await combo(['Control'], 'Enter');
+  const V2 = await fileUntil(NP, 'breakdown.json', (j) => j.current === 'v2');
+  check('matrix: one row per item, one column per scene; a click links Theo to sc04 (the cell lights), Ctrl+Enter saves v2', mx0.rows === sug.n && mx0.cols === 4 && mx1.linked && mx1.on && V2?.versions.at(-1).items.find(i => i.id === theo)?.links.some(l => l.scene === 'sc04'), { mx0, mx1, v2: V2?.current });
+
+  // 5. merge: Ctrl+click two items, "merge" in the selection bar, keep the name chosen in the pick list
+  await click('.bdbar [data-view=list]');
+  const coat = await itemId('Coat'), rain = await itemId('Red raincoat');
+  await click(`.bdrow[data-item="${rain}"] .bdnm`); await click(`.bdrow[data-item="${rain}"] .bdnm`);   // open then close: a plain selection
+  await pg.evaluate((id) => { const e = document.querySelector(`.bdrow[data-item="${id}"] .bdnm`); e.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true })); }, coat || rain); await wait(150);
+  const selBar = await pg.evaluate(() => ({ shown: getComputedStyle(document.querySelector('.bdsel')).display !== 'none', text: document.querySelector('.bdsel')?.textContent || '' }));
+  await click('.bdsel [data-a=merge]'); await wait(150);
+  await pg.keyboard.type('raincoat'); await wait(80);
+  await pg.screenshot({ path: path.join(OUT, 'v6_breakdown_merge_pick.png') });
+  await pg.keyboard.press('Enter'); await wait(250);
+  const mg = await pg.evaluate(([a, b]) => { const s = window.WB.breakdown.ws; return { a: !!s.item(a), b: s.item(b) && { aliases: s.item(b).aliases, scenes: s.item(b).links.map(l => l.scene) } }; }, [coat, rain]);
+  await pg.screenshot({ path: path.join(OUT, 'v6_breakdown_merged.png') });
+  await combo(['Control'], 'Enter');
+  const V3 = await fileUntil(NP, 'breakdown.json', (j) => j.current === 'v3');
+  check('merge: Ctrl+click selects two, the selection bar offers merge, the pick keeps "Red raincoat" (the other name kept as an alias, scenes united), saved as v3',
+    !!coat && selBar.shown && /2 selected/.test(selBar.text) && !mg.a && mg.b?.aliases?.includes('Coat') && mg.b.scenes.includes('sc03') && mg.b.scenes.includes('sc01') && !V3?.versions.at(-1).items.some(i => i.id === coat),
+    { coat, rain, selBar, mg, v3: V3?.current });
+
+  // 6. context menus: an item row (rename, kind, merge, split, drop, create entity…) and a scene chip (the scene filter)
+  const lamp = await itemId('Lamp');
+  const rowMenu = await menuOf(`.bdrow[data-item="${lamp}"] .bdnm`);
+  await pg.evaluate((id) => window.WB.commands.run('breakdown.drop', { itemId: id }), lamp); await wait(150);
+  const dropped = await pg.evaluate((id) => ({ flag: !!window.WB.breakdown.ws.item(id).dropped, grey: document.querySelector(`.bdrow[data-item="${id}"]`)?.classList.contains('dropped') }), lamp);
+  await pg.evaluate((id) => window.WB.commands.run('breakdown.drop', { itemId: id }), lamp); await wait(150);
+  const restored = await pg.evaluate((id) => !window.WB.breakdown.ws.item(id).dropped, lamp);
+  check('item context menu (rename, change kind, merge, split, drop, create entity, note); drop is soft (greyed) and restorable',
+    ['Rename the item', 'Change the kind…', 'Split the item…', 'Drop (soft: restorable)', 'Create entity…', 'Note on the item'].every(x => rowMenu.includes(x)) && dropped.flag && dropped.grey && restored, { rowMenu, dropped, restored });
+
+  // 7. Create entity: Mara becomes a character (Assets), her red raincoat a look on her; nothing generated or spent
+  await pg.evaluate((id) => window.WB.breakdown.focus(id), mara); await wait(150);
+  await click('.bded [data-a=promote]'); await wait(200);
+  const pickRows = await pg.evaluate(() => [...document.querySelectorAll('.pal .pr .lb')].map(x => x.textContent));
+  await pg.screenshot({ path: path.join(OUT, 'v6_breakdown_promote_pick.png') });
+  await pg.keyboard.press('Enter');
+  await until(() => window.WB.store.entities.some(e => e.id === 'mara'), null, 8000);
+  await pg.evaluate((id) => window.WB.breakdown.focus(id), rain); await wait(150);
+  await click('.bded [data-a=promote]'); await wait(200); await pg.keyboard.press('Enter');
+  await until(() => (window.WB.store.entities.find(e => e.id === 'mara')?.looks || []).length === 1, null, 8000); await wait(300);
+  await pg.screenshot({ path: path.join(OUT, 'v6_breakdown_promoted.png') });
+  const E = readJ(NP, 'entities/characters/mara.json'), BS = readJ(NP, 'breakdown.json')?.states || {}, C = readJ(NP, 'costs.json'), RQ = readJ(NP, 'requests.json');
+  await pg.evaluate(() => window.WB.app.show('characters')); await wait(500);
+  const assets = await pg.evaluate(() => document.querySelector('#panes')?.textContent.includes('Mara'));
+  await pg.screenshot({ path: path.join(OUT, 'v6_assets_from_breakdown.png') });
+  check('Create entity (page): Mara becomes a draft character in Assets (linked back to the item and its scenes), the red raincoat a look on her; no request, no cost',
+    /Create a new character “Mara”/.test(pickRows[0] || '') && E?.status === 'draft' && E.breakdown?.item === mara && E.breakdown.scenes.length === 4 && E.looks?.[0]?.name === 'Red raincoat' && BS[mara]?.entity_id === 'mara' && BS[rain]?.look_id === E.looks[0].id
+    && assets && !(C?.items || []).length && !(RQ?.items || []).length,
+    { pick: pickRows.slice(0, 2), entity: E && { status: E.status, breakdown: E.breakdown, looks: E.looks?.map(l => l.id) }, states: { mara: BS[mara], rain: BS[rain] }, assets });
+
+  // 8. Ask the agent to extract: an ask note; the agent answers with a new version (live, marked agent); the agent rules
+  await pg.evaluate(() => window.WB.stages.open('breakdown')); await wait(300);
+  await click('.bdbar [data-a=extract]');
+  await fileUntil(NP, 'breakdown.json', (j) => j.notes.some(n => n.kind === 'extract'));
+  const bg = (await agent('breakdown_get', { with_script: false })).body, ask = bg.asks_for_agent.find(a => a.kind === 'extract');
+  const au = await agent('breakdown_update', { upsert: [{ kind: 'prop', name: 'Bus ticket', description: 'verify agent: the ticket she keeps', links: [{ scene: 'sc04', beats: [] }] }], message: 'verify agent: the ticket' });
+  await agent('breakdown_note_resolve', { id: ask?.id, reply: 'verify agent: added the ticket' });
+  const live = await until(() => [...document.querySelectorAll('.bdws .bdrow')].some(r => r.textContent.includes('Bus ticket') && r.querySelector('.who.ag')));
+  const agOk = await agent('breakdown_update', { status: { [theo]: 'ok' } }), agRev = await agent('breakdown_update', { status: { [theo]: 'review' } }), agProm = await agent('breakdown_promote', { item: theo });
+  await until((id) => window.WB.store.breakdown.states?.[id]?.status === 'review', theo);
+  await pg.screenshot({ path: path.join(OUT, 'v6_breakdown_agent.png') });
+  check('Ask the agent to extract: an ask (kind extract) the agent reads; its new version shows live (marked agent); the agent can ask for review but not mark ok or create an entity',
+    !!ask && au.status === 200 && live && agOk.status === 403 && agRev.status === 200 && agProm.status === 403, { ask: ask && ask.text.slice(0, 60), au: au.body, live, agOk: agOk.status, agRev: agRev.status, agProm: agProm.status });
+
+  // 9. the timeline: the scenes column carries the breakdown markers; a scene's menu opens its items in the breakdown
+  await pg.evaluate(() => window.WB.app.show('timeline')); await wait(500);
+  await pg.evaluate(() => { const tl = window.WB.timeline; tl.scrollToTime(0); tl.drawLanes(); }); await wait(200);
+  const marks = await pg.evaluate(() => [...document.querySelectorAll('.col-scenes .scn .scbd')].map(e => e.textContent));
+  await pg.screenshot({ path: path.join(OUT, 'v6_timeline_markers.png') });
+  const scMenu = await menuOf('.col-scenes .it.scene .scn');
+  await pg.evaluate(() => window.WB.commands.run('breakdown.sceneItems', { sceneId: 'sc03' })); await wait(400);
+  const filt = await pg.evaluate(() => ({ stage: window.WB.stages.current(), scene: window.WB.breakdown.ws.scene, rows: [...document.querySelectorAll('.bdws .bdrow')].map(r => r.dataset.item), bar: document.querySelector('.bdscf')?.textContent || '' }));
+  await pg.screenshot({ path: path.join(OUT, 'v6_breakdown_scene.png') });
+  const wantSc3 = (readJ(NP, 'breakdown.json')?.versions.at(-1).items || []).filter(i => i.links.some(l => l.scene === 'sc03')).map(i => i.id).sort();
+  check('timeline: the scenes column shows each scene\'s characters / locations; the scene menu has "Breakdown items in scene …", which opens the breakdown filtered to that scene',
+    marks.length >= 3 && marks.some(m => m.includes('Mara')) && scMenu.some(x => /^Breakdown items in scene sc0\d$/.test(x)) && filt.stage === 'breakdown' && filt.scene === 'sc03' && JSON.stringify([...filt.rows].sort()) === JSON.stringify(wantSc3) && /sc03/.test(filt.bar),
+    { marks, scMenu: scMenu.filter(x => /Breakdown/.test(x)), filt: { ...filt, rows: filt.rows.length }, want: wantSc3.length });
+  await pg.close();
+  const del = await post('/api/projects/delete', { id: NP });
+  check('breakdown project deleted', del.status === 200 && !fs.existsSync(ND), del.status);
+  v6.pass = Object.values(v6.checks).every(c => c.pass);
+} catch (e) { v6.checks.aborted = blockFailed('v6', e); v6.pass = false; }
 // write path: approve/needs-changes + a note, on another scratch copy (_verify, its own server), then a stale-rev POST must get 409
 try {
   const TMP = path.join(DATA, '_verify');
@@ -961,8 +1130,8 @@ report.project = P;
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 1));
 const w = report.writes || {};
 const writesOk = w.noteSaved && w.noteShownInColumn && w.staleStatus === 409 && w.newState !== undefined && w.newState !== w.stateBefore && w.approvalsRev > w.approvalsRevBefore;
-console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
-process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
+console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
+process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
 await browser.close();
 for (const c of procs) c.kill();
 await new Promise(r => setTimeout(r, 300));   // let the servers release the scratch folder; cleanup() removes it on exit

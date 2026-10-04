@@ -6,7 +6,7 @@
 // official SDK client and exercises: tools/list, song_get, timeline_query, note_add + note_resolve, request_create +
 // request_update (the approval and cap rules, done -> cost + media), snapshot_save + snapshot_restore, ui_focus, the guided
 // flow (stages_get / stage_update, lyrics_* on a derived and on a new lyrics-only project, song_attach; stage 2: intake_*,
-// script_get / scenes_update (derived from script.json, versions, snap, restore, diff, status rules), scene notes, sketches),
+// script_get / scenes_update (derived from script.json, versions, snap, restore, diff, status rules), scene notes, sketches; stage 3: breakdown_* (versions, statuses, notes, the page-only promotion)),
 // resources, the director-session prompt, the guard rules (edit voids approval, director-only approvals, media kind,
 // CSRF / Host / token checks, path traversal and the PRIVATE rule) and the offline (files only) mode. The temp folder
 // is removed at the end, whatever happens; data/demo must be byte-identical afterwards.
@@ -108,7 +108,8 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const EXPECT = ['status', 'projects', 'snapshot_save', 'snapshot_list', 'snapshot_restore', 'song_get', 'timeline_query', 'shots_list', 'shot_get', 'shot_update', 'entities_list', 'entity_get', 'entity_upsert',
     'media_list', 'media_add', 'notes_list', 'note_add', 'note_resolve', 'approvals_get', 'approve', 'request_changes', 'requests_list', 'request_create', 'request_update', 'costs_get', 'ui_focus',
     'stages_get', 'stage_update', 'lyrics_get', 'lyrics_update', 'lyrics_versions', 'lyrics_note_add', 'lyrics_note_resolve', 'song_attach',
-    'script_get', 'scenes_update', 'scene_note_add', 'scene_note_resolve', 'intake_get', 'intake_answer', 'sketch_save', 'sketch_get', 'sketch_list'];
+    'script_get', 'scenes_update', 'scene_note_add', 'scene_note_resolve', 'intake_get', 'intake_answer', 'sketch_save', 'sketch_get', 'sketch_list',
+    'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve'];
   check('tools/list has every tool', EXPECT.every(t => tools.includes(t)), { count: tools.length, missing: EXPECT.filter(t => !tools.includes(t)) });
   const schemaOk = (await mcp.listTools()).tools.every(t => t.description?.length > 40 && t.inputSchema?.type === 'object');
   check('every tool has a description and a JSON schema', schemaOk);
@@ -372,6 +373,73 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   check('stages_get: the script stage counts scenes, intake and gaps', st2.facts?.scenes === 3 && st2.facts.intakeOpen === 7 && st2.stages.find(x => x.id === 'script').blockers_all.some(b => /intake/.test(b)), { facts: st2.facts });
 }
 
+// 11d. stage 3 (the breakdown): items as versions linked to scenes / beats, statuses, notes, asks; promotion is the page's
+{
+  const b0 = await call(mcp, 'breakdown_get');
+  check('breakdown_get on a project without breakdown.json: no version, the script to extract from (scenes, beats, sketch pins, intake), the existing entities',
+    b0.current === null && b0.items?.length === 0 && b0.script?.scenes?.length >= 3 && b0.script.scenes.find(s => s.id === 'sc02')?.beats.length > 3 && b0.script.scenes.find(s => s.id === 'sc02').sketches[0]?.pins?.[0]?.text === 'necklace, silver, thin'
+    && b0.intake?.mood === undefined && 'who' in (b0.intake || {}) && b0.entities?.some(e => e.id === 'ada') && !fs.existsSync(path.join(D, 'breakdown.json')),
+    { current: b0.current, scenes: b0.script?.scenes?.map(s => s.id), entities: b0.entities?.map(e => e.id) });
+  const u1 = await call(mcp, 'breakdown_update', { items: [
+    { kind: 'character', name: 'Ada', description: 'the lead', links: [{ scene: 'sc02', beats: ['b1'], note: 'faces the wall' }] },
+    { kind: 'character', name: 'Bo', links: ['sc02'] },
+    { kind: 'location', name: 'Studio', links: ['sc01', 'sc02', 'sc03'] },
+    { kind: 'prop', name: 'Tone generator', links: [{ scene: 'sc02', beats: ['b3'] }] },
+    { kind: 'wardrobe', name: 'Orange hoodie', for: 'bi01', links: ['sc02'] },
+    { kind: 'fx', name: 'Test card', links: ['sc01', 'sc03', 'sc99'], status: 'ok', entity_id: 'x' },
+  ], message: 'mcp: first extraction' });
+  const g1 = await call(mcp, 'breakdown_get', { with_script: false });
+  const pageBd = await pageHas((_, s) => s ? s.files.includes('breakdown.json') : window.WB.store.breakdown?.current === 'v1');
+  check('breakdown_update: a new version (ids bi01…, source agent, script version recorded); a link to an unknown scene and page fields (status, entity_id) only warn; the page sees it',
+    u1.version === 'v1' && u1.items === 6 && u1.warnings?.some(w => /sc99/.test(w)) && u1.warnings?.some(w => /entity_id ignored/.test(w)) && g1.items.map(i => i.id).join() === 'bi01,bi02,bi03,bi04,bi05,bi06'
+    && g1.items.every(i => i.source === 'agent' && i.status === 'draft' && !i.entity_id) && g1.items[0].links[0].note === 'faces the wall' && g1.items[4].for === 'bi01' && g1.version.script === g1.script_current
+    && g1.counts.character === 2 && g1.scenes.find(s => s.id === 'sc02').items.length === 5 && g1.items[5].missing_scenes?.[0] === 'sc99' && !g1.script && pageBd,
+    { u1, counts: g1.counts, ids: g1.items.map(i => i.id) });
+  const okRef = await call(mcp, 'breakdown_update', { status: { bi01: 'ok' } });
+  const rev = await call(mcp, 'breakdown_update', { status: { bi01: 'review' } });
+  const badId = await call(mcp, 'breakdown_update', { upsert: [{ id: '../x', kind: 'prop', name: 'x' }] });
+  const badKind = await call(mcp, 'breakdown_update', { upsert: [{ kind: 'vehicle', name: 'bus' }] });
+  const up = await call(mcp, 'breakdown_update', { upsert: [{ id: 'bi06', dropped: true }, { kind: 'prop', name: 'Fractal wall', links: [{ scene: 'sc02', beats: ['b1', 'b2'] }] }], remove: ['bi02'], message: 'mcp: drop the test card, wall in, Bo out' });
+  const g2 = await call(mcp, 'breakdown_get', { with_script: false, kind: 'prop' });
+  const same = await call(mcp, 'breakdown_update', { upsert: [{ id: 'bi01', name: 'Ada' }] });
+  check('breakdown_update: ok refused (403), review set; bad ids / kinds refused; upsert + remove + dropped make v2 (a new id, never reused); an unchanged list makes none',
+    /403/.test(okRef.error || '') && rev.status?.bi01 === 'review' && /400|Invalid/.test(badId.error || '') && /400|Invalid/.test(badKind.error || '') && up.version === 'v2'
+    && g2.items.map(i => i.id).join() === 'bi04,bi07' && g2.dropped === 1 && same.unchanged === true,
+    { okRef: okRef.error, badId: badId.error, badKind: badKind.error, up, props: g2.items?.map(i => i.id) });
+  const rs = await call(mcp, 'breakdown_update', { restore: 'v1' });
+  const df = await call(mcp, 'breakdown_get', { diff: ['v1', 'v2'] });
+  const bySc = await call(mcp, 'breakdown_get', { with_script: false, scene: 'sc01' });
+  check('breakdown_update restore = a new version copied from the old one; breakdown_get diff lists the items added / removed / changed; scene filter',
+    rs.version === 'v3' && JSON.stringify(df.items) === JSON.stringify({ added: ['bi07'], removed: ['bi02'], changed: ['bi06'] }) && /\{\+Fractal\+\}/.test(df.diff) && bySc.items.map(i => i.id).join() === 'bi03,bi06',
+    { rs, items: df.items, bySc: bySc.items?.map(i => i.id) });
+  // notes: on an item, a reply, resolve; an ask (kind extract) from the page shows in asks_for_agent
+  const n1 = await call(mcp, 'breakdown_note_add', { item: 'bi03', text: 'mcp: one studio or two?' });
+  const r1 = await call(mcp, 'breakdown_note_add', { reply_to: n1.id, text: 'mcp: a reply' });
+  const nb = await call(mcp, 'breakdown_note_add', { item: 'nope', text: 'x' });
+  const ns = await call(mcp, 'breakdown_note_add', { scene: 'sc77', text: 'x' });
+  const cur = JSON.parse(fs.readFileSync(path.join(D, 'breakdown.json'), 'utf8'));
+  cur.notes.push({ id: 'bn90', item: null, text: 'extract it please', to: 'agent', kind: 'extract', status: 'open', replies: [] });
+  const ps = await post(`/api/save/breakdown.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur });
+  const asks = (await call(mcp, 'breakdown_get', { with_script: false })).asks_for_agent;
+  const rv = await call(mcp, 'breakdown_note_resolve', { id: 'bn90', reply: 'mcp: extracted' });
+  check('breakdown notes: via agent, thread reply, unknown item / scene refused; a page ask (kind extract, via page) is in asks_for_agent; resolve with a reply',
+    n1.via === 'agent' && n1.item === 'bi03' && n1.item_name === 'Studio' && r1.reply?.id === `${n1.id}.1` && /404/.test(nb.error || '') && /404/.test(ns.error || '') && ps.status === 200
+    && asks.some(a => a.id === 'bn90' && a.kind === 'extract') && rv.status === 'resolved' && rv.replies.length === 1 && JSON.parse(fs.readFileSync(path.join(D, 'breakdown.json'), 'utf8')).notes.find(n => n.id === 'bn90').via === 'page',
+    { n1: n1.id, nb: nb.error, ns: ns.error, ps: ps.status, asks });
+  // promotion is the page's: no MCP tool; the HTTP op without the page's Origin and the offline op are refused
+  const tools = (await mcp.listTools()).tools.map(t => t.name);
+  const prHttp = await post(`/api/op/breakdown_promote?project=${PROJECT}`, { item: 'bi01' });
+  let prOff = null; try { S.ops.breakdown_promote(PROJECT, { item: 'bi01' }); } catch (e) { prOff = e.code; }
+  const prPage = await post(`/api/op/breakdown_promote?project=${PROJECT}`, { item: 'bi03', entity_id: 'studio' }, { origin: URL_ });
+  const g3 = await call(mcp, 'breakdown_get', { with_script: false });
+  check('create entity is the page\'s: no MCP tool; refused to the agent surface (HTTP without the page\'s Origin: 403; offline: 403); the page links an item to an existing entity (ok, entity_id)',
+    !tools.includes('breakdown_promote') && prHttp.status === 403 && prOff === 403 && prPage.status === 200 && prPage.body?.entity_id === 'studio' && g3.items.find(i => i.id === 'bi03').entity_id === 'studio' && g3.items.find(i => i.id === 'bi03').status === 'ok',
+    { prHttp: prHttp.status, prOff, prPage: prPage.body, bi03: g3.items.find(i => i.id === 'bi03') });
+  const st3 = await call(mcp, 'stages_get');
+  check('stages_get: the breakdown counts items and asks; the characters stage lists the items not yet entities',
+    st3.facts?.items === 6 && st3.facts.itemsToPromote === 4 && st3.stages.find(x => x.id === 'characters').blockers_all.some(b => /4 breakdown items not yet entities/.test(b)), { facts: st3.facts });
+}
+
 // 12. offline: the server is unreachable -> the same tools work on the files; ui_focus explains
 {
   const off = await connect({ WORKBENCH_URL: 'http://localhost:9' });
@@ -379,9 +447,9 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const tq = await call(off, 'timeline_query', { t0: 4000, t1: 8000 });
   const ui = await call(off, 'ui_focus', { t: 1000 });
   const sg = await call(off, 'stages_get'), lu = await call(off, 'lyrics_update', { project: 'mcp-lyrics', text: '[Verse 1]\noffline line', message: 'offline' });
-  const so = await call(off, 'scenes_update', { upsert: [{ id: 'sc01', title: 'offline title' }], message: 'offline' }), sko = await call(off, 'sketch_get', { id: 'mcp-sk1' });
-  check('offline mode: files directly (stages, lyrics, scenes, sketches too), ui_focus refuses politely', st.mode === 'files' && tq.shots?.[0]?.id === 's2-wall' && /not running/.test(ui.error || '') && sg.stages?.length === 7 && lu.version === 'v4'
-    && /^v\d+$/.test(so.version || '') && sko.pins?.length === 1,
+  const so = await call(off, 'scenes_update', { upsert: [{ id: 'sc01', title: 'offline title' }], message: 'offline' }), sko = await call(off, 'sketch_get', { id: 'mcp-sk1' }), bo = await call(off, 'breakdown_get', { with_script: false });
+  check('offline mode: files directly (stages, lyrics, scenes, sketches, breakdown too), ui_focus refuses politely', st.mode === 'files' && tq.shots?.[0]?.id === 's2-wall' && /not running/.test(ui.error || '') && sg.stages?.length === 7 && lu.version === 'v4'
+    && /^v\d+$/.test(so.version || '') && sko.pins?.length === 1 && bo.current === 'v3' && bo.items?.length === 6,
     { mode: st.mode, shots: tq.shots?.map(s => s.id), ui: ui.error, stages: sg.stages?.length, lyrics: lu.version || lu.error, scenes: so.version || so.error });
   await off.close();
 }

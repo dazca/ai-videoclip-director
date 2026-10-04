@@ -43,6 +43,7 @@ import crypto from 'node:crypto';
 import * as S from './lib/store.mjs';
 import { checkLyrics } from './js/flow.js';
 import { checkScenes, SCENE_STATUSES } from './js/scenes.js';
+import { checkBreakdown, ITEM_STATUSES } from './js/breakdown.js';
 
 const { CFG, DATA_ROOT, WB_DIR: WB } = S;
 const ARGS = process.argv.slice(2);
@@ -154,7 +155,9 @@ function readBody(req, limit) {
 // version once saved never changes (the server keeps its copy); new versions, notes and replies are stamped
 // by "director", via "page"; existing notes and replies keep their author. scenes.json (stage 2): the same for its
 // versions, notes and replies; a changed scene status or intake answer is stamped director / page (an unchanged one keeps
-// its author); a malformed file is refused (400).
+// its author); a malformed file is refused (400). breakdown.json (stage 3): versions and note authors the same; a changed
+// item status is stamped director / page; entity_id / look_id are never taken from a page save (only the page's
+// "Create entity" op, breakdown_promote, sets them).
 function stampPage(name, data, cur) {
   const at = new Date().toISOString().slice(0, 19);
   if (name === 'requests.json' && Array.isArray(data.items)) {
@@ -220,6 +223,26 @@ function stampPage(name, data, cur) {
     }
     data.intake = ik;
   }
+  if (name === 'breakdown.json') {
+    try { checkBreakdown(data); } catch (e) { throw new S.WbError(400, e.message); }
+    const cv = new Map((cur.versions || []).map(v => [v.id, v])), cn = new Map((cur.notes || []).map(n => [n.id, n]));
+    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, created: at, by: 'director', via: 'page' });
+    data.notes = (data.notes || []).filter(n => n && typeof n === 'object').map(n => {
+      const c = cn.get(n.id), cr = new Map((c?.replies || []).map(r => [r.id, r]));
+      const replies = (Array.isArray(n.replies) ? n.replies : []).filter(r => r && typeof r === 'object').map(r => cr.get(r.id) ? { ...r, by: cr.get(r.id).by, via: cr.get(r.id).via, at: cr.get(r.id).at } : { ...r, by: 'director', via: 'page', at });
+      return c ? { ...n, by: c.by, via: c.via, at: c.at, replies } : { ...n, by: 'director', via: 'page', at, replies };
+    });
+    const st = {};
+    for (const [k, v] of Object.entries(data.states || {})) {
+      if (!v || !ITEM_STATUSES.includes(v.status)) continue;
+      const c = cur.states?.[k], x = c && c.status === v.status ? { ...c } : { status: v.status, by: 'director', via: 'page', at };
+      delete x.entity_id; delete x.look_id;
+      if (c?.entity_id) x.entity_id = c.entity_id; if (c?.look_id) x.look_id = c.look_id;
+      st[k] = x;
+    }
+    for (const [k, c] of Object.entries(cur.states || {})) if (c?.entity_id && !st[k]) st[k] = { ...c };
+    data.states = st;
+  }
   return data;
 }
 const json = (res, code, v) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)); };
@@ -268,6 +291,9 @@ http.createServer(async (req, res) => {
         if (!Object.hasOwn(S.ops, name)) return json(res, 404, { error: 'no such op: ' + name });
         // who drew a sketch (provenance, not a permission): a browser on this origin is the page, anything else an agent
         if (name === 'sketch_save') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
+        // only the page turns a breakdown item into an entity: a browser request from this origin (the MCP server has no
+        // such tool, and a request without the page's Origin is the agent surface and refused by the op)
+        if (name === 'breakdown_promote') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
         return json(res, 200, await S.ops[name](project, body));
       }
       if (p === '/api/projects/new') return json(res, 200, body.lyrics != null || body.song ? await S.createGuidedProject(body) : S.createProject(body.id, body.title));

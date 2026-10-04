@@ -1,12 +1,14 @@
 // Data store: loads the project files, saves the writable ones through the server, listens for file changes.
 // Writable (shared with the agent, each {rev, ...}): approvals.json, notes.json, requests.json, overrides.json, settings.json,
-// lyrics.json, stages.json (the guided flow: js/flow.js), scenes.json (stage 2, the script draft: js/scenes.js); a missing
+// lyrics.json, stages.json (the guided flow: js/flow.js), scenes.json (stage 2, the script draft: js/scenes.js), breakdown.json
+// (stage 3: js/breakdown.js); a missing
 // guided-flow file reads as derived from the other files.
 // Every page edit goes through store.mutate(), which records an undo step (core/history.js) unless {record:false}.
 // the server redirects a bare / to ?project=<its default project>
 // same id rule as the server (lib/store.mjs validId); anything else falls back to the demo
 import { normLyrics, normStages, projectFacts } from './flow.js';
 import { normScenes } from './scenes.js';
+import { normBreakdown } from './breakdown.js';
 const QP = new URLSearchParams(location.search).get('project');
 export const PROJECT = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/.test(QP || '') ? QP : 'demo';
 export const DATA = `data/${PROJECT}/`;
@@ -47,12 +49,14 @@ export const WRITABLE = {
   'lyrics.json': ['lyrics', null],
   'stages.json': ['stages', null],
   'scenes.json': ['scenes', null],
+  'breakdown.json': ['breakdown', null],
 };
 // derived defaults of the guided-flow files (need the song / entities, so they run after those are loaded)
 const NORM = {
   'lyrics.json': (s, v) => normLyrics(v, s.song, Object.fromEntries(Object.entries(s.overrides?.sections || {}).filter(([, x]) => x?.label).map(([k, x]) => [k, x.label]))),
   'scenes.json': (s, v) => normScenes(v, s.song, s.script),
-  'stages.json': (s, v) => normStages(v, projectFacts({ song: s.song, script: s.script, shots: s.shots, entities: s.entities, lyrics: s.lyrics, scenes: s.scenes })),
+  'breakdown.json': (s, v) => normBreakdown(v),
+  'stages.json': (s, v) => normStages(v, projectFacts({ song: s.song, script: s.script, shots: s.shots, entities: s.entities, lyrics: s.lyrics, scenes: s.scenes, breakdown: s.breakdown })),
 };
 const FULL = /^(song|events|energy|script|shots|costs|media)\.json$|^entities\//;
 // PRIVATE files (e.g. crops of real photos): shown only in the local page (lock badge), never exported (see
@@ -82,7 +86,7 @@ export const store = {
       if (this._saving[f]) this._missed.add(f); else this[field] = v;   // a save is in flight: re-read it after
     }));
     this.entities = await Promise.all(index.map(e => getJSON(e.path)));
-    for (const f of ['lyrics.json', 'scenes.json', 'stages.json']) this[WRITABLE[f][0]] = NORM[f](this, this[WRITABLE[f][0]]);
+    for (const f of ['lyrics.json', 'scenes.json', 'breakdown.json', 'stages.json']) this[WRITABLE[f][0]] = NORM[f](this, this[WRITABLE[f][0]]);
     this.entityById = Object.fromEntries(this.entities.map(e => [e.id, e]));
     this.media = (await getJSON('media.json', { items: [] })).items || [];
     this.mediaById = Object.fromEntries(this.media.map(m => [m.id, m]));

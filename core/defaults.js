@@ -314,7 +314,9 @@ export function contextArgs(target, clientX, clientY) {
   // the stage rail (core/rail.js) and a stage workspace (tabs/stage.js)
   const st = target.closest('#rail [data-stage]');
   if (st?.dataset.stage) { names.push('stage'); args.stageId = st.dataset.stage; return { names, args }; }
-  const sc = target.closest('.scws [data-scene]');   // a scene in the script stage (tabs/script.js)
+  const bi = target.closest('.bdws [data-item]');   // an item in the breakdown stage (tabs/breakdown.js)
+  if (bi?.dataset.item) { names.push('bditem'); args.itemId = bi.dataset.item; }
+  const sc = target.closest('.scws [data-scene], .bdws [data-scene]');   // a scene in the script stage (tabs/script.js) or a breakdown matrix column
   if (sc?.dataset.scene) { names.push('scene'); args.sceneId = sc.dataset.scene; }
   if (target.closest('.stagews')) { names.push('stage'); args.stageId = WB().stages?.current(); }
   names.push('global');

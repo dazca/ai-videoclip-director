@@ -254,6 +254,52 @@ try {
   check('static allow-list: the sketch tool and the catalogue are served, tools/ and escapes are not', stat2.sketchJs === 200 && stat2.sketchCss === 200 && stat2.cat === 200 && stat2.catLic === 200 && stat2.catImg === 200 && stat2.dev === 403
     && [stat2.catUp, stat2.deep].every(x => x === 400 || x === 403) && stat2.skJson === 200, stat2);
 
+  {
+  // ---------------------------------------------------------------- stage 3: breakdown.json (ids, page saves, the page-only "Create entity", restore)
+  const bIds = {};
+  for (const [k, args] of Object.entries({
+    itemId: { upsert: [{ id: '../evil', kind: 'prop', name: 'x' }] }, itemIdBs: { items: [{ id: '..\\evil', kind: 'prop', name: 'x' }] },
+    sceneLink: { upsert: [{ kind: 'prop', name: 'x', links: [{ scene: '../evil' }] }] }, beat: { upsert: [{ kind: 'prop', name: 'x', links: [{ scene: 'sc01', beats: ['a/b'] }] }] },
+    statusKey: { status: { '../x': 'review' } }, forId: { upsert: [{ kind: 'wardrobe', name: 'x', for: '..\\x' }] }, kind: { upsert: [{ kind: '<script>', name: 'x' }] },
+    noName: { upsert: [{ kind: 'prop', name: '   ' }] }, removeId: { remove: ['../x'] }, notAList: { items: 'x' },
+  })) bIds[k] = (await op('breakdown_update', args)).status;
+  check('breakdown_update: bad item / scene / beat / for ids, kinds, names, status keys and shapes refused (400); nothing written', Object.values(bIds).every(x => x === 400) && !fs.existsSync(path.join(D, 'breakdown.json')), bIds);
+  const bu = (await op('breakdown_update', { items: [{ kind: 'character', name: 'Sec Ada', links: ['sc01'] }, { kind: 'location', name: 'Sec Room', links: ['sc01'] }, { kind: 'wardrobe', name: 'Sec Coat', for: 'bi01', links: ['sc01'] }, { kind: 'fx', name: 'Sec Smoke', links: ['sc01'] }], message: 'sec' })).body;
+  const bn = (await op('breakdown_note_add', { item: 'bi01', text: 'sec: agent note' })).body;
+  const okA = await op('breakdown_update', { status: { bi01: 'ok' } });
+  await pageSave('breakdown.json', (d) => { d.states.bi02 = { status: 'ok' }; });
+  const snapB = (await post(`/api/snapshot?project=${P}`, { message: 'sec: breakdown bi02 ok' })).body;
+  // "Create entity": the page's own request only (token + this origin); the agent surface is refused whatever it claims
+  const pr = (b, h = {}) => post(`/api/op/breakdown_promote?project=${P}`, b, h), ownO = { origin: A.base };
+  const prom = { noTok: (await pr({ item: 'bi01' }, { 'x-wb-token': '' })).status, foreign: (await pr({ item: 'bi01' }, { origin: 'https://evil.example' })).status,
+    agent: (await pr({ item: 'bi01' })).status, agentClaimsPage: (await pr({ item: 'bi01', via: 'page' })).status,
+    badEnt: (await pr({ item: 'bi01', entity_id: '../../x' }, ownO)).status, badItem: (await pr({ item: '../x' }, ownO)).status, badChar: (await pr({ item: 'bi03', character: '..\\x' }, ownO)).status,
+    fx: (await pr({ item: 'bi04' }, ownO)).status, wrongKind: (await pr({ item: 'bi02', entity_id: 'ada' }, ownO)).status };
+  let offAgent = null; try { S.ops.breakdown_promote(P, { item: 'bi01' }); } catch (e) { offAgent = e.code; }
+  const pc = await pr({ item: 'bi01' }, ownO), pl = await pr({ item: 'bi03' }, ownO), again = (await pr({ item: 'bi01' }, ownO)).status;
+  const entA = fs.existsSync(path.join(D, 'entities/characters/sec-ada.json')) ? readP('entities/characters/sec-ada.json') : null;
+  check('Create entity: refused without the token, from a foreign Origin, to the agent surface (no Origin, a claimed via:"page", offline); bad ids, FX and a kind mismatch refused; the page makes a draft entity and a look, once',
+    prom.noTok === 403 && prom.foreign === 403 && prom.agent === 403 && prom.agentClaimsPage === 403 && offAgent === 403 && prom.badEnt === 400 && prom.badItem === 400 && prom.badChar === 400 && prom.fx === 400 && prom.wrongKind === 409
+    && pc.status === 200 && pc.body?.entity_id === 'sec-ada' && entA?.status === 'draft' && entA.breakdown?.item === 'bi01' && pl.body?.look_id === 'sec-coat' && entA.looks?.[0]?.id === 'sec-coat' && again === 409 && !fs.existsSync(path.join(DATA, 'x.json')),
+    { prom, offAgent, pc: pc.body, pl: pl.body, again, ent: entA && { status: entA.status, looks: entA.looks?.map(l => l.id) } });
+  // page saves of breakdown.json: saved versions, note authors and entity links cannot be forged; statuses are stamped
+  const bp = await pageSave('breakdown.json', (d) => { d.versions[0].items[0].name = 'FORGED'; const a = d.notes.find(x => x.id === bn.id); a.by = 'director'; a.via = 'page';
+    d.notes.push({ id: 'bn99', item: null, text: 'sec: page note claiming the agent', by: 'agent', via: 'agent', status: 'open', replies: [] });
+    d.states.bi02 = { status: 'ok', by: 'agent', via: 'agent', entity_id: 'forged-entity' }; d.states.bi01 = { status: 'ok' }; d.states.bi04 = { status: 'review', by: 'agent', via: 'agent', entity_id: 'forged-two' }; });
+  const BDN = readP('breakdown.json');
+  const badBd = await post(`/api/save/breakdown.json?project=${P}`, { base_rev: BDN.rev, data: { versions: [{ id: 'v1', items: [{ id: '../x', kind: 'prop', name: 'x', links: [] }] }], current: 'v1' } });
+  const badSt = await post(`/api/save/breakdown.json?project=${P}`, { base_rev: BDN.rev, data: { ...BDN, states: { bi01: { status: 'approved' } } } });
+  check('breakdown.json from the page: a saved version, a note author and an entity link cannot be forged (nor dropped); a changed status is stamped director / page; malformed refused (400); an agent cannot mark ok (403)',
+    okA.status === 403 && bp.status === 200 && BDN.versions[0].items[0].name === 'Sec Ada' && BDN.notes.find(x => x.id === bn.id)?.via === 'agent' && BDN.notes.find(x => x.id === 'bn99')?.via === 'page'
+    && BDN.states.bi02?.via === 'page' && !BDN.states.bi02.entity_id && BDN.states.bi01?.entity_id === 'sec-ada' && BDN.states.bi04?.via === 'page' && BDN.states.bi04.by === 'director' && !BDN.states.bi04.entity_id && badBd.status === 400 && badSt.status === 400,
+    { okA: okA.status, v1: BDN.versions[0].items[0].name, states: BDN.states, bad: [badBd.status, badSt.status] });
+  await pageSave('breakdown.json', (d) => { d.states.bi02 = { status: 'draft' }; });   // the director took the ok back
+  await post(`/api/restore?project=${P}`, { snapshot: snapB.id, by: 'agent' });
+  const BDR = readP('breakdown.json');
+  check('an agent restore brings no item ok back (review); entities and their links roll back together', BDR.states.bi02?.status === 'review' && !BDR.states.bi01?.entity_id && !BDR.states.bi03?.look_id && !fs.existsSync(path.join(D, 'entities/characters/sec-ada.json')),
+    BDR.states);
+  }
+
   // ---------------------------------------------------------------- F09: the EDL extractor's server (source check: it needs the owner's render page)
   const edl = fs.readFileSync(path.join(WB, 'importers/azemar_extract_edl.mjs'), 'utf8');
   check('F09 EDL extractor server: 127.0.0.1, decode in try/catch, confined to ROOT', /listen\(\d+, '127\.0\.0\.1'/.test(edl) && /try \{ p = inside\(ROOT,/.test(edl) && /if \(!p\) \{ r\.writeHead\(403\)/.test(edl));
@@ -296,6 +342,17 @@ try {
     for (const side of ['notes', 'versions', 'intake']) { await pg.evaluate((s) => document.querySelector(`.scws .lytabs [data-side=${s}]`)?.click(), side); await wait(200); }
     await pg.evaluate(() => window.WB.app.show('timeline')); await wait(800);
     check('F02 stored payloads in the script (scene titles, text, beats, notes, intake, version messages, the timeline scenes column) render as text', await pg.evaluate(() => window.__s === undefined && !document.querySelector('.scws img:not([src*="sketches/"]), .col-scenes img')));
+    const Y = (n) => `<img src=x onerror="window.__b=${n}">`;
+    await op('breakdown_update', { upsert: [{ kind: 'character', name: Y(1), description: Y(2), aliases: [Y(3)], links: [{ scene: 'sc02', beats: ['b1'], note: Y(4) }] }, { kind: 'wardrobe', name: Y(5), for: 'bi01', links: ['sc02'] }], message: Y(6) });
+    await op('breakdown_note_add', { item: 'bi01', text: Y(7), by: Y(8) });
+    await pg.goto(`${A.base}/?project=${P}`, { waitUntil: 'domcontentloaded' });
+    await pg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 });
+    await pg.evaluate(() => window.WB.stages.open('breakdown')); await wait(800);
+    await pg.evaluate(() => { const s = window.WB.breakdown.ws; const it = s.draft.find(i => i.kind === 'character'); s.focus(it.id); }); await wait(300);
+    for (const side of ['notes', 'versions']) { await pg.evaluate((x) => document.querySelector(`.bdws .lytabs [data-side=${x}]`)?.click(), side); await wait(200); }
+    await pg.evaluate(() => { const s = window.WB.breakdown.ws; s.view = 'matrix'; s.render(); }); await wait(300);
+    await pg.evaluate(() => window.WB.app.show('timeline')); await wait(800);
+    check('F02 stored payloads in the breakdown (item names, aliases, descriptions, link notes, notes, version messages; list, matrix, the timeline scenes column) render as text', await pg.evaluate(() => window.__b === undefined && !document.querySelector('.bdws img, .col-scenes img')));
     const tokenOk = await pg.evaluate(async () => (await fetch('/api/op/costs_get?project=demo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status);
     const dock = await browser.newPage(); dock.on('console', m => { if (/Content Security Policy|Refused to/i.test(m.text())) violations.push('dock: ' + m.text()); });
     await dock.goto(`${A.base}/dock.html?project=${P}`, { waitUntil: 'domcontentloaded' }); await wait(1500);

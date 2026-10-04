@@ -8,10 +8,11 @@ import { menus } from './menus.js';
 import { store, prefs, toast, esc } from '../js/store.js';
 import '../tabs/lyrics.js';   // registers the lyrics commands (palette, keys) before its workspace is first opened
 import '../tabs/script.js';   // the same for the script stage
+import '../tabs/breakdown.js';   // and the breakdown stage
 import { STAGES, STATUS_LABEL, stagesView, projectFacts, stageById } from '../js/flow.js';
 
 const WB = () => window.WB;
-const facts = () => projectFacts({ song: store.song, script: store.script, shots: store.shots, entities: store.entities, lyrics: store.lyrics, scenes: store.scenes });
+const facts = () => projectFacts({ song: store.song, script: store.script, shots: store.shots, entities: store.entities, lyrics: store.lyrics, scenes: store.scenes, breakdown: store.breakdown });
 const view = () => stagesView(store.stages, facts());
 const current = () => { const s = prefs.get('stage', 'lyrics'); return stageById(s) ? s : 'lyrics'; };
 const onStage = (c) => (c || WB().context()).tab === 'stage';
@@ -40,7 +41,7 @@ export function mountRail() {
   el.setAttribute('aria-label', 'stages');
   document.body.classList.toggle('norail', prefs.get('rail', true) === false);
   el.addEventListener('click', (e) => { const a = e.target.closest('[data-stage]'); if (a?.dataset.stage) stages.open(a.dataset.stage); });
-  store.on((w) => { if (['stages', 'lyrics', 'scenes', 'all'].includes(w)) render(); });
+  store.on((w) => { if (['stages', 'lyrics', 'scenes', 'breakdown', 'entities', 'all'].includes(w)) render(); });
   document.addEventListener('wb:page', render);
   render();
 }
@@ -57,8 +58,8 @@ C.push(
   { id: 'stage.progress', group: 'Stages', title: 'Mark stage in progress', hidden: true, when: (c) => !!target(c) && view().stages.find(s => s.id === target(c))?.status !== 'in_progress', run: (c) => stages.setStatus(target(c), 'in_progress') },
   { id: 'stage.needsYou', group: 'Stages', title: 'Flag stage: needs you', hidden: true, when: (c) => !!target(c) && view().stages.find(s => s.id === target(c))?.status !== 'needs_you', run: (c) => stages.setStatus(target(c), 'needs_you') },
   // one key per act across the stage workspaces: each stage module offers WB.stageActions[<stage>] {canSave, save, canNote, note}
-  { id: 'stage.save', group: 'Stages', title: 'Save a version (lyrics / script)', keys: ['Ctrl+Enter'], global: true, when: (c) => onStage(c) && !!WB().stageActions?.[current()]?.canSave(), run: () => WB().stageActions[current()].save() },
-  { id: 'stage.note', group: 'Stages', title: 'Note (lyrics: the selected words; script: the open scene)', keys: ['Alt+N'], when: (c) => onStage(c) && !!WB().stageActions?.[current()]?.canNote(), run: () => WB().stageActions[current()].note() },
+  { id: 'stage.save', group: 'Stages', title: 'Save a version (lyrics / script / breakdown)', keys: ['Ctrl+Enter'], global: true, when: (c) => onStage(c) && !!WB().stageActions?.[current()]?.canSave(), run: () => WB().stageActions[current()].save() },
+  { id: 'stage.note', group: 'Stages', title: 'Note (lyrics: the selected words; script: the open scene; breakdown: the open item)', keys: ['Alt+N'], when: (c) => onStage(c) && !!WB().stageActions?.[current()]?.canNote(), run: () => WB().stageActions[current()].note() },
   { id: 'view.rail', group: 'View', title: 'Stage rail', checked: () => !document.body.classList.contains('norail'), run: () => { const off = !document.body.classList.contains('norail'); document.body.classList.toggle('norail', off); prefs.set('rail', !off); WB().timeline?.requestRelayout(); } },
 );
 commands.register(C);

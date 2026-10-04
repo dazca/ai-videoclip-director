@@ -32,9 +32,9 @@ outside the project folder, extra PRIVATE path rule. Env vars win: `WB_PROJECT`,
 | `mcp/server.mjs`, `mcp/test.mjs` | MCP server (stdio) and its end-to-end test |
 | `index.html`, `app.js`, `app.css` | the page shell |
 | `core/` | command registry + keymap, menus, palette, undo history, selection, projects/exports, preview dock, default commands, `rail.js` (stage rail + stage commands), `wizard.js` (new-project wizard), `sketch/` (the sketch tool: `mountSketch` / `openSketch`, API in its header) |
-| `js/` | store (data + live reload), timeline (the warp), columns, player, verify hooks, `flow.js` (the guided flow: stages + lyrics model) and `scenes.js` (stage 2: scenes, intake, gaps, snapping), both shared with `lib/store.mjs` |
-| `tabs/` | one module per view; `tabs/registry.js` lists pages and sub-views; `stage.js` (stage workspaces), `lyrics.js` (stage 1), `script.js` (stage 2) |
-| `docs/SPEC_v3_GUIDED.md` | the guided creation flow (seven stages); phase 1 = stage rail, wizard, lyrics stage; phase 2 = the script stage + sketch files |
+| `js/` | store (data + live reload), timeline (the warp), columns, player, verify hooks, `flow.js` (the guided flow: stages + lyrics model), `scenes.js` (stage 2: scenes, intake, gaps, snapping) and `breakdown.js` (stage 3: items, links, merge / split, the "Suggest from script" pre-pass), all shared with `lib/store.mjs` |
+| `tabs/` | one module per view; `tabs/registry.js` lists pages and sub-views; `stage.js` (stage workspaces), `lyrics.js` (stage 1), `script.js` (stage 2), `breakdown.js` (stage 3) |
+| `docs/SPEC_v3_GUIDED.md` | the guided creation flow (seven stages); phase 1 = stage rail, wizard, lyrics stage; phase 2 = the script stage + sketch files; phase 3 = the breakdown stage |
 | `catalog/` | the free starter catalogue (CC0 / public-domain bases: bodies, poses, face angles, garments, locations, props; `catalog.json`, `LICENSES.md`), served read-only for stage 4 |
 | `importers/` | `new_project.mjs` (song + lyrics -> project), `azemar_*` (the owner's production, kept as a worked example) |
 | `tools/` | `verify.mjs` (UI suite), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `make_demo.mjs`, `chrome.mjs` |
@@ -74,6 +74,14 @@ relative to the media base; any other path is relative to the project folder. Fu
   asked?}}`. Scenes are bound to song time (t0 < t1 ms; `line_ids` = the song lines starting inside). Missing = v1
   derived from `script.json` (its `stages` become scenes, its `lines` their beats); `script.json` itself is never
   rewritten and its readers (the timeline script column, `timeline_query`) keep working. Logic: `js/scenes.js`.
+- `breakdown.json` (shared, `{rev}`): stage 3, what the script needs. `current`, `versions[{id "v3", created, by, via,
+  message, from?, script?, items[{id "bi03", kind character|location|prop|wardrobe|fx, name, description, links[{scene
+  "sc02", beats[], note?}], source agent|director, aliases?[], for?: <character item id> (wardrobe), dropped?: true}]}]`
+  (immutable; a save appends; `script` = the script version it was made from), `states{<item id>: {status:
+  draft|review|ok, entity_id?, look_id?, by, via, at}}` (outside the versions; `ok` and `entity_id` / `look_id` only from
+  the page), `notes[{id "bn01", item|null, scene?, text, by, via, to?: "agent", kind?: request|extract, status, version,
+  replies[]}]`. Links name scene and beat ids of `scenes.json` (scene ids are never reused). Missing = no breakdown yet.
+  Logic: `js/breakdown.js`.
 - `sketches/<id>.json|.png|.mask.png`: sketches (vector strokes + pins + metadata, the flattened image, the edit mask),
   written by `sketch_save` and registered in `media.json` (kind `sketch`, links `scenes` / `entities` / `shots`);
   under `private/sketches/` when drawn over a private underlay. Not snapshotted (the script versions point at them).
@@ -120,6 +128,12 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 
    answers only in the director's words (`intake_answer`, `asked_in_chat` when you asked); write scenes with
    `scenes_update` (a new version each time; `ok` on a scene is the director's); "fill the gaps" asks
    (`script_get` `asks_for_agent`, kind `fill_gaps`) mean: cover every listed range with scenes, then resolve.
+   Breakdown: `breakdown_get` gives the script to extract from (scene text, beats, sketch pins, intake) and the
+   existing entities; write the items with `breakdown_update` (a new version each time; link each to the scenes and
+   beats that need it; merge duplicates; `dropped: true` rather than removing what the director made); an ask of kind
+   `extract` means draft or refresh the whole breakdown, then resolve it. Item status `ok` is the director's; to ask
+   for an entity, set `review` and say why in a note: only the page's "Create entity" makes one (nothing is generated
+   or spent by it).
 5. **Snapshot before big edits** (`snapshot_save`); a restore snapshots the current state first, so it is undoable.
 6. Register every new file (`media_add`, or automatically on `request_update` done) so it shows up in the page.
 
@@ -169,6 +183,16 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 
   and bodies up to 25 MB (every other request: 5 MB; over the limit: 413); it keeps the token / Origin / Host checks.
   A sketch drawn over a PRIVATE underlay is written under `private/sketches/` and flagged private in `media.json`
   (local only, never exported). Its `via` (page / agent) is provenance, not a permission.
+- Stage 3 (breakdown): every `breakdown_update` is a new version; item, scene, beat and `for` ids must match
+  `^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$` (400 otherwise); an agent cannot set an item `ok` (403) nor write `status`,
+  `entity_id` or `look_id` on an item (ignored, with a warning). A page save of `breakdown.json` cannot rewrite a saved
+  version, a note's author or an entity link (`entity_id` / `look_id` are kept from the server's copy whatever the
+  page sends); a changed status is stamped `by: "director", via: "page"`; a malformed file is refused (400). "Create
+  entity" (`POST /api/op/breakdown_promote`) is the page's only: the server passes `via: "page"` only for a request with
+  this server's own Origin (plus the token, Host and JSON checks), the MCP server has no such tool and the op refuses
+  anything else (403); entity ids are checked like every entity id; it writes a draft entity (or a look) and spends
+  nothing. Like a page save, a local process holding the token could forge the Origin header: this guards the tool
+  surface. An agent's snapshot restore brings a lost item `ok` back as `review`.
 - Entity thumbnails and copies made from private media stay private (`thumbs/priv_*`, `private/<kind>/`).
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.
@@ -195,6 +219,8 @@ initial project. Tools:
 | `script_get`, `scenes_update` | stage 2: scenes (time range, lines, title, text, beats, sketches with image paths + pins, status), gaps, coverage, asks for the agent, versions + diff; a new version (full list / upsert + remove / restore; snap to lines, bars, sections; statuses draft / needs_you) |
 | `scene_note_add`, `scene_note_resolve` | notes on a scene or a beat, thread replies, resolve |
 | `sketch_save`, `sketch_get`, `sketch_list` | sketch files: save (JSON + base64 PNG + mask), get the PNG / mask paths (absolute too) and the numbered pins, list (by scene) |
+| `breakdown_get`, `breakdown_update` | stage 3: the items (characters, locations, props, wardrobe, FX) with their scene / beat links, statuses, entity links, the matrix, asks for the agent, versions + diff, and the script + intake to extract from; a new version (full list / upsert + remove / restore; statuses draft / review) |
+| `breakdown_note_add`, `breakdown_note_resolve` | notes on an item or a scene, thread replies, resolve |
 | `snapshot_save`, `snapshot_list`, `snapshot_restore` | durable checkpoints |
 | `song_get` | sections, lyric lines with word timings, events, grid |
 | `timeline_query` | everything between t0 and t1 across all columns |

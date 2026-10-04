@@ -69,7 +69,8 @@ Tools: `status`, `projects` (list/create/duplicate/open), `snapshot_save` / `sna
 `request_create` / `request_update`, `costs_get`, `ui_focus`; the guided flow: `stages_get` / `stage_update`,
 `lyrics_get` / `lyrics_update` / `lyrics_versions` / `lyrics_note_add` / `lyrics_note_resolve`, `song_attach`; stage 2:
 `intake_get` / `intake_answer`, `script_get` / `scenes_update`, `scene_note_add` / `scene_note_resolve`, `sketch_save` /
-`sketch_get` / `sketch_list` (image paths + pins, so the agent can look at the director's drawings). Resources: the README, `CLAUDE.md`, the file formats, the
+`sketch_get` / `sketch_list` (image paths + pins, so the agent can look at the director's drawings); stage 3:
+`breakdown_get` / `breakdown_update`, `breakdown_note_add` / `breakdown_note_resolve`. Resources: the README, `CLAUDE.md`, the file formats, the
 skill, and each project's JSON files. Prompt: `director-session`. Rules the tools enforce: an agent cannot approve on
 its own, a request runs only after the director approved it, queueing is refused above the cost cap, and `done` needs
 the output files and the actual cost (recorded in `costs.json`, outputs indexed as media). The agent guide is
@@ -113,6 +114,23 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   draft**), **Notes** (per scene or all, threads, resolve, Ask the agent about the open scene or the whole script),
   **Versions** (A/B side-by-side diff with the scenes added / changed / removed, restore). Right-click a scene for its
   commands; double-click a scene in the timeline Scenes column to open it here.
+- **Breakdown stage** (stage 3): what the script needs, as **items** of five kinds (characters, locations, props,
+  wardrobe, FX), each linked to the scenes (and beats) that need it. **Suggest from script** makes a first list here and
+  now, without an agent (a deterministic pass over the scene titles, text and beats and the intake answers: capitalised
+  names and the "who" answer become characters, places after "in / at / to…" and the "where" answer locations,
+  garments after "wearing / her / his…" wardrobe with its owner, a short list of objects props, of effects FX);
+  **Ask the agent to extract** writes an ask the agent reads (`breakdown_get`). Two views: **List** (grouped by kind; a
+  row shows the status, the source, the entity it became and its scene chips; click to edit in place: name, kind,
+  status, description, wardrobe owner, scenes with their beat chips and a note each) and **Matrix** (items × scenes; a
+  click on a cell links / unlinks; a scene header filters to that scene's items; scenes without a character in amber).
+  Director tools, all commands with menus: **merge** (Ctrl+click several, the selection bar or right-click; pick which
+  name stays, the others become aliases), **rename** (double-click), **drop** (soft: greyed, restorable), **split**
+  (pick the scenes that go to the new item), **change kind**, link / unlink. Edits are a draft until **Save version**
+  (Ctrl+Enter); item statuses (draft / review / ok) are saved at once, ok is the director's. **Create entity** turns a
+  character, location or prop into a draft entity in Assets (or links it to an existing one) and a wardrobe item into a
+  look on a character: no images, no request, nothing spent; page only. Side panel: notes (per item or all, Ask the
+  agent) and versions (A/B diff, restore). Right-click a scene (timeline, script, matrix) > **Breakdown items in this
+  scene**; the timeline Scenes column shows each scene's characters and locations under its title.
 - **Top bar** (18 px; `` ` `` hides / shows it; **Esc never hides it**: Esc only closes menus, dialogs, the palette and
   the cheat sheet): menu bar (File Edit View Timeline Generate Window Help; F10 opens it from the keyboard), the
   **page tabs**, project name, transport, `⌘` = command palette, `⌃` = hide the bar, `⚙` = Settings (far right).
@@ -175,7 +193,7 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
 | stems | lane | hidden | vocals, backing, bass, drums |
 | energy | lane | on | RMS (24 fps) + amber target overload ladder 0-10 per section |
 | script | text, drive | on | W/S/B + action per lyric line (TREATMENT §2), approval dot |
-| scenes | text, follow | on | stage 2 (`scenes.json`): each scene (title, text, sketch count, status colour) on the left, its beats on the right, each at its own time; double-click = open it in the script stage |
+| scenes | text, follow | on | stage 2 (`scenes.json`): each scene (title, text, sketch count, status colour; stage 3: its characters and locations from `breakdown.json`, + the count of other items) on the left, its beats on the right, each at its own time; double-click = open it in the script stage |
 | shots | text, follow | on | storyboard shot, frame of the v1 render, kind (screen/split/world), status dot |
 | clips | text, follow | on | world-clip uses (clip.take +in-point), frame at the in-point, location colour; overlaps share width |
 | cast | text, follow | on | D, H, A1-A8 chips + location letters per shot |
@@ -213,6 +231,7 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `stages.json` | `{rev, stages[{id: lyrics/script/breakdown/characters/scenery/storyboard/final, status: empty/in_progress/needs_you/done, done_by?, via?, updated?, updated_by?, blockers[], note?}]}`: the guided flow (shared with the page; only the page sets `done`, stamped `done_by: "director", via: "page"`); missing = derived (stages with content count as done) |
 | `lyrics.json` | `{rev, current: "v3", seq, versions[{id, n, created, by, via, message, from?, sections[{id, label, lines[{id, text, t?}]}]}], notes[{id, line, w: [first, last word] \| null, quote, text, by, via, to?: "agent", kind?, status, at, version, replies[{id, text, by, via, at}]}]}`: stage 1. Versions are immutable (a save appends one and moves `current`; the server keeps its copy of every saved version); line ids are stable across versions and are the `song.json` line ids (a missing file reads as v1 derived from `song.json`). The server re-syncs `song.json` lines on every new current version |
 | `scenes.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, scenes[{id: "sc03", t0, t1, title, text, line_ids[], beats[{id: "b1", t, text}], sketches[ids]}]}], states{<scene>: {status: draft/needs_you/ok, by, via, at}}, notes[{id: "sn01", scene \| null, beat?, text, by, via, to?: "agent", kind?: request/fill_gaps, gaps?, status, at, version, replies[]}], intake{<question>: {text, by, via, at, asked?}}}`: stage 2, the script draft (shared with the page). Versions are immutable (a save appends; restore copies); statuses and intake answers live outside them; only the page sets a scene `ok`. A missing file reads as v1 derived from `script.json` (`stages` -> scenes, `lines` -> beats), which is never rewritten. Shapes and logic: `js/scenes.js` |
+| `breakdown.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, script?, items[{id: "bi03", kind: character/location/prop/wardrobe/fx, name, description, links[{scene, beats[], note?}], source: agent/director, aliases?, for? (wardrobe: the character item), dropped?}]}], states{<item>: {status: draft/review/ok, entity_id?, look_id?, by, via, at}}, notes[{id: "bn01", item \| null, scene?, text, by, via, to?: "agent", kind?: request/extract, status, at, version, replies[]}]}`: stage 3, the breakdown (shared with the page). Versions are immutable (a save appends; restore copies); statuses and entity links live outside them; only the page sets an item `ok` or links it to an entity ("Create entity": a draft entity in `entities/`, or a look on a character). Links name scene / beat ids of `scenes.json`. Shapes and logic: `js/breakdown.js` |
 | `sketches/<id>.json` / `.png` / `.mask.png` | a sketch: `{id, w, h, paper, underlay{src, opacity, fit}, strokes[], mask[], pins[{n, x, y, text}], title?, created, updated, by, via}` (format: `core/sketch/sketch.js`), the flattened image and the edit mask; written by `sketch_save`, registered in `media.json` (`kind: "sketch"`, `sketch`, `mask`, `scenes[]`, `pins`); under `private/sketches/` when drawn over a private image; not snapshotted |
 | `.snapshots/<yyyymmdd-hhmmss>-<slug>/` | copies of the small JSON files (no peaks, thumbs, `_src`, settings) + `.meta.json {id, at, message, auto, files}` |
 
@@ -295,6 +314,12 @@ small files are served in one read so no handle stays open.
   and bodies up to 25 MB (every other request: 5 MB; over the limit: 413); it keeps the token / Origin / Host checks.
   A sketch drawn over a PRIVATE underlay is written under `private/sketches/` and flagged private in `media.json`
   (local only, never exported). Its `via` (page / agent) is provenance, not a permission.
+- Stage 3 (breakdown): ids of items, scenes, beats and wardrobe owners are checked (`^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$`,
+  400 otherwise); an agent cannot set an item `ok` or write an entity link; a page save of `breakdown.json` cannot
+  rewrite a saved version, a note's author or an entity link, and changed statuses are stamped director / page;
+  "Create entity" (`/api/op/breakdown_promote`) runs only for the page's own request (this server's Origin + the
+  token), never for the MCP tools (no such tool) or offline; it spends nothing. An agent's restore brings a lost `ok`
+  back as `review`.
 - Entity thumbnails and copies made from private media stay private (`thumbs/priv_*`, `private/<kind>/`).
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.

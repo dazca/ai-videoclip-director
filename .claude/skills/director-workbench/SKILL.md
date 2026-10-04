@@ -47,11 +47,22 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
    `needs_you` (`status`), never `ok` (the director's). The director's drawings: `sketch_get` / `sketch_list` give the
    PNG and mask paths (open them to look) and the numbered pins ("necklace, silver, thin"); `sketch_save` writes one
    (base64 PNG). A project scripted before the flow reads its old `script.json` as v1 (stages -> scenes, lines -> beats).
-3. **Breakdown**: cut into shots on downbeats / section starts (`shots.json`); each shot gets kind, title, cast,
-   locations, and later the clip uses that fill it. Use `timeline_query` to see what a cut crosses.
+3. **Breakdown** (stage 3, `breakdown.json`): `breakdown_get` returns the current items and, with them, everything to
+   extract from: the script scenes (text, beats, sketch pins: the director's callouts), the intake (who, where, era,
+   must-haves) and the existing entities. Write the items with `breakdown_update` (a NEW version each time, with a
+   message): characters, locations, props, wardrobe (`for` = the character item it belongs to) and FX, one item per
+   distinct thing, each linked to the scenes and beats that need it (`links: [{scene, beats, note?}]`). Keep what the
+   director made: merge duplicates, mark `dropped: true` instead of removing, never undo their drops. An ask of kind
+   `extract` (the page's "Ask the agent to extract") means draft or refresh the breakdown, then
+   `breakdown_note_resolve` it with a reply. Statuses: `review` asks the director to look (e.g. "make this an
+   entity"); `ok` is theirs. Entities come from the page's "Create entity" (a draft character / location / prop, or a
+   look on a character): you cannot create them from a breakdown item; ask with `review` and a note
+   (`breakdown_note_add`).
 4. **Characters, looks, locations, props**: `entity_upsert` with references; looks (costumes) live in the character's
    `looks[]`. A missing look or angle becomes a generation request, not a guess.
-5. **Storyboard**: one frame per shot (thumbs), reviewed in the page; `ui_focus` to walk the director through it.
+5. **Storyboard**: cut into shots on downbeats / section starts (`shots.json`); each shot gets kind, title, cast,
+   locations, and later the clip uses that fill it (`timeline_query` shows what a cut crosses); one frame per shot
+   (thumbs), reviewed in the page; `ui_focus` to walk the director through it.
 6. **Generation requests**: `request_create` drafts with a concrete prompt, refs, tool and an honest `est_cost`.
    The director approves in Review > Queue (show it with `ui_focus` view "queue"). Only if the owner enabled
    `agent_approvals` may you pass `director_approved: true`, and only when they said so in the conversation.
@@ -73,6 +84,7 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
 - Never mark a stage done or edit `stages.json` / `lyrics.json` / `scenes.json` by hand to look like the director's
   (`via: "page"`): use the tools, which stamp your writes `via: "agent"`. Never mark a scene `ok`.
 - Never invent intake answers: record only what the director said.
+- Never mark a breakdown item `ok`, and never try to turn one into an entity yourself: set `review` and ask.
 
 ## Handy patterns
 

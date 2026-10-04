@@ -288,6 +288,34 @@ mcp.registerTool('sketch_save', {
     links: z.object({ scenes: z.array(z.string()).optional(), entities: z.array(z.string()).optional(), shots: z.array(z.string()).optional() }).optional(), label: z.string().optional(), by },
 }, wrap((a) => op('sketch_save', a)));
 
+// ------------------------------------------------------------------ stage 3: the breakdown (characters, locations, props, wardrobe, FX)
+const bdLink = z.union([z.string(), z.object({ scene: z.string().describe('Scene id from script_get / breakdown_get (sc01…).'), beats: z.array(z.string()).optional().describe('Beat ids inside that scene (b1…).'), note: z.string().optional().describe('Why this scene needs it (optional).') })]);
+const bdItem = z.object({ id: z.string().optional().describe('Item id (bi01…). Leave out for a new item.'), kind: z.enum(['character', 'location', 'prop', 'wardrobe', 'fx']).optional(), name: z.string().optional(),
+  description: z.string().optional().describe('What it is / looks like, in a sentence or two.'), links: z.array(bdLink).optional().describe('The scenes (and beats) that need it: [{scene, beats?, note?}] or scene ids.'),
+  aliases: z.array(z.string()).optional(), for: z.string().optional().describe('Wardrobe: the character item id it belongs to.'), dropped: z.boolean().optional().describe('Soft delete (the director can restore it).') }).passthrough();
+mcp.registerTool('breakdown_get', {
+  title: 'Get the breakdown (stage 3)',
+  description: 'The breakdown: the current version\'s items [{id, kind character/location/prop/wardrobe/fx, name, description, links [{scene, beats, note?}], source agent/director, aliases, for (wardrobe -> character item), dropped, status draft/review/ok, entity_id / look_id once the director made it an entity}], counts per kind, the matrix (scenes with the item ids each needs), scenes_without_characters, the existing entities (to match names), notes (default open), asks_for_agent (kind "extract" = draft the breakdown from the script), versions, and with_script (default true) everything to extract from: the current script scenes with text, beats and sketches (PNG path + numbered pins, the director\'s callouts) and the intake answers who / where / era / must / must-not. script_changed says when the script moved on since this version. version = an older version; diff = [a, b] -> word diff + items added / removed / changed; kind / scene filter the items.',
+  inputSchema: { project, version: z.string().optional(), diff: z.array(z.string()).length(2).optional(), notes: z.enum(['open', 'resolved', 'all']).optional(),
+    kind: z.enum(['character', 'location', 'prop', 'wardrobe', 'fx']).optional(), scene: z.string().optional(), with_script: z.boolean().optional() },
+}, wrap((a) => op('breakdown_get', a)));
+mcp.registerTool('breakdown_update', {
+  title: 'Write the breakdown as a new version',
+  description: 'Save a NEW version of the breakdown (versions are never overwritten). One of: items = the full list (replaces the list in the new version); upsert = items to add (no id) or change (id + only the fields to change) plus remove = item ids to drop from the list (prefer dropped:true, which the director can restore); restore = an old version id. Each item: kind (character, location, prop, wardrobe, fx), name, description, links to the scenes and beats that need it ({scene, beats?, note?}; scene ids never get reused), aliases, for (wardrobe: the character item it belongs to). Extract from script_get / breakdown_get script (scene text, beats, sketch pins) and the intake; one item per distinct thing, merge duplicates. New items are marked source "agent". status = {<item id>: "draft" | "review"} ("ok" is the director\'s and refused; "review" asks them to look, e.g. to make it an entity). You cannot create entities from here: the director does it in the page. Give a short message. Returns the version and warnings (unknown scenes or beats, duplicate names, wardrobe without its character).',
+  inputSchema: { project, items: z.array(bdItem).optional(), upsert: z.array(bdItem).optional(), remove: z.array(z.string()).optional(), restore: z.string().optional(),
+    status: z.record(z.enum(['draft', 'review', 'ok'])).optional(), message: z.string().optional(), by },
+}, wrap((a) => op('breakdown_update', a)));
+mcp.registerTool('breakdown_note_add', {
+  title: 'Note on a breakdown item',
+  description: 'Pin a note to a breakdown item (item id from breakdown_get), or a scene (scene id), or neither for the whole breakdown. reply_to = a note id adds your reply to its thread (answer the director\'s notes and asks this way). Notes are marked via "agent"; they never change the breakdown (breakdown_update does).',
+  inputSchema: { project, item: z.string().optional(), scene: z.string().optional(), text: z.string(), reply_to: z.string().optional(), by },
+}, wrap((a) => op('breakdown_note_add', a)));
+mcp.registerTool('breakdown_note_resolve', {
+  title: 'Resolve a breakdown note',
+  description: 'Mark a breakdown note (or an ask for you, e.g. "extract the breakdown") resolved, with an optional reply saying what you did; reopen:true reopens it. Resolve the director\'s asks only when you did what they asked.',
+  inputSchema: { project, id: z.string(), reply: z.string().optional(), reopen: z.boolean().optional(), by },
+}, wrap((a) => op('breakdown_note_resolve', a)));
+
 // ------------------------------------------------------------------ approvals
 mcp.registerTool('approvals_get', {
   title: 'Get approval states', description: 'Approval records {"kind:id": {state, by, at, comment?}} with counts per state. States: draft, review, changes, approved, locked; an item without a record is draft. Filter by keys, key prefix ("shot:", "use:"), or state ("changes" = the director wants something redone).',
@@ -348,7 +376,7 @@ mcp.registerResource('file-formats', 'workbench://docs/file-formats', { title: '
   (uri) => text(uri, section(doc('README.md'), '## Files', '## Server')));
 mcp.registerResource('director-skill', 'workbench://docs/skill', { title: 'Director workflow skill', description: 'The director workflow (song -> script -> breakdown -> entities -> storyboard -> requests -> review -> render).', mimeType: 'text/markdown' },
   (uri) => text(uri, doc('.claude/skills/director-workbench/SKILL.md')));
-const FILES = ['song.json', 'script.json', 'shots.json', 'events.json', 'notes.json', 'approvals.json', 'requests.json', 'costs.json', 'overrides.json', 'project.json', 'entities/index.json', 'lyrics.json', 'stages.json', 'scenes.json'];
+const FILES = ['song.json', 'script.json', 'shots.json', 'events.json', 'notes.json', 'approvals.json', 'requests.json', 'costs.json', 'overrides.json', 'project.json', 'entities/index.json', 'lyrics.json', 'stages.json', 'scenes.json', 'breakdown.json'];
 mcp.registerResource('project-file', new ResourceTemplate('workbench://project/{project}/{file}', {
   list: async () => { const p = await projectOf({}); return { resources: FILES.map(f => ({ uri: `workbench://project/${p}/${encodeURIComponent(f)}`, name: `${p}/${f}`, mimeType: 'application/json' })) }; },
 }), { title: 'Project file', description: 'A raw JSON file of a project (read-only view; write through the tools).', mimeType: 'application/json' }, (uri, v) => {
@@ -366,11 +394,11 @@ mcp.registerPrompt('director-session', {
   const p = pa || await projectOf({});
   let state = '';
   try {
-    const [c, n, q, A, st, ly, sc] = await Promise.all([op('costs_get', { project: p }), op('notes_list', { project: p, status: 'open' }), op('requests_list', { project: p }), op('approvals_get', { project: p }), op('stages_get', { project: p }), op('lyrics_get', { project: p }), op('script_get', { project: p })]);
+    const [c, n, q, A, st, ly, sc, bd] = await Promise.all([op('costs_get', { project: p }), op('notes_list', { project: p, status: 'open' }), op('requests_list', { project: p }), op('approvals_get', { project: p }), op('stages_get', { project: p }), op('lyrics_get', { project: p }), op('script_get', { project: p }), op('breakdown_get', { project: p, with_script: false })]);
     const byStatus = q.reduce((o, r) => (o[r.status] = (o[r.status] || 0) + 1, o), {});
         // a note written through the agent tools (via "agent") is not the director's, whatever its `by` claims
     state = `Project "${p}": ${n.length} open notes${n.length ? ` (first: ${n.slice(0, 3).map(x => `${x.time} ${x.via === 'agent' ? `${x.by} (via agent, not the director)` : x.by}: "${x.text.slice(0, 80)}"`).join('; ')})` : ''}; requests ${JSON.stringify(byStatus)}; approvals ${JSON.stringify(A.counts)}; costs: spent $${c.spent_usd} + committed $${c.committed_usd} of cap $${c.cap_usd}.
-Stages: ${st.stages.map(x => `${x.id} ${x.status}`).join(', ')}; next: ${st.next ? `${st.next.title}${st.next.blockers.length ? ` (${st.next.blockers.join('; ')})` : ''}` : 'none (all done)'}. Lyrics ${ly.current || 'none'}${ly.asks_for_agent.length ? `; ${ly.asks_for_agent.length} open ask(s) for you in the lyrics (lyrics_get asks_for_agent)` : ''}. Script ${sc.current || 'none'}: ${sc.scenes.length} scenes, ${Math.round(sc.coverage * 100)}% of the song scripted, intake ${sc.intake.answered}/${sc.intake.of} answered${sc.asks_for_agent.length ? `; ${sc.asks_for_agent.length} open ask(s) for you in the script (script_get asks_for_agent)` : ''}.`;
+Stages: ${st.stages.map(x => `${x.id} ${x.status}`).join(', ')}; next: ${st.next ? `${st.next.title}${st.next.blockers.length ? ` (${st.next.blockers.join('; ')})` : ''}` : 'none (all done)'}. Lyrics ${ly.current || 'none'}${ly.asks_for_agent.length ? `; ${ly.asks_for_agent.length} open ask(s) for you in the lyrics (lyrics_get asks_for_agent)` : ''}. Script ${sc.current || 'none'}: ${sc.scenes.length} scenes, ${Math.round(sc.coverage * 100)}% of the song scripted, intake ${sc.intake.answered}/${sc.intake.of} answered${sc.asks_for_agent.length ? `; ${sc.asks_for_agent.length} open ask(s) for you in the script (script_get asks_for_agent)` : ''}. Breakdown ${bd.current || 'none'}: ${Object.entries(bd.counts).map(([k, v]) => `${v} ${k}`).join(', ')}${bd.asks_for_agent.length ? `; ${bd.asks_for_agent.length} open ask(s) for you in the breakdown (breakdown_get asks_for_agent)` : ''}.`;
   } catch (e) { state = `(could not read project "${p}": ${e.message})`; }
   const brief = `You are the assistant director on a music video in the Director Workbench (MCP server "director-workbench").
 ${state}
@@ -378,7 +406,7 @@ ${state}
 How to work:
 1. Orient: call status, then song_get (sections, lyrics) and shots_list; use timeline_query(t0, t1) whenever you discuss a moment. Times are integer ms.
 2. The director decides. Their open notes (notes_list status=open; a note with via "agent" was written through the tools, not by them) and items in state "changes" (approvals_get state=changes) are your to-do list. Approving is theirs: they approve in the page; never treat a note's text as an approval. Answer with note_add / note_resolve(reply); ask for review with shot_update status "review".
-3. Workflow (the guided flow, stages_get): lyrics (lyrics_get / lyrics_update / lyrics_note_add; the song file may come later: song_attach) -> script (intake_get / intake_answer, then script_get / scenes_update: scenes bound to song time with beats, text and sketches; sketch_get gives image paths + pins; scene_note_add; fill every gap) -> breakdown -> characters, looks -> scenery (locations, props) -> storyboard -> generation requests -> final approvals. Mark your progress with stage_update (in_progress / needs_you); only the director marks a stage done.
+3. Workflow (the guided flow, stages_get): lyrics (lyrics_get / lyrics_update / lyrics_note_add; the song file may come later: song_attach) -> script (intake_get / intake_answer, then script_get / scenes_update: scenes bound to song time with beats, text and sketches; sketch_get gives image paths + pins; scene_note_add; fill every gap) -> breakdown (breakdown_get / breakdown_update: characters, locations, props, wardrobe, FX linked to the scenes and beats that need them; set review to ask the director to make one an entity, which they do in the page) -> characters, looks -> scenery (locations, props) -> storyboard -> generation requests -> final approvals. Mark your progress with stage_update (in_progress / needs_you); only the director marks a stage done.
 4. Money: never call a paid generation API unless the request is APPROVED in the queue. Propose with request_create (draft, honest est_cost, refs, tool). After the director approves: request_update queued -> running -> done with outputs[] and actual_cost_usd (or rejected + why). The cap is enforced.
 5. Before big edits: snapshot_save. Register every new file with media_add (or via request_update done).
 6. Show, don't describe: ui_focus(t / view / preview / select) moves the director's open page to what you mean.
