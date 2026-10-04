@@ -71,8 +71,19 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
    (locks it), all in the page. A look starts from the approved identity; propose new costumes with `look_create`
    (status review). Answer the director's notes and asks with `character_note_add` (`reply_to`, `resolve`). Private
    photos (friends, the director) and anything made from them stay under `private/`: never copy them anywhere shared.
-   **Locations, props**: `entity_upsert` with references (stage 5 will follow the same pattern). A missing look or
-   angle becomes a generation request, not a guess.
+   The `character_*` tools are the generic `asset_*` tools with `type: "character"`.
+   **Scenery** (stage 5, locations and props: the page's Scenery stage): the same loop through `asset_get` (no id:
+   every location / prop with its status; with `type` + id: base, trees "base" and "variant:<id>", variants with
+   their axes, requests, `to_run`, `to_register`, `waiting_for_director`, and `scenes`: each scene that uses it with
+   the variant it needs), `request_create` with `asset {type: "location" | "prop", id, tree, from, kind: base | edit |
+   variant}` (a location's base is an establishing plate, empty of people; a prop's a sheet; a variant's sheet starts
+   from the approved base node, its image first in refs), `asset_iteration_add {type, id, request}` and
+   `asset_note_add`. Propose variants with `variant_create` (status review): a location's `axes` {angle: wide / medium
+   / reverse / a word, tod: dawn / day / dusk / night, weather: clear / overcast / rain / fog / snow / a word}, a
+   prop's {angle, state: broken / lit / wet / open / a word}, and `scenes` = the scenes you propose it for (read the
+   scene text: "at night in the rain" -> a night / rain variant for that scene). The director picks the variant each
+   scene uses in the page; the storyboard reads `asset_get` `scenes`. A missing look, angle or state becomes a
+   variant + a generation request, not a guess.
 5. **Storyboard**: cut into shots on downbeats / section starts (`shots.json`); each shot gets kind, title, cast,
    locations, and later the clip uses that fill it (`timeline_query` shows what a cut crosses); one frame per shot
    (thumbs), reviewed in the page; `ui_focus` to walk the director through it.
@@ -98,8 +109,9 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
   (`via: "page"`): use the tools, which stamp your writes `via: "agent"`. Never mark a scene `ok`.
 - Never invent intake answers: record only what the director said.
 - Never mark a breakdown item `ok`, and never try to turn one into an entity yourself: set `review` and ask.
-- Never choose keep / branch / revert, approve an identity or a look, or write a character's `iter` / `base` by hand:
-  those are the director's, in the page. Register only outputs of approved, done requests.
+- Never choose keep / branch / revert, approve an identity, a base, a look or a variant, pick the variant a scene
+  uses, or write an asset's `iter` / `base` / `uses` by hand: those are the director's, in the page. Register only
+  outputs of approved, done requests.
 
 ## Handy patterns
 

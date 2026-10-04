@@ -6,7 +6,7 @@
 // official SDK client and exercises: tools/list, song_get, timeline_query, note_add + note_resolve, request_create +
 // request_update (the approval and cap rules, done -> cost + media), snapshot_save + snapshot_restore, ui_focus, the guided
 // flow (stages_get / stage_update, lyrics_* on a derived and on a new lyrics-only project, song_attach; stage 2: intake_*,
-// script_get / scenes_update (derived from script.json, versions, snap, restore, diff, status rules), scene notes, sketches; stage 3: breakdown_* (versions, statuses, notes, the page-only promotion); stage 4: character_* and look_create (the
+// script_get / scenes_update (derived from script.json, versions, snap, restore, diff, status rules), scene notes, sketches; stage 3: breakdown_* (versions, statuses, notes, the page-only promotion); stage 4: character_* and look_create; stage 5: asset_* and variant_create (the
 // page-only base / choices / approvals, requests linked to a tree, nodes from approved runs only, locks, looks, notes, an
 // agent restore)),
 // resources, the director-session prompt, the guard rules (edit voids approval, director-only approvals, media kind,
@@ -111,7 +111,8 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     'media_list', 'media_add', 'notes_list', 'note_add', 'note_resolve', 'approvals_get', 'approve', 'request_changes', 'requests_list', 'request_create', 'request_update', 'costs_get', 'ui_focus',
     'stages_get', 'stage_update', 'lyrics_get', 'lyrics_update', 'lyrics_versions', 'lyrics_note_add', 'lyrics_note_resolve', 'song_attach',
     'script_get', 'scenes_update', 'scene_note_add', 'scene_note_resolve', 'intake_get', 'intake_answer', 'sketch_save', 'sketch_get', 'sketch_list',
-    'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve', 'character_get', 'character_iteration_add', 'character_note_add', 'look_create'];
+    'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve', 'character_get', 'character_iteration_add', 'character_note_add', 'look_create',
+    'asset_get', 'asset_iteration_add', 'asset_note_add', 'variant_create'];
   check('tools/list has every tool', EXPECT.every(t => tools.includes(t)), { count: tools.length, missing: EXPECT.filter(t => !tools.includes(t)) });
   const schemaOk = (await mcp.listTools()).tools.every(t => t.description?.length > 40 && t.inputSchema?.type === 'object');
   check('every tool has a description and a JSON schema', schemaOk);
@@ -530,6 +531,94 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   check('an agent\'s snapshot restore brings no identity approval back and keeps the node made since (undecided)',
     !!snap.id && n5.node?.id && rs.restored === snap.id && !E2.iter.trees.identity.approved && E2.iter.nodes.some(n => n.id === n5.node.id && n.choice === null) && rs.kept_since_snapshot?.some(k => /approval not restored/.test(k)),
     { kept: rs.kept_since_snapshot, identity: E2.iter.trees.identity, nodes: E2.iter.nodes.map(n => n.id) });
+}
+
+// 11f. stage 5 (scenery): locations and props on the same asset code path; variants (angle / time of day / weather,
+// angle / state) are trees from the approved base; the variant each scene needs is the director's pick
+{
+  const pageAct = (body) => post(`/api/op/asset_act?project=${PROJECT}`, body, { origin: URL_ });
+  const agentAct = (body) => post(`/api/op/asset_act?project=${PROJECT}`, body);
+  const approveInPage = async (rid) => { const cur = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')); cur.items.find(r => r.id === rid).status = 'approved'; return post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur }); };
+  const out = (f, rgb) => { fs.mkdirSync(path.join(D, 'media/gen'), { recursive: true }); fs.writeFileSync(path.join(D, 'media/gen', f), Buffer.from(tinyPngB64(48, 27, rgb), 'base64')); return `media/gen/${f}`; };
+  const runReq = async (rid, file) => { for (const s of ['queued', 'running']) await call(mcp, 'request_update', { id: rid, status: s }); return call(mcp, 'request_update', { id: rid, status: 'done', outputs: [file], actual_cost_usd: 0 }); };
+  const scIds = (await call(mcp, 'script_get')).scenes.map(s => s.id);
+  const l0 = await call(mcp, 'asset_get', { type: 'location' }), all = await call(mcp, 'asset_get');
+  check('asset_get: the locations with their stage-5 status; without a type every kind (characters, locations, props)',
+    l0.locations?.some(x => x.id === 'studio' && x.status === 'base' && x.label === 'needs a base') && !l0.characters && all.characters?.some(c => c.id === 'bo') && all.props?.some(x => x.id === 'tone-generator') && Array.isArray(all.not_entities_yet),
+    { l0: l0.locations?.map(x => [x.id, x.status]), kinds: Object.keys(all) });
+  // the base: the page's (asset_act with its Origin); the agent surface is refused, over HTTP and offline
+  const base = { text: 'a room that is a test pattern, neon tubes, concrete floor', refs: [{ path: 'catalog/location/neon_photostudio.jpg', source: 'catalog', licence: 'CC0-1.0' }, { path: 'media/still/studio.jpg', source: 'media' }] };
+  const pb = await pageAct({ type: 'location', id: 'studio', act: 'base', base }), pbA = await agentAct({ type: 'location', id: 'studio', act: 'base', base });
+  let offAct = null; try { S.ops.asset_act(PROJECT, { type: 'location', id: 'studio', act: 'base', base }); } catch (e) { offAct = e.code; }
+  const wrongType = await pageAct({ type: 'prop', id: 'studio', act: 'base', base }), badType = await pageAct({ type: 'planet', id: 'studio', act: 'base', base });
+  check('the location base is the page\'s (asset_act, via page): the agent surface gets 403 (HTTP and offline); a wrong or unknown type is refused; no asset_act tool',
+    pb.status === 200 && pb.body?.base?.refs?.length === 2 && pb.body.base.via === 'page' && pbA.status === 403 && offAct === 403 && wrongType.status === 404 && badType.status === 400 && !(await mcp.listTools()).tools.some(t => t.name === 'asset_act'),
+    { pb: pb.status, pbA: pbA.status, offAct, wrongType: wrongType.status, badType: badType.status });
+  // a base plate request (asset link, no char link); bad links refused; the node after a page approval and done
+  const r1 = await call(mcp, 'request_create', { kind: 'location-plate', prompt: 'establishing plate of the studio', est_cost: 0.08, tool: 'fal-ai/flux-pro/kontext/max/multi', refs: base.refs.map(r => r.path), asset: { type: 'location', id: 'studio', tree: 'base', kind: 'base' } });
+  const rBad = await call(mcp, 'request_create', { kind: 'location-plate', prompt: 'x', est_cost: 0.08, asset: { type: 'location', id: 'studio', tree: 'identity' } });
+  const rBad2 = await call(mcp, 'request_create', { kind: 'prop-sheet', prompt: 'x', est_cost: 0.08, asset: { type: 'prop', id: 'studio' } });
+  const rBad3 = await call(mcp, 'request_create', { kind: 'location-variant', prompt: 'x', est_cost: 0.08, asset: { type: 'location', id: 'studio', tree: 'variant:nope' } });
+  const early = await call(mcp, 'asset_iteration_add', { type: 'location', id: 'studio', request: r1.id });
+  await approveInPage(r1.id); await runReq(r1.id, out('studio_n1.png', [30, 60, 120]));
+  const n1 = await call(mcp, 'asset_iteration_add', { id: 'studio', request: r1.id, note: 'placeholder plate' });
+  const asChar = await call(mcp, 'character_iteration_add', { id: 'studio', request: r1.id });
+  check('a location generation: a draft request with an asset link (target location:studio, no char link); a root / variant tree that is not this type\'s or does not exist and a type mismatch refused; asset_iteration_add only after approval and done (type read from the request): n01 heads the base tree; character_iteration_add does not take it',
+    r1.status === 'draft' && r1.target === 'location:studio' && r1.asset?.type === 'location' && r1.asset.tree === 'base' && !r1.char && /400/.test(rBad.error || '') && /404/.test(rBad2.error || '') && /404/.test(rBad3.error || '')
+    && /403/.test(early.error || '') && n1.node?.id === 'n01' && n1.node.tree === 'base' && n1.node.kind === 'base' && n1.head === 'n01' && /400/.test(asChar.error || ''),
+    { r1: r1.asset, rBad: rBad.error, rBad2: rBad2.error, rBad3: rBad3.error, early: early.error, n1: n1.error || n1.node?.id, asChar: asChar.error });
+  // variants: the agent proposes one (review) for a scene; bad axes refused; its node waits for the approved base
+  const v1 = await call(mcp, 'variant_create', { type: 'location', id: 'studio', axes: { angle: 'reverse', tod: 'night', weather: 'rain' }, scenes: [scIds[1]], description: 'neon reflections on the wet floor' });
+  const vDup = await call(mcp, 'variant_create', { type: 'location', id: 'studio', axes: { angle: 'reverse', tod: 'night', weather: 'rain' } });
+  const vBad = await call(mcp, 'variant_create', { type: 'location', id: 'studio', axes: { tod: '<b>night</b>' } }), vBad2 = await call(mcp, 'variant_create', { type: 'location', id: 'studio', axes: { state: 'broken' } });
+  const vAp = await call(mcp, 'entity_upsert', { kind: 'location', id: 'studio', fields: { variants: [{ id: 'x', status: 'approved' }] } });
+  const r2 = await call(mcp, 'request_create', { kind: 'location-variant', prompt: 'the studio, reverse angle at night in the rain', est_cost: 0.08, refs: ['media/gen/studio_n1.png'], asset: { type: 'location', id: 'studio', tree: `variant:${v1.variant}`, from: 'n01', kind: 'variant' } });
+  await approveInPage(r2.id); await runReq(r2.id, out('studio_night.png', [10, 10, 40]));
+  const tooEarly = await call(mcp, 'asset_iteration_add', { type: 'location', id: 'studio', request: r2.id });
+  const apA = await agentAct({ type: 'location', id: 'studio', act: 'approve', tree: 'base' }), apP = await pageAct({ type: 'location', id: 'studio', act: 'approve', tree: 'base' });
+  const n2 = await call(mcp, 'asset_iteration_add', { type: 'location', id: 'studio', request: r2.id });
+  check('variant_create (location): axes reverse / night / rain -> id reverse-night-rain, name from the axes, status review, proposed for a scene; a duplicate 409, a bad axis value or an axis of another type 400; approving a variant through entity_upsert 403; its node waits for the approved base (409), the page approves the base (the agent 403), then the variant tree roots from it (from_identity n01)',
+    v1.variant === 'reverse-night-rain' && v1.name === 'reverse · night · rain' && v1.status === 'review' && v1.tree === 'variant:reverse-night-rain' && /409/.test(vDup.error || '') && /400/.test(vBad.error || '') && /400/.test(vBad2.error || '') && /403/.test(vAp.error || '')
+    && /409/.test(tooEarly.error || '') && apA.status === 403 && apP.status === 200 && n2.node?.tree === 'variant:reverse-night-rain' && n2.node.from_identity === 'n01' && n2.node.parent === null && n2.head === n2.node.id,
+    { v1, vDup: vDup.error, vBad: vBad.error, vBad2: vBad2.error, vAp: vAp.error, tooEarly: tooEarly.error, apA: apA.status, apP: apP.status, n2: n2.error || n2.node?.tree });
+  // the variant each scene needs: the agent's proposal shows until the director picks (page only)
+  const g1 = await call(mcp, 'asset_get', { type: 'location', id: 'studio' });
+  const useA = await agentAct({ type: 'location', id: 'studio', act: 'use', scene: scIds[0], variant: 'reverse-night-rain' });
+  const useP = await pageAct({ type: 'location', id: 'studio', act: 'use', scene: scIds[0], variant: 'reverse-night-rain' }), useP2 = await pageAct({ type: 'location', id: 'studio', act: 'use', scene: scIds[1], variant: null });
+  const useBad = await pageAct({ type: 'location', id: 'studio', act: 'use', scene: scIds[0], variant: 'nope' }), useBad2 = await pageAct({ type: 'location', id: 'studio', act: 'use', scene: '../x', variant: null });
+  const upUses = await call(mcp, 'entity_upsert', { kind: 'location', id: 'studio', fields: { uses: { [scIds[2]]: { variant: 'reverse-night-rain' } } } });
+  const g2 = await call(mcp, 'asset_get', { type: 'location', id: 'studio' });
+  const u = (g, s) => g.scenes?.find(x => x.scene === s);
+  check('scenes: the agent\'s proposal (variant_create scenes) shows as source agent; the director\'s pick (asset_act use, page only; the agent 403; an unknown variant 404, a bad scene id 400; entity_upsert uses ignored) wins: a scene on the variant, another back on the base; asset_get gives each scene its variant, name and image',
+    u(g1, scIds[1])?.variant === 'reverse-night-rain' && u(g1, scIds[1]).source === 'agent' && u(g1, scIds[1]).image === n2.node.image && useA.status === 403 && useP.status === 200 && useP2.status === 200 && useBad.status === 404 && useBad2.status === 400
+    && upUses.warnings?.some(w => /uses ignored/.test(w)) && u(g2, scIds[0])?.variant === 'reverse-night-rain' && u(g2, scIds[0]).source === 'director' && u(g2, scIds[1])?.variant === null && u(g2, scIds[1]).source === 'director' && u(g2, scIds[1]).variant_name === 'base' && u(g2, scIds[2])?.source !== 'director'
+    && g2.variants?.[0]?.axes?.tod === 'night' && g2.root_approved === 'n01' && g2.status?.key === 'variants',
+    { g1: g1.scenes, g2: g2.scenes, useA: useA.status, useBad: useBad.status, useBad2: useBad2.status, warn: upUses.warnings, status: g2.status });
+  // a prop: an angle / state variant; notes on a scene's use; the character tools still answer
+  const pv = await call(mcp, 'variant_create', { type: 'prop', id: 'tone-generator', axes: { state: 'broken' } }), pvBad = await call(mcp, 'variant_create', { type: 'prop', id: 'tone-generator', axes: { tod: 'night' } });
+  const pvLit = await call(mcp, 'variant_create', { type: 'prop', id: 'tone-generator', axes: { angle: 'close-up', state: 'lit' }, name: 'Glowing close-up' });
+  const no1 = await call(mcp, 'asset_note_add', { type: 'prop', id: 'tone-generator', scene: scIds[0], text: 'mcp: broken in this scene?', to: 'agent' });
+  const no2 = await call(mcp, 'asset_note_add', { type: 'prop', id: 'tone-generator', reply_to: no1.id, text: 'mcp: yes, proposed the broken variant', resolve: true });
+  const noBad = await call(mcp, 'asset_note_add', { type: 'prop', id: 'tone-generator', tree: 'identity', text: 'x' });
+  const gp = await call(mcp, 'asset_get', { id: 'tone-generator', notes: 'all' }), gc = await call(mcp, 'asset_get', { id: 'bo' }), cl = await call(mcp, 'character_get');
+  const lc = await call(mcp, 'variant_create', { type: 'character', id: 'bo', name: 'Rain gear', garments: ['yellow raincoat'] });
+  check('a prop: variant_create state broken -> id broken; angle close-up + state lit with a name; a time of day refused (not a prop axis); notes on a scene\'s use (an01, reply, resolved; a character tree refused); asset_get finds the type by id; the character tools still answer (character_get lists characters; variant_create on a character is look_create)',
+    pv.variant === 'broken' && pv.status === 'review' && /400/.test(pvBad.error || '') && pvLit.variant === 'close-up-lit' && pvLit.name === 'Glowing close-up' && no1.id === 'an01' && no1.scene === scIds[0] && no2.status === 'resolved'
+    && /400/.test(noBad.error || '') && gp.type === 'prop' && gp.variants?.length === 2 && gp.notes?.length === 1 && gc.type === 'character' && gc.looks?.length >= 1 && cl.characters?.some(c => c.id === 'bo') && lc.look === 'rain-gear' && lc.status === 'review',
+    { pv: pv.error || pv.variant, pvBad: pvBad.error, pvLit: pvLit.error || pvLit.variant, no1: no1.error || no1.id, noBad: noBad.error, gp: gp.variants?.map(v => v.id), lc: lc.error || lc.look });
+  // an agent's snapshot restore: no variant approval comes back, the director's scene picks made since stay
+  await pageAct({ type: 'location', id: 'studio', act: 'approve', tree: 'variant:reverse-night-rain' });
+  const E1 = JSON.parse(fs.readFileSync(path.join(D, 'entities/locations/studio.json'), 'utf8'));
+  const snap = await call(mcp, 'snapshot_save', { message: 'mcp: scenery' });
+  await pageAct({ type: 'location', id: 'studio', act: 'unlock', tree: 'variant:reverse-night-rain' });
+  await pageAct({ type: 'location', id: 'studio', act: 'use', scene: scIds[2], variant: 'reverse-night-rain' });
+  const rs = await call(mcp, 'snapshot_restore', { snapshot: snap.id });
+  const E2 = JSON.parse(fs.readFileSync(path.join(D, 'entities/locations/studio.json'), 'utf8'));
+  check('approving a variant (page) sets it approved; an agent\'s snapshot restore brings back no variant approval that is not the current one (the variant back to review) and keeps the director\'s scene picks made since',
+    E1.variants.find(v => v.id === 'reverse-night-rain')?.status === 'approved' && E1.iter.trees['variant:reverse-night-rain'].via === 'page' && rs.restored === snap.id
+    && !E2.iter.trees['variant:reverse-night-rain']?.approved && E2.variants.find(v => v.id === 'reverse-night-rain')?.status === 'review' && E2.uses?.[scIds[2]]?.variant === 'reverse-night-rain'
+    && rs.kept_since_snapshot?.some(k => /approval not restored/.test(k)),
+    { kept: rs.kept_since_snapshot, uses: E2.uses, tree: E2.iter?.trees?.['variant:reverse-night-rain'] });
 }
 
 // 12. offline: the server is unreachable -> the same tools work on the files; ui_focus explains

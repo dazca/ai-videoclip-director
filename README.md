@@ -72,7 +72,9 @@ Tools: `status`, `projects` (list/create/duplicate/open), `snapshot_save` / `sna
 `sketch_get` / `sketch_list` (image paths + pins, so the agent can look at the director's drawings); stage 3:
 `breakdown_get` / `breakdown_update`, `breakdown_note_add` / `breakdown_note_resolve`; stage 4: `character_get`,
 `character_iteration_add`, `character_note_add`, `look_create` (generations are `request_create` drafts with a `char`
-link to the character's tree). Resources: the README, `CLAUDE.md`, the file formats, the
+link to the character's tree); stages 4 and 5, any asset (characters, locations, props): `asset_get`,
+`asset_iteration_add`, `asset_note_add`, `variant_create` (generations carry an `asset` link; the `character_*` tools
+are the same code for a character). Resources: the README, `CLAUDE.md`, the file formats, the
 skill, and each project's JSON files. Prompt: `director-session`. Rules the tools enforce: an agent cannot approve on
 its own, a request runs only after the director approved it, queueing is refused above the cost cap, and `done` needs
 the output files and the actual cost (recorded in `costs.json`, outputs indexed as media). The agent guide is
@@ -152,8 +154,26 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   (page only; Unlock reopens). **Looks**: one tree per costume, starting from the approved identity; the breakdown's
   wardrobe items are its draft looks (or "make it a look"), **+ New look**, **Request look sheet**, then the same edit /
   compare / keep loop and **Approve look**. **Notes**: notes on the character, a tree or a node, "ask the agent", and
-  the history of every act. Commands: palette "Characters: …", right-click a node (compare, edit, keep, branch,
-  revert, approve), Ctrl+Enter sends the open edit request.
+  the history of every act. **Scenes**: the look each scene needs (see the Scenery stage). Commands: palette
+  "Characters: …", right-click a node (compare, edit, keep, branch, revert, approve), Ctrl+Enter sends the open edit
+  request.
+- **Scenery stage** (stage 5): locations and props on the same workspace as the characters (one code path:
+  `tabs/assetws.js`, logic in `js/assets.js`). Left: the breakdown's **Locations** and **Props** in two groups, each with
+  its scenes and where it stands (needs a base / base chosen / base · n nodes / base approved / variants a/n approved;
+  items not yet entities greyed, "make…"). Per asset: **Base**: the same base picker (the catalogue opens on its
+  locations or props, Openverse, a description, private photos of a real place or object, a sketch), **Request base
+  plate** (a location: an establishing plate, wide, empty of people) / **Request prop sheet**, then the same iteration
+  tree, edit (text + sketch + mask + pins), A/B compare, keep / branch / revert and **Approve base** (page only; sets
+  the location's `establishing` / the prop's `hero` image when it has none). **Variants**: each variant is its own tree
+  starting from the approved base; **+ New variant** opens a one-line-per-axis form: a location's **angle** (wide /
+  medium / reverse / custom), **time of day** (dawn / day / dusk / night) and **weather** (clear / overcast / rain / fog
+  / snow / custom); a prop's **angle** and **state** (broken / lit / wet / open / custom); the name and id follow the
+  axes ("reverse · night · rain", `reverse-night-rain`); **Request variant sheet** starts from the approved base;
+  **Approve variant**. **Scenes**: every scene that uses the asset (from the breakdown links) with a picker for the
+  variant it needs (the base or a variant; "you" = your pick, "agent" = the agent's proposal, "default" = the base),
+  the variant's image and the scene text; add any other scene. The pick is saved in the entity (`uses`), page only,
+  and is what the storyboard reads. **Notes**: on the asset, a tree, a node or a scene. Commands: palette "Scenery: …",
+  Ctrl+Enter sends the open edit request.
 - **Top bar** (18 px; `` ` `` hides / shows it; **Esc never hides it**: Esc only closes menus, dialogs, the palette and
   the cheat sheet): menu bar (File Edit View Timeline Generate Window Help; F10 opens it from the keyboard), the
   **page tabs**, project name, transport, `⌘` = command palette, `⌃` = hide the bar, `⚙` = Settings (far right).
@@ -237,7 +257,7 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `energy.json` | `{fps, rms[], onset[]}` (0-1) |
 | `script.json` | `{stages[{name,t0,t1,text}], lines[{id:"s07", t0, t_end?, lyric, mode:"W"|"S"|"B"|"W→S", action, line_id}]}` |
 | `shots.json` | `{shots[{id, t0, t1, section, kind, title, cast[], locations[], clips[use ids], thumb, render_frame_ms}], uses[{id:"G05@20158", clip, take, in_ms, t0, t1, file, start_image, location, thumb, label}]}` |
-| `entities/{characters,locations,props}/<id>.json` | `{id, kind, name, role|description, refs[paths], thumb, status, private_refs?, breakdown?{item, scenes}, ...}`; `entities/index.json` lists them. A character also carries `looks[{id, name, garments[], colors[], images[], notes, status: draft/review/approved, from?: breakdown/agent/page, breakdown?}]` and stage 4: `base{text, refs[{path, source: catalog/openverse/photo/sketch/media, private?, title?, licence?, licence_url?, creator?, url?, original?, attribution?, catalog_id?, openverse_id?}], at, by, via}` and `iter{nodes[{id: "n03", tree: "identity" \| "look:<id>", parent, from_identity?, image, request, kind: identity/edit/look, edit{text, sketch?, png?, mask?, pins[{n, x, y, text}]}, choice: null/kept/branch/reverted, private?, at, by, via, note?}], trees{<tree>: {head, approved?, approved_at?, approved_by?, via?}}, notes[{id: "cn01", tree?, node?, text, by, via, to?, status, at, replies[]}], log[{at, by, via, act, tree?, node?, detail?}]}`: append-only (a node never changes except the director's `choice`; every act is logged); `identity_sheet` = the approved identity image. Catalogue paths (`catalog/...`) are relative to the workbench folder. Logic: `js/characters.js` |
+| `entities/{characters,locations,props}/<id>.json` | `{id, kind, name, role|description, refs[paths], thumb, status, private_refs?, breakdown?{item, scenes}, ...}`; `entities/index.json` lists them. A character also carries `looks[{id, name, garments[], colors[], images[], notes, status: draft/review/approved, from?: breakdown/agent/page, breakdown?}]` and stage 4: `base{text, refs[{path, source: catalog/openverse/photo/sketch/media, private?, title?, licence?, licence_url?, creator?, url?, original?, attribution?, catalog_id?, openverse_id?}], at, by, via}` and `iter{nodes[{id: "n03", tree: "identity" \| "look:<id>", parent, from_identity?, image, request, kind: identity/edit/look, edit{text, sketch?, png?, mask?, pins[{n, x, y, text}]}, choice: null/kept/branch/reverted, private?, at, by, via, note?}], trees{<tree>: {head, approved?, approved_at?, approved_by?, via?}}, notes[{id: "cn01", tree?, node?, text, by, via, to?, status, at, replies[]}], log[{at, by, via, act, tree?, node?, detail?}]}`: append-only (a node never changes except the director's `choice`; every act is logged); `identity_sheet` = the approved identity image. Catalogue paths (`catalog/...`) are relative to the workbench folder. Locations and props (stage 5) carry the same `base` and `iter` (trees `"base"` and `"variant:<id>"`, node kinds base/edit/variant, notes `"an01"`) and `variants[{id, name, axes{angle?, tod?, weather?} (location) \| {angle?, state?} (prop), notes, images[], status: draft/review/approved, from?: page/agent, scenes?[] (the agent's proposal), breakdown?}]`; `sheet` = the approved base image. Every asset may carry `uses{<scene id>: {variant: <variant / look id> \| null (the base / identity), by, via: "page", at, note?}}`: the variant each scene needs (the director's pick; without one, the variant the agent proposed for that scene, else the base). Logic: `js/assets.js` (shared), `js/characters.js` (the stage-4 names) |
 | `notes.json` | `{rev, notes[{id, t, line_id, by, text, status:"open"|"resolved", at, about?, source?}]}` |
 | `approvals.json` | `{rev, states[], items:{"<kind>:<id>": {state, by, at, why?, comment?}}}`; kinds: `shot`, `use`, `job`, `script`, `character`, `location`, `prop` |
 | `costs.json` | `{cap_usd, fal_total_usd, items[{id, t, usd, tool, date}], pre_production[], ledger[]}` |
@@ -247,8 +267,8 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `media.json` | `{generated, count, by_kind, items[{id, path, kind, label, entities[], shots[], uses[], take, job, group, size, w, h, duration_ms, private, status: used/picked/unused/private, cost_usd, thumb, strip?, strip_n?, packed_alpha?}]}`; kinds: render, clip, still, avatar, body, motion, dancer, motion-ref, sheet, variation, contact, audio, ref |
 | `thumbs/m_*.jpg`, `s_*.jpg`, `priv_*.jpg` | media thumbnails (max 240 px, sheets 600 px), 8-frame hover-scrub strips of videos, thumbnails of PRIVATE files |
 | `_src/probe.json` | ffprobe cache (size/mtime keyed) |
-| `requests.json` | `{rev, items[{id, kind, target, prompt, refs[], est_cost, tool?, status: draft/approved/queued/running/done/rejected, by, at, outputs?[], char?{id, tree, from, kind: identity/edit/look, text?, sketch?, png?, mask?, pins[]}}]}`; kinds: regenerate, new-costume, new-variant, generate, duplicate, choose-take, set-in, edit-timing, swap-costume, section-variant, import, identity-sheet, character-edit, look-sheet. `char` links a stage-4 generation to the character tree it grows |
-| `refs/<character>/`, `private/refs/<character>/`, `private/characters/<character>/` | stage-4 references: Openverse images (public, provenance in `media.json` `provenance{}`), the director's reference photos (always private), and iteration images made from private photos (private) |
+| `requests.json` | `{rev, items[{id, kind, target, prompt, refs[], est_cost, tool?, status: draft/approved/queued/running/done/rejected, by, at, outputs?[], asset?{type: character/location/prop, id, tree, from, kind: identity/base/edit/look/variant, text?, sketch?, png?, mask?, pins[]}, char?{id, tree, from, kind: identity/edit/look, ...}}]}`; kinds: regenerate, new-costume, new-variant, generate, duplicate, choose-take, set-in, edit-timing, swap-costume, section-variant, import, identity-sheet, character-edit, look-sheet, location-plate, location-edit, location-variant, prop-sheet, prop-edit, prop-variant. `asset` links a stage-4 / 5 generation to the asset tree it grows; a character's request also carries it as `char` (the stage-4 name; readers take `asset` first) |
+| `refs/<id>/`, `private/refs/<id>/`, `private/{characters,locations,props}/<id>/` | stage-4 / 5 references: Openverse images (public, provenance in `media.json` `provenance{}`), the director's reference photos (always private), and iteration images made from private photos (private) |
 | `overrides.json` | `{rev, sections:{<id>:{label?, color?}}}`: the director's section renames / colours over `song.json` |
 | `settings.json` | `{rev, keybindings:{<command id>:[keys]}}` (not snapshotted) |
 | `project.json` | `{title, created, from?}` |
@@ -358,6 +378,15 @@ small files are served in one read so no handle stays open.
   image is copied under `private/characters/<id>/`; outputs of a request with private refs are flagged private.
   `entity_upsert` ignores `iter` / `base` and refuses to approve or lock a look (403); `look_create` makes looks in
   `review`. An agent's snapshot restore brings back no identity / look approval and keeps the nodes made since.
+- Stage 5 (scenery): locations and props run on the same ops. `POST /api/op/asset_act` (`character_act` is it with
+  `type: "character"`) adds the per-scene pick (`act: "use"`) and the variant acts (`variant_new`, `variant_status`),
+  and is page only like `character_act` (this server's Origin + the token; 403 to the agent surface, a claimed
+  `via`, a foreign Origin, no token, offline). `ref_upload` takes `type` and checks that the entity is of that type.
+  An agent proposes variants with `variant_create` (always `review`; axis values are short words, scene ids are
+  checked), registers nodes with `asset_iteration_add` (never before the base is approved for a variant, never into a
+  locked tree), and cannot pick a scene's variant: `entity_upsert` ignores `iter`, `base` and `uses` and refuses to
+  approve a variant (403). A request carries one link (`asset`, else `char`). An agent's snapshot restore brings back no
+  variant approval that is not the current one (the variant back to `review`) and keeps the director's current picks.
 - Entity thumbnails and copies made from private media stay private (`thumbs/priv_*`, `private/<kind>/`).
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.

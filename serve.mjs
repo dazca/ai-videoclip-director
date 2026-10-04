@@ -298,9 +298,9 @@ http.createServer(async (req, res) => {
         // only the page turns a breakdown item into an entity: a browser request from this origin (the MCP server has no
         // such tool, and a request without the page's Origin is the agent surface and refused by the op)
         if (name === 'breakdown_promote') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
-        // stage 4: the director's acts (base, keep / branch / revert, approving the identity or a look) and reference
-        // uploads are the page's only, the same way
-        if (name === 'character_act' || name === 'ref_upload') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
+        // stages 4 and 5: the director's acts (base, keep / branch / revert, approving the root or a variant, the variant
+        // a scene uses) and reference uploads are the page's only, the same way
+        if (name === 'character_act' || name === 'asset_act' || name === 'ref_upload') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
         delete body.import_ok;   // only a local script calling lib/store.mjs directly may import approved looks
         return json(res, 200, await S.ops[name](project, body));
       }

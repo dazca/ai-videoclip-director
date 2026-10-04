@@ -44,6 +44,7 @@ export function projectFacts({ song, script, shots, entities, lyrics, scenes, br
     props: ents.filter(e => e.kind === 'prop').length,
     agentAsks: (lyrics?.notes || []).filter(n => n.status === 'open' && n.to === 'agent').length,
     items: bitems.length, itemsToPromote: bitems.filter(i => PROMOTABLE.includes(i.kind) && !breakdown?.states?.[i.id]?.entity_id).length,
+    sceneryToPromote: bitems.filter(i => (i.kind === 'location' || i.kind === 'prop') && !breakdown?.states?.[i.id]?.entity_id).length,
     breakdownAsks: (breakdown?.notes || []).filter(n => n.status === 'open' && n.to === 'agent').length,
   };
 }
@@ -69,7 +70,7 @@ export function autoBlockers(stages, f) {
       ...(f.scenes ? (f.gapMs >= 1000 ? [`${Math.round(f.gapMs / 1000)} s unscripted`] : []) : ['no scenes yet']),
       ...(f.sceneAsks ? [`${f.sceneAsks} open ask${f.sceneAsks > 1 ? 's' : ''} for the agent`] : [])],
     breakdown: [...need('script'), ...(f.items || f.characters + f.locations + f.props ? [] : ['no items yet']), ...(f.breakdownAsks ? [`${f.breakdownAsks} open ask${f.breakdownAsks > 1 ? 's' : ''} for the agent`] : [])],
-    characters: [...need('breakdown'), ...(f.itemsToPromote ? [`${f.itemsToPromote} breakdown item${f.itemsToPromote > 1 ? 's' : ''} not yet entities`] : [])], scenery: need('breakdown'), storyboard: need('script'),
+    characters: [...need('breakdown'), ...(f.itemsToPromote ? [`${f.itemsToPromote} breakdown item${f.itemsToPromote > 1 ? 's' : ''} not yet entities`] : [])], scenery: [...need('breakdown'), ...(f.sceneryToPromote ? [`${f.sceneryToPromote} location / prop item${f.sceneryToPromote > 1 ? 's' : ''} not yet entities`] : [])], storyboard: need('script'),
     final: stages.filter(s => s.id !== 'final' && s.status !== 'done').length ? [`${stages.filter(s => s.id !== 'final' && s.status !== 'done').length} stages not done`] : [],
   };
 }

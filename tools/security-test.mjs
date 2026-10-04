@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Security regressions for the workbench server, the data layer and the page (audit F01-F15, NV1, NV2, the guided flow
-// stages 1-4; the exporter's
+// stages 1-5; the exporter's
 // F07/F08/F12 are in tools/security-exporter.mjs). Runs on a SCRATCH copy of data/demo with scratch media and config,
 // on free ports; never touches data/. Uses headless Chromium when one is found (tools/chrome.mjs), else skips the
 // browser checks.   node tools/security-test.mjs   (npm run test:security runs both files)
@@ -362,6 +362,49 @@ try {
     check('CSP: connect-src is this server and https://api.openverse.org only (img-src keeps https: for remote media)', cs === "'self' https://api.openverse.org" && /img-src 'self' data: blob: https:/.test(shell.headers['content-security-policy'] || ''), cs);
   }
 
+  // ---------------------------------------------------------------- stage 5 (scenery): the same asset code path for locations and props
+  {
+    await op('entity_upsert', { kind: 'location', id: 'sec-place', name: 'Sec Place' });
+    await op('entity_upsert', { kind: 'prop', id: 'sec-thing', name: 'Sec Thing' });
+    const pageOp = (name, body, headers = {}) => post(`/api/op/${name}?project=${P}`, body, { origin: A.base, ...headers }), PNG = tinyPngB64(8, 8);
+    const up = {
+      agent: (await op('ref_upload', { type: 'location', id: 'sec-place', kind: 'photo', name: 'a.png', data: PNG })).status,
+      wrongType: (await pageOp('ref_upload', { type: 'prop', id: 'sec-place', kind: 'photo', name: 'a.png', data: PNG })).status,
+      badType: (await pageOp('ref_upload', { type: '../x', id: 'sec-place', kind: 'photo', name: 'a.png', data: PNG })).status,
+    };
+    const okUp = (await pageOp('ref_upload', { type: 'location', id: 'sec-place', kind: 'photo', name: '../../flat.png', data: PNG })).body;
+    const mUp = readP('media.json').items.find(m => m.path === okUp?.ref?.path);
+    check('ref_upload for a location: page only (403 to the agent surface); the type must match the entity (404) and be known (400); a scouting photo lands in private/refs/<id>/, flagged private',
+      up.agent === 403 && up.wrongType === 404 && up.badType === 400 && /^private\/refs\/sec-place\/[a-z0-9_-]+\.png$/.test(okUp?.ref?.path || '') && mUp?.private === true,
+      { up, path: okUp?.ref?.path });
+    const base = await pageOp('asset_act', { type: 'location', id: 'sec-place', act: 'base', base: { text: 'x', refs: [{ path: okUp.ref.path, source: 'photo' }, { path: 'catalog/location/lakeside.jpg', source: 'catalog' }] } });
+    const acts = {
+      approve: (await op('asset_act', { type: 'location', id: 'sec-place', act: 'approve', tree: 'base' })).status,
+      claim: (await op('asset_act', { type: 'location', id: 'sec-place', act: 'approve', tree: 'base', via: 'page' })).status,
+      foreign: (await post(`/api/op/asset_act?project=${P}`, { type: 'location', id: 'sec-place', act: 'approve' }, { origin: 'https://evil.example' })).status,
+      noToken: (await post(`/api/op/asset_act?project=${P}`, { type: 'location', id: 'sec-place', act: 'approve' }, { origin: A.base, 'x-wb-token': '' })).status,
+      use: (await op('asset_act', { type: 'prop', id: 'sec-thing', act: 'use', scene: 'sc01', variant: null })).status,
+      viaChar: (await op('character_act', { type: 'location', id: 'sec-place', act: 'approve', via: 'page' })).status,
+      varAp: (await op('entity_upsert', { kind: 'prop', id: 'sec-thing', fields: { variants: [{ id: 'v1', status: 'approved' }] } })).status,
+      varCreate: (await op('variant_create', { type: 'prop', id: 'sec-thing', axes: { state: 'broken' } })).body?.status,
+      badAxis: (await op('variant_create', { type: 'prop', id: 'sec-thing', axes: { state: '<img src=x>' } })).status,
+      badScene: (await op('variant_create', { type: 'prop', id: 'sec-thing', axes: { state: 'lit' }, scenes: ['../../x'] })).status,
+    };
+    const upW = (await op('entity_upsert', { kind: 'location', id: 'sec-place', fields: { iter: { trees: { base: { approved: 'n01' } } }, base: { refs: [] }, uses: { sc01: { variant: 'x', via: 'page' } } } })).body;
+    const E = readP('entities/locations/sec-place.json');
+    let off = null; try { S.ops.asset_act(P, { type: 'location', id: 'sec-place', act: 'approve' }); } catch (e) { off = e.code; }
+    const fake = await op('request_create', { kind: 'location-plate', prompt: 'x', est_cost: 0, asset: { type: 'location', id: 'sec-place', tree: 'base' }, char: { id: 'sec-cast' } });
+    check('an agent cannot approve a location / prop base or variant nor pick a scene\'s variant: asset_act refused to the agent surface (no Origin, a claimed via, a foreign Origin, no token, offline: 403; character_act cannot be used to reach another type); entity_upsert cannot approve a variant (403) nor write iter / base / uses (ignored); variant_create is "review" and checks axes and scene ids (400); a request carries one link (asset wins over char)',
+      base.status === 200 && acts.approve === 403 && acts.claim === 403 && acts.foreign === 403 && acts.noToken === 403 && acts.use === 403 && acts.viaChar === 403 && off === 403 && acts.varAp === 403 && acts.varCreate === 'review' && acts.badAxis === 400 && acts.badScene === 400
+      && upW?.warnings?.length === 3 && !E.iter?.trees?.base?.approved && !E.uses && E.base?.refs?.length === 2 && fake.status === 200 && fake.body?.asset?.type === 'location' && !fake.body.char,
+      { base: base.status, acts, off, warnings: upW?.warnings, fake: fake.body?.asset });
+    if (L) {
+      const lj = async (p) => { const r = await get(lanIp, L.port, p, { host: `${lanIp}:${L.port}` }); let j = null; try { j = JSON.parse(r.body); } catch (e) { /* not JSON */ } return { status: r.status, body: r.body, j }; };
+      const le = await lj(`/data/${P}/entities/locations/sec-place.json`), lf = await lj(`/data/${P}/${okUp.ref.path}`);
+      check('a LAN peer gets no private location reference (the photo 403; the base lists only the catalogue ref)', lf.status === 403 && le.status === 200 && !/private\//.test(le.body) && le.j?.base?.refs?.length === 1, { photo: lf.status, refs: le.j?.base?.refs?.map(r => r.path) });
+    } else check('stage 5 LAN checks skipped: no LAN address', true);
+  }
+
   // ---------------------------------------------------------------- F09: the EDL extractor's server (source check: it needs the owner's render page)
   const edl = fs.readFileSync(path.join(WB, 'importers/azemar_extract_edl.mjs'), 'utf8');
   check('F09 EDL extractor server: 127.0.0.1, decode in try/catch, confined to ROOT', /listen\(\d+, '127\.0\.0\.1'/.test(edl) && /try \{ p = inside\(ROOT,/.test(edl) && /if \(!p\) \{ r\.writeHead\(403\)/.test(edl));
@@ -440,6 +483,27 @@ try {
     check('F02 stored payloads in the characters stage (name, role, looks, garments, notes, request kind / text, pins) render as text; the CSP blocks a fetch to another origin',
       inert && noViolation && blocked.failed && /example\.org/.test(blocked.v || ''), { inert, cv: cv.slice(0, 2), blocked });
     await cp.close();
+    // the same for the scenery stage: a location and a prop with payloads in the name, description, variant name / axes / notes, notes, scene picks
+    await op('entity_upsert', { kind: 'location', id: 'sec-xloc', name: C(21), fields: { description: C(22) } });
+    await op('entity_upsert', { kind: 'prop', id: 'sec-xprop', name: C(23), fields: { description: C(24) } });
+    await op('variant_create', { type: 'location', id: 'sec-xloc', name: C(25), axes: { angle: 'reverse', tod: 'night' }, description: C(26), scenes: ['sc01'] });
+    await op('variant_create', { type: 'prop', id: 'sec-xprop', axes: { state: 'broken' }, name: C(27) });
+    await op('asset_note_add', { type: 'location', id: 'sec-xloc', scene: 'sc01', text: C(28), by: C(29) });
+    await op('request_create', { kind: C(30), prompt: C(31), est_cost: 0, asset: { type: 'location', id: 'sec-xloc', text: C(32), pins: [{ x: 1, y: 1, text: C(33) }] } });
+    const sp = await browser.newPage(); const sv = [];
+    sp.on('console', m => { if (/Content Security Policy|Refused to/i.test(m.text())) sv.push(m.text()); });
+    await sp.goto(`${A.base}/?project=${P}`, { waitUntil: 'domcontentloaded' });
+    await sp.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 });
+    await sp.evaluate(() => window.WB.stages.open('scenery')); await wait(600);
+    for (const id of ['sec-xloc', 'sec-xprop']) {
+      await sp.evaluate((x) => window.WB.scenery.open(x), id); await wait(250);
+      for (const t of ['base', 'variants', 'scenes', 'notes']) { await sp.evaluate((x) => document.querySelector(`.chtabs [data-tab=${x}]`)?.click(), t); await wait(200); }
+    }
+    await sp.evaluate(() => document.querySelector('.chlook[data-look]')?.click()); await wait(200);
+    const sInert = await sp.evaluate(() => window.__c === undefined && !document.querySelector('.chws img[src="x"]') && document.querySelectorAll('.chws .chrow').length >= 2);
+    check('F02 stored payloads in the scenery stage (location / prop names and descriptions, variant names and notes, scene notes, request kind / text, pins) render as text',
+      sInert && !sv.length, { sInert, sv: sv.slice(0, 2) });
+    await sp.close();
   }
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {

@@ -32,12 +32,12 @@ outside the project folder, extra PRIVATE path rule. Env vars win: `WB_PROJECT`,
 | `mcp/server.mjs`, `mcp/test.mjs` | MCP server (stdio) and its end-to-end test |
 | `index.html`, `app.js`, `app.css` | the page shell |
 | `core/` | command registry + keymap, menus, palette, undo history, selection, projects/exports, preview dock, default commands, `rail.js` (stage rail + stage commands), `wizard.js` (new-project wizard), `sketch/` (the sketch tool: `mountSketch` / `openSketch`, API in its header) |
-| `js/` | store (data + live reload), timeline (the warp), columns, player, verify hooks, `flow.js` (the guided flow: stages + lyrics model), `scenes.js` (stage 2: scenes, intake, gaps, snapping), `breakdown.js` (stage 3: items, links, merge / split, the "Suggest from script" pre-pass) and `characters.js` (stage 4: iteration trees, branches, statuses, estimates, prompts), all shared with `lib/store.mjs` |
-| `tabs/` | one module per view; `tabs/registry.js` lists pages and sub-views; `stage.js` (stage workspaces), `lyrics.js` (stage 1), `script.js` (stage 2), `breakdown.js` (stage 3), `charstage.js` (stage 4; `characters.js` is the Assets sub-view) |
-| `docs/SPEC_v3_GUIDED.md` | the guided creation flow (seven stages); phase 1 = stage rail, wizard, lyrics stage; phase 2 = the script stage + sketch files; phase 3 = the breakdown stage; phase 4 = the characters stage |
+| `js/` | store (data + live reload), timeline (the warp), columns, player, verify hooks, `flow.js` (the guided flow: stages + lyrics model), `scenes.js` (stage 2: scenes, intake, gaps, snapping), `breakdown.js` (stage 3: items, links, merge / split, the "Suggest from script" pre-pass), `assets.js` (stages 4 and 5: the asset workspace logic for characters, locations and props: iteration trees, branches, variants and their axes, statuses, estimates, prompts, the variant per scene) and `characters.js` (the stage-4 names on top of it), all shared with `lib/store.mjs` |
+| `tabs/` | one module per view; `tabs/registry.js` lists pages and sub-views; `stage.js` (stage workspaces), `lyrics.js` (stage 1), `script.js` (stage 2), `breakdown.js` (stage 3), `assetws.js` (the generic asset workspace + its commands), `charstage.js` (stage 4 on it; `characters.js` is the Assets sub-view), `scenery.js` (stage 5 on it: locations and props) |
+| `docs/SPEC_v3_GUIDED.md` | the guided creation flow (seven stages); phase 1 = stage rail, wizard, lyrics stage; phase 2 = the script stage + sketch files; phase 3 = the breakdown stage; phase 4 = the characters stage; phase 5 = the scenery stage (locations, props) on the generic asset workspace |
 | `catalog/` | the free starter catalogue (CC0 / public-domain bases: bodies, poses, face angles, garments, locations, props; `catalog.json`, `LICENSES.md`), served read-only for stage 4 |
 | `importers/` | `new_project.mjs` (song + lyrics -> project), `azemar_*` (the owner's production, kept as a worked example) |
-| `tools/` | `verify.mjs` (UI suite; its stage-4 block is `verify-characters.mjs`, runnable alone), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `make_demo.mjs`, `chrome.mjs` |
+| `tools/` | `verify.mjs` (UI suite; its stage-4 / 5 blocks are `verify-characters.mjs` (v7) and `verify-scenery.mjs` (v8), each runnable alone), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `make_demo.mjs`, `chrome.mjs` |
 | `exporters/hyperframes-html/` | HTML package of a HyperFrames composition: `export.mjs`, `verify.mjs`, `serve.mjs` (see Export) |
 | `data/<project>/` | one folder per project; only `data/_template/` and `data/demo/` are in git |
 
@@ -59,12 +59,17 @@ relative to the media base; any other path is relative to the project folder. Fu
   `iter{nodes[{id "n03", tree "identity"|"look:<id>", parent, from_identity?, image, request, kind, edit{text, sketch?,
   png?, mask?, pins[]}, choice null|kept|branch|reverted, private?, at, by, via}], trees{<tree>: {head, approved?}},
   notes[], log[]}`: append-only iteration trees (nodes never change except the director's `choice`; every act is
-  logged). `catalog/...` ref paths are relative to the workbench folder. Logic: `js/characters.js`. Reference images:
-  `refs/<character>/` (Openverse, with provenance), `private/refs/<character>/` (the director's photos, always private).
+  logged). `catalog/...` ref paths are relative to the workbench folder. Stage 5: locations and props carry the same
+  `base` / `iter` (trees `"base"` and `"variant:<id>"`) and `variants[{id, name, axes{angle?, tod?, weather?} |
+  {angle?, state?}, notes, images[], status draft|review|approved, from?, scenes?[]}]`; any asset may carry
+  `uses{<scene>: {variant: <variant / look id> | null, by, via: "page", at}}` (the variant each scene needs: the
+  director's pick, else the agent's proposal in `variants[].scenes`, else the base; `asset_get` `scenes` resolves it).
+  Logic: `js/assets.js` (shared), `js/characters.js` (stage-4 names). Reference images: `refs/<id>/` (Openverse, with
+  provenance), `private/refs/<id>/` (the director's photos, always private).
 - `media.json`: every generated/imported file with kind, links (entities, shots, uses, job, take), status, thumbnails.
 - Shared with the page, each `{rev, ...}`: `notes.json`, `approvals.json` (`"kind:id" -> {state}`; states draft,
-  review, changes, approved, locked), `requests.json` (the generation queue; a stage-4 generation carries `char{id,
-  tree, from, kind: identity|edit|look, text?, sketch?, png?, mask?, pins[]}`), `overrides.json`, `settings.json`.
+  review, changes, approved, locked), `requests.json` (the generation queue; a stage-4 / 5 generation carries `asset{type, id,
+  tree, from, kind: identity|base|edit|look|variant, text?, sketch?, png?, mask?, pins[]}`, a character's also as `char`), `overrides.json`, `settings.json`.
 - `costs.json`: `cap_usd`, `items[{id, t, usd, tool, date, request?}]`.
 - `stages.json` (shared, `{rev}`): the guided flow, `stages[{id, status: empty|in_progress|needs_you|done, done_by,
   via, updated, blockers[], note?}]` for lyrics, script, breakdown, characters, scenery, storyboard, final. Missing =
@@ -153,6 +158,17 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 
    the page (no tool); a look starts from the approved identity; `look_create` proposes a look in `review`. Ask with
    `character_note_add` and show it with `ui_focus` view "stage". Never copy a private photo or a node made from one
    anywhere shared.
+   Scenery (stage 5): locations and props work the same way through the generic tools (`asset_get`,
+   `asset_iteration_add`, `asset_note_add`; the `character_*` tools are the same code with `type: "character"`).
+   `asset_get` (no id: every asset by kind; `type` filters) gives the base, the trees ("base" and one "variant:<id>"
+   per variant), the variants with their axes, and `scenes`: each scene that uses the asset with the variant it needs,
+   its source (director / agent / default) and image: what the storyboard reads. A generation is a `request_create`
+   draft with `asset {type, id, tree, from, kind: base | edit | variant}` (kinds location-plate / prop-sheet,
+   location-edit / prop-edit, location-variant / prop-variant; estimates in `js/assets.js` EST); a variant's sheet
+   starts from the approved base node (refs: its image first). Propose variants with `variant_create` (status
+   `review`; a location: axes angle wide / medium / reverse / a word, tod dawn / day / dusk / night, weather; a prop:
+   angle, state broken / lit / ...; `scenes` = where you propose it). The base, keep / branch / revert, approving the
+   base or a variant and the variant each scene uses are the director's, in the page (`asset_act`, no tool).
 5. **Snapshot before big edits** (`snapshot_save`); a restore snapshots the current state first, so it is undoable.
 6. Register every new file (`media_add`, or automatically on `request_update` done) so it shows up in the page.
 
@@ -226,6 +242,12 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 
   `iter` / `base` and refuses to approve or lock a look (403; `import_ok`, for local scripts calling the data layer, is
   stripped from HTTP calls). An agent's snapshot restore brings back no identity / look approval and keeps the nodes
   made since (undecided).
+- Stage 5 (scenery): `asset_act` (the same acts for locations and props, plus the variant a scene uses, `act: "use"`;
+  `character_act` is it with `type: "character"`) is page only like `character_act` (403 to the agent surface and
+  offline); `ref_upload` takes `type` and checks it against the entity. `variant_create` always writes `review`
+  (short-word axis values, checked scene ids); `entity_upsert` ignores `iter` / `base` / `uses` and refuses to approve
+  a variant (403); a request carries one link (`asset` wins over `char`). An agent's snapshot restore brings back no
+  variant approval that is not the current one and keeps the director's current scene picks.
 - Entity thumbnails and copies made from private media stay private (`thumbs/priv_*`, `private/<kind>/`).
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.
@@ -258,6 +280,10 @@ initial project. Tools:
 | `character_iteration_add` | register the output of an approved, done request as a node of its tree (never approves or chooses) |
 | `character_note_add` | a note on a character, a tree or a node; reply_to (+ resolve) answers the director's asks |
 | `look_create` | propose a look (costume): status `review`; its tree starts from the approved identity |
+| `asset_get` | stages 4-5, any asset (character, location, prop): no id = every asset by kind (+ breakdown items not yet entities); id = base, trees, variants (axes), `scenes` (each scene's variant, source and image), requests, `to_run`, `to_register`, `waiting_for_director`, notes, asks |
+| `asset_iteration_add` | register the output of an approved, done request as a node of the asset tree it names (`asset` / `char` link; never approves or chooses) |
+| `asset_note_add` | a note on an asset, a tree, a node or a scene's use of it; reply_to (+ resolve) |
+| `variant_create` | propose a variant: a location's angle / time of day / weather, a prop's angle / state (a character: a look); status `review`; `scenes` = where you propose it |
 | `snapshot_save`, `snapshot_list`, `snapshot_restore` | durable checkpoints |
 | `song_get` | sections, lyric lines with word timings, events, grid |
 | `timeline_query` | everything between t0 and t1 across all columns |
@@ -266,7 +292,7 @@ initial project. Tools:
 | `media_list`, `media_add` | the media index; add = thumbnails + links |
 | `notes_list`, `note_add`, `note_resolve` | notes pinned to time; resolve with a reply |
 | `approvals_get`, `approve`, `request_changes` | approval states |
-| `requests_list`, `request_create`, `request_update` | the generation queue and its lifecycle (`char` links a stage-4 generation to a character tree) |
+| `requests_list`, `request_create`, `request_update` | the generation queue and its lifecycle (`asset` links a stage-4 / 5 generation to an asset tree; `char` for a character) |
 | `costs_get` | spent / committed / cap |
 | `ui_focus` | move the open page: seek, select, open a view, preview in the dock, toast |
 
@@ -289,10 +315,12 @@ Resources: `workbench://docs/readme`, `workbench://docs/claude` (this file), `wo
   (so its commands exist before it is opened); offer `WB.stageActions[<stage>] = {canSave, save, canNote, note}` and
   the rail's `stage.save` (Ctrl+Enter) / `stage.note` (Alt+N) reach it. A sketch anywhere: `mountSketch(el, {sketch?,
   id, resolve: mediaUrl, save})` from `core/sketch/sketch.js`, saving through `POST /api/op/sketch_save` (stage 4 mounts
-  it over a node image for an edit: strokes, mask and pins go into the request).
+  it over a node image for an edit: strokes, mask and pins go into the request). A new asset kind: a `TYPE` entry in
+  `js/assets.js` (root tree, variant prefix and field, words, axes, request kinds, estimates) and a `UI` entry in
+  `tabs/assetws.js`; a stage module mounts `new AssetWorkspace(el, {types, stage, pref})` and calls `assetCommands`.
 - **A page-only act** (the director's decision): an op in `lib/store.mjs` that fails unless `via === 'page'`, and one
   line in `serve.mjs` setting `body.via` from the request's Origin (see `breakdown_promote`, `character_act`,
-  `ref_upload`); no MCP tool; a security check that the agent surface gets 403.
+  `asset_act`, `ref_upload`); no MCP tool; a security check that the agent surface gets 403.
 - **An agent op / MCP tool**: a function in `ops` in `lib/store.mjs` (it is then also `POST /api/op/<name>`), and a
   `registerTool` in `mcp/server.mjs` with a zod schema and a description an agent can follow; cover it in `mcp/test.mjs`.
 - **Tests**: `npm run test:mcp` and `npm run verify` must pass (the verify suite runs on the demo; the owner's extra

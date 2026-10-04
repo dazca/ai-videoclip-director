@@ -786,3 +786,28 @@ button.on { color: var(--acc); }
 .chnadd textarea { flex: 1; font: 12px/16px "Segoe UI", Arial, sans-serif; }
 .chnadd button { height: 20px; cursor: pointer; }
 .chlog { font-size: 11px; padding: 0 8px; line-height: 16px; border-bottom: 1px solid var(--line2); }
+
+/* stage 5: scenery (tabs/scenery.js on the generic tabs/assetws.js; the ch* classes above are the shared workspace) */
+.chst.s-approved, .chst.s-variants { color: #9fd8b0; }
+.chdot.s-approved, .chdot.s-variants { background: #3fae6a; border-color: #3fae6a; }
+.chlist .chlh + .chlh, .chlist .chrow + .chlh, .chlist .scempty + .chlh { border-top: 1px solid var(--line); }
+.askind { font-size: 10px; padding: 0 4px; border: 1px solid var(--line); color: var(--dim); text-transform: uppercase; letter-spacing: .04em; }
+.askind.k-location { color: #9db7d6; border-color: #34507a; } .askind.k-prop { color: #d8b98a; border-color: #6b5530; }
+.chlg i { font-style: normal; padding: 0 3px; margin-right: 2px; border: 1px solid var(--line2); color: #c9ccd1; }
+.asvf { border-bottom: 1px solid var(--line); background: #111317; border-left: 2px solid var(--acc); }
+.asax { display: flex; align-items: center; gap: 1px; height: 20px; padding: 0 6px; font-size: 11px; border-bottom: 1px solid var(--line2); }
+.asaxl { width: 74px; color: var(--dim); flex: none; }
+.asax a { padding: 0 6px; line-height: 16px; border: 1px solid var(--line2); cursor: pointer; color: #b9bdc4; background: var(--bg2); }
+.asax a:hover { border-color: #4f79c0; } .asax a.on { background: #3a3220; border-color: var(--acc); color: #f3d9a6; }
+.asaxc { height: 16px; width: 110px; font-size: 11px; margin-left: 4px; } .asaxc.on { border-color: var(--acc); }
+.asvff { display: flex; align-items: center; gap: 5px; height: 22px; padding: 0 6px; font-size: 11px; }
+.asvff input { height: 16px; font-size: 11px; } .asvname { width: 180px; } .asvnotes { flex: 1; min-width: 120px; }
+.asvff button { height: 18px; font-size: 11px; cursor: pointer; }
+.asuse { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 6px; font-size: 11px; border-bottom: 1px solid var(--line2); white-space: nowrap; }
+.asuse.add { height: 22px; }
+.asut { width: 78px; flex: none; } .asutl { width: 150px; flex: none; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
+.asusrc { width: 46px; flex: none; } .asutx { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.asuse select { height: 18px; font-size: 11px; width: 170px; flex: none; }
+.asuth { flex: none; width: 54px; height: 32px; display: flex; align-items: center; justify-content: center; background: #0a0a0b; }
+.asuth img { max-width: 54px; max-height: 32px; display: block; } .asuth .chnoimg { font-size: 9px; height: auto; }
+.asuse select.asuseadd { width: 360px; }
