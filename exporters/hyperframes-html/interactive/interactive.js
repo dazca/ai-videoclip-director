@@ -10,8 +10,13 @@
  *           window/dialog; Alt+click = pause.
  * Paused:   the film's own document takes the pointer: select / copy text, drag images, right-click natively;
  *           double-click lifts; Alt+click or Space resumes (selection cleared, clock continues from the paused ms).
- * Keys:     Space play/pause, Esc close the newest unpinned card, Left/Right seek 5 s, I outlines on/off.
+ * Keys:     Space play/pause, Esc close the newest unpinned card, Left/Right seek 5 s, I outlines on/off,
+ *           H HUD auto / always / never, L progress line on/off, A fit / fill (H, L, A are remembered).
  * Cards:    drag by the header, resize at the corner, Ctrl+wheel zoom (also - 100% +), pin, save/copy, x.
+ * Nothing animates: cards, outlines and the HUD appear and disappear instantly. The system pointer is always visible
+ * (the film hides it for its own drawn cursor; a style injected into the film document puts it back).
+ * Screen: the HUD shows only at the bottom edge (48 px) or briefly after a key; outlines only while the pointer moves.
+ * Aspect: fit = the whole film, letterboxed; fill = cover the window, centred (or ?focus=x,y in 0..1), overflow cropped.
  *
  * Optional files read from the package: manifest.json (file facts) and interactive.project.json (workbench shots,
  * cast, notes, script, lyric lines; written by build.mjs --project).
@@ -21,12 +26,23 @@
   const $ = (s, r = document) => r.querySelector(s);
   const film = $('#ix-film'), ov = $('#ix-overlay'), hov = $('#ix-hover'), hovLabel = $('#ix-hover b'), cardsEl = $('#ix-cards');
   const btnPlay = $('#ix-play'), timeEl = $('#ix-time'), scrub = $('#ix-scrub'), btnLive = $('#ix-live'), hint = $('#ix-hint');
+  const lineEl = $('#ix-line'), lineFill = $('#ix-line i'), toastEl = $('#ix-toast'), hud = $('#ix-hud');
+  // per-viewer preferences (localStorage can be missing or throw: private windows, blocked storage)
+  const pref = {
+    get: (k, d, ok) => { try { const v = localStorage.getItem('ix.' + k); return v !== null && (!ok || ok.includes(v)) ? v : d; } catch (e) { return d; } },
+    set: (k, v) => { try { localStorage.setItem('ix.' + k, v); } catch (e) {} },
+  };
+  const ASPECTS = ['fit', 'fill'], HUDS = ['auto', 'always', 'never'];
+  let aspect = pref.get('aspect', 'fit', ASPECTS), hudMode = pref.get('hud', 'auto', HUDS), lineOn = pref.get('line', '0') === '1', hinted = pref.get('hinted', '0') === '1';
+  const focus = (() => { const m = /[?&]focus=([\d.]+),([\d.]+)/.exec(location.search); return m ? [Math.min(1, +m[1]), Math.min(1, +m[2])] : [0.5, 0.5]; })();
+  const HUD_ZONE = 48, HUD_LINGER = 1200, KEY_SHOW = 1500, STILL = 1500;
 
   let W = null, doc = null, root = null, A = null, CW = 1280, CH = 720, DUR = 0;
   let fit = { s: 1, ox: 0, oy: 0 };
   let ready = false, paused = false, inspect = true, drive = null;
   let manifest = null, project = null;
-  const ptr = { x: -1, y: -1, in: false };
+  const ptr = { x: -1, y: -1, in: false, moved: -1e9, inWin: false };
+  let zoneLeft = -1e9, keyUntil = -1e9, hudShown = null;
   let hoverHit = null, zTop = 100, cardN = 0, cards = [], scrubbed = false, liveT = 0, lastWall = performance.now(), scrubbing = false;
 
   const WIN_SEL = '.win, .kit-win, .wframe, .balloon, .tip, dialog, [role=dialog], [role=alertdialog], .dialog, .window';
@@ -52,16 +68,19 @@
   const fmt = (t) => { t = Math.max(0, t || 0); const m = Math.floor(t / 60), s = t - m * 60; return m + ':' + (s < 10 ? '0' : '') + s.toFixed(3); };
   const fmtShort = (t) => fmt(t).slice(0, -2);
 
-  // ------------------------------------------------------------------ layout: the film fits the window, letterboxed
+  // ------------------------------------------------------------------ layout: fit (letterbox) or fill (cover + crop)
+  // One uniform scale either way (never stretched); every window <-> film mapping goes through fit {s, ox, oy}.
   function layout() {
-    const vw = innerWidth, vh = innerHeight, s = Math.min(vw / CW, vh / CH);
-    fit = { s, ox: (vw - CW * s) / 2, oy: (vh - CH * s) / 2 };
+    const vw = innerWidth, vh = innerHeight, s = (aspect === 'fill' ? Math.max : Math.min)(vw / CW, vh / CH);
+    fit = { s, ox: (vw - CW * s) * (aspect === 'fill' ? focus[0] : 0.5), oy: (vh - CH * s) * (aspect === 'fill' ? focus[1] : 0.5) };
+    document.body.dataset.aspect = aspect;
     film.style.width = CW + 'px'; film.style.height = CH + 'px';
     film.style.transform = `translate(${fit.ox}px,${fit.oy}px) scale(${s})`;
   }
   const toFilm = (x, y) => [(x - fit.ox) / fit.s, (y - fit.oy) / fit.s];
   const toWin = (r) => ({ x: fit.ox + r.left * fit.s, y: fit.oy + r.top * fit.s, w: r.width * fit.s, h: r.height * fit.s });
   addEventListener('resize', layout);
+  layout(); setHint();
 
   // ------------------------------------------------------------------ boot
   // the iframe precedes this script, so the film may have finished loading before it runs: boot now in that case
@@ -74,7 +93,10 @@
       return fatal('The interactive layer needs the package served over http (same origin).<br>node serve.mjs &lt;package&gt; and open /interactive.html');
     }
     const st = doc.createElement('style'); st.id = 'ix-base';
-    st.textContent = 'html,body{margin:0!important;overflow:hidden!important;background:#000}';
+    // the film hides the system pointer (#screen {cursor: none}) because it draws its own XP cursor; in the player the
+    // real pointer stays visible: arrow, or the I-beam over selectable text while paused
+    st.textContent = 'html,body{margin:0!important;overflow:hidden!important;background:#000}html,body,body *{cursor:auto!important}' +
+      'html.ix-hot,html.ix-hot body,html.ix-hot body *{cursor:pointer!important}';
     doc.head.appendChild(st);
     for (let i = 0; i < 600 && !(root = doc.querySelector('[data-composition-id]')); i++) await wait(50);
     if (!root) return fatal('no [data-composition-id] root in the composition');
@@ -121,6 +143,8 @@
       e.stopPropagation();
       if (e.altKey) { e.preventDefault(); setMode(false); }
     }, true);
+    // while paused the film document takes the pointer: report its position in window coordinates (HUD zone, outlines)
+    W.addEventListener('pointermove', (e) => movedTo(fit.ox + e.clientX * fit.s, fit.oy + e.clientY * fit.s), true);
     W.addEventListener('dblclick', (e) => {
       if (!paused) return;
       const h = hitFilm(e.clientX, e.clientY, e.shiftKey);
@@ -136,17 +160,26 @@
     paused = wantPaused;
     document.body.classList.toggle('ix-paused', paused);
     btnPlay.innerHTML = paused ? '&#9654;' : '&#10074;&#10074;';
-    hint.textContent = paused ? 'paused · select / copy / drag anything · dbl-click lifts · Space resumes' : 'click anything · Alt+click or Space pauses';
+    setHint();
     let us = doc.getElementById('ix-select');
     if (paused && !us) { us = doc.createElement('style'); us.id = 'ix-select'; us.textContent = '#' + (root.id || 'root') + ' *, [data-composition-id] *{-webkit-user-select:text!important;user-select:text!important}img{-webkit-user-drag:auto}'; doc.head.appendChild(us); }
     if (!paused) { if (us) us.remove(); try { W.getSelection().removeAllRanges(); } catch (e) {} window.focus(); }
-    if (paused) hideHover();
+    if (paused) hideHover(); else setHot(false);
   }
+  function setHint() {
+    const txt = paused ? 'paused · select / copy / drag anything · dbl-click lifts · Space resumes'
+      : hinted ? '' : 'click anything · Space pauses · H bar · A fit/fill';
+    hint.textContent = txt; hint.hidden = !txt;
+  }
+  // paused: the film document owns the pointer; a hand over things a double-click lifts (the I-beam stays on text)
+  let hot = false;
+  function setHot(on) { if (on !== hot && doc) { hot = on; doc.documentElement.classList.toggle('ix-hot', on); } }
   btnPlay.addEventListener('click', () => setMode(!paused));
 
   // ------------------------------------------------------------------ the frame loop (parent only)
   function tick(now) {
     requestAnimationFrame(tick);
+    now = performance.now();
     const dt = (now - lastWall) / 1000; lastWall = now;
     const t = clock.t(), playing = clock.playing();
     if (playing === paused) setMode(!playing, true); // ended, autoplay refused, or the film paused itself
@@ -157,8 +190,26 @@
     btnLive.hidden = !scrubbed;
     timeEl.textContent = fmt(t).slice(0, -2) + ' / ' + fmtShort(DUR);
     if (!scrubbing) scrub.value = String(t);
-    if (!paused && ptr.in && inspect) showHover(hitWin(ptr.x, ptr.y, false)); else hideHover();
+    // what is under the pointer (only where the film itself is on top, not a card or the HUD)
+    let h = null;
+    if (ptr.in) { const top = document.elementFromPoint(ptr.x, ptr.y); if (top === ov || top === film) h = hitWin(ptr.x, ptr.y, false); }
+    ov.classList.toggle('ix-over', !paused && !!h);
+    if (paused) setHot(!!h && h.kind !== 'text');
+    // outlines only while the pointer moves: a still screen is clean
+    if (!paused && h && inspect && now - ptr.moved < STILL) showHover(h); else hideHover();
+    hudTick(now, t);
   }
+  // ------------------------------------------------------------------ HUD: bottom edge / keys / always / never
+  function hudTick(now, t) {
+    if (ptr.in && ptr.y >= innerHeight - HUD_ZONE) zoneLeft = now;
+    const on = hudMode === 'always' || (hudMode === 'auto' && (now - zoneLeft < HUD_LINGER || now < keyUntil || scrubbing));
+    if (on !== hudShown) { hudShown = on; document.body.classList.toggle('ix-hud-on', on); }
+    document.body.classList.toggle('ix-line-on', lineOn && !on);
+    if (lineOn && !on && DUR) lineFill.style.width = (100 * t / DUR).toFixed(3) + '%';
+  }
+  let toastT = 0;
+  function toast(msg) { toastEl.textContent = msg; toastEl.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { toastEl.hidden = true; }, 1200); }
+  function setAspect(m) { aspect = ASPECTS.includes(m) ? m : 'fit'; pref.set('aspect', aspect); layout(); }
   // compositions without their own standalone driver: seek the timeline and keep timed media in step
   function driveFilm(t, playing) {
     try { drive.seek(t, false); } catch (e) {}
@@ -244,7 +295,6 @@
   // ------------------------------------------------------------------ hover
   function showHover(h) {
     hoverHit = h;
-    ov.classList.toggle('ix-over', !!h);
     if (!h || !h.el.isConnected) { hov.style.display = 'none'; return; }
     const r = toWin(h.el.getBoundingClientRect());
     Object.assign(hov.style, { display: 'block', left: r.x + 'px', top: r.y + 'px', width: r.w + 'px', height: r.h + 'px' });
@@ -252,13 +302,12 @@
     const lab = h.kind + ' · ' + nameOf(h);
     if (hovLabel.textContent !== lab) hovLabel.textContent = lab;
   }
-  function hideHover() { hoverHit = null; hov.style.display = 'none'; ov.classList.remove('ix-over'); }
+  function hideHover() { if (hoverHit || hov.style.display !== 'none') { hoverHit = null; hov.style.display = 'none'; } }
 
-  let idleT = 0;
-  const wake = () => { document.body.classList.remove('ix-idle'); clearTimeout(idleT); idleT = setTimeout(() => document.body.classList.add('ix-idle'), 2500); };
-  addEventListener('pointermove', wake); addEventListener('keydown', wake); wake();
-  ov.addEventListener('pointermove', (e) => { ptr.x = e.clientX; ptr.y = e.clientY; ptr.in = true; });
-  ov.addEventListener('pointerleave', () => { ptr.in = false; });
+  // the pointer in window coordinates, from this page or (paused) from the film document
+  function movedTo(x, y) { ptr.x = x; ptr.y = y; ptr.in = x >= 0 && y >= 0 && x < innerWidth && y < innerHeight; ptr.moved = performance.now(); }
+  addEventListener('pointermove', (e) => movedTo(e.clientX, e.clientY), true);
+  document.documentElement.addEventListener('pointerleave', () => { ptr.in = false; });
   ov.addEventListener('click', (e) => {
     if (!ready) return;
     if (e.altKey) { setMode(true); return; }
@@ -273,11 +322,18 @@
   // ------------------------------------------------------------------ keys
   function onKey(e) {
     if (e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName) && e.target.type !== 'range') return;
-    const k = e.key;
+    const k = e.key, plain = !(e.ctrlKey || e.metaKey || e.altKey);
+    if (k === ' ' || e.code === 'Space' || k === 'ArrowLeft' || k === 'ArrowRight') keyUntil = performance.now() + KEY_SHOW; // the bar shows briefly
     if (k === ' ' || e.code === 'Space') { e.preventDefault(); setMode(!paused); }
     else if (k === 'Escape') { e.preventDefault(); const c = [...cards].reverse().find((c) => !c.pinned) || null; if (c) closeCard(c); }
     else if (k === 'ArrowLeft' || k === 'ArrowRight') { e.preventDefault(); seekTo(clock.t() + (k === 'ArrowLeft' ? -5 : 5)); }
-    else if (k === 'i' || k === 'I') { if (e.ctrlKey || e.metaKey || e.altKey) return; inspect = !inspect; document.body.classList.toggle('ix-noinspect', !inspect); }
+    else if ((k === 'i' || k === 'I') && plain) { inspect = !inspect; document.body.classList.toggle('ix-noinspect', !inspect); toast('outlines ' + (inspect ? 'on' : 'off')); }
+    else if ((k === 'h' || k === 'H') && plain) {
+      hudMode = HUDS[(HUDS.indexOf(hudMode) + 1) % HUDS.length]; pref.set('hud', hudMode);
+      toast({ auto: 'bar: at the bottom edge', always: 'bar: always', never: 'bar: never (keys still work)' }[hudMode]);
+    }
+    else if ((k === 'l' || k === 'L') && plain) { lineOn = !lineOn; pref.set('line', lineOn ? '1' : '0'); toast('progress line ' + (lineOn ? 'on' : 'off')); }
+    else if ((k === 'a' || k === 'A') && plain) { setAspect(ASPECTS[(ASPECTS.indexOf(aspect) + 1) % ASPECTS.length]); toast(aspect === 'fill' ? 'fill: cover the window, edges cropped' : 'fit: the whole film'); }
   }
   addEventListener('keydown', onKey, true);
 
@@ -489,12 +545,6 @@
   const pkgRel = (u) => { try { const b = new URL('.', location.href).href, a = new URL(u, doc.baseURI).href; return a.startsWith(b) ? decodeURIComponent(a.slice(b.length).split(/[?#]/)[0]) : null; } catch (e) { return null; } };
 
   // ------------------------------------------------------------------ cards
-  function alive(el) {
-    if (!el.isConnected) return false;
-    if (el.checkVisibility && !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false;
-    const r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0 && r.left < CW && r.top < CH;
-  }
   function lift(h, o) {
     o = o || {};
     const t = clock.t(), from = toWin(h.el.getBoundingClientRect());
@@ -533,12 +583,11 @@
     x = Math.max(4, Math.min(vw - w - 4, x)); y = Math.max(4, Math.min(vh - hh - 24, y));
     Object.assign(card.style, { left: x + 'px', top: y + 'px', width: w + 'px', height: hh + 'px', zIndex: ++zTop });
     if (body.wait) body.wait.then((n) => { if (n && n.w) { c.body.nat = n; } });
-    card.animate([{ transform: flip(from, { x, y, w, h: hh }), opacity: 0.35 }, { transform: 'none', opacity: 1 }], { duration: 260, easing: 'cubic-bezier(.2,.8,.2,1)' });
     wire(c);
+    if (!hinted) { hinted = true; pref.set('hinted', '1'); setHint(); }
     cards.push(c);
     return c;
   }
-  const flip = (a, b) => `translate(${a.x - b.x}px,${a.y - b.y}px) scale(${a.w / b.w},${a.h / b.h})`;
   function setZoom(c, z, ax, ay) {
     z = Math.max(0.05, Math.min(16, z));
     const b = c.bodyEl, old = c.z || 1;
@@ -585,17 +634,12 @@
     if (s.canvas) { try { a.href = s.canvas.toDataURL('image/png'); } catch (e) { return flash('n/a'); } } else a.href = s.href;
     document.body.appendChild(a); a.click(); a.remove();
   }
+  // a closed card simply disappears (no animation)
   function closeCard(c) {
     if (c.closing) return; c.closing = true;
     cards = cards.filter((x) => x !== c);
-    const card = c.card, here = { x: card.offsetLeft, y: card.offsetTop, w: card.offsetWidth, h: card.offsetHeight };
-    const live = alive(c.h.el), to = live ? toWin(c.h.el.getBoundingClientRect()) : c.from;
-    c.returnedTo = live ? 'element' : 'origin';
-    card.style.pointerEvents = 'none';
-    const an = card.animate([{ transform: 'none', opacity: 1 }, { transform: flip(to, here), opacity: live ? 0.85 : 0.25, offset: 0.85 }, { transform: flip(to, here), opacity: 0 }],
-      { duration: 300, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' });
-    an.onfinish = () => { for (const f of c.body.stop) try { f(); } catch (e) {} card.remove(); };
-    return an;
+    for (const f of c.body.stop) try { f(); } catch (e) {}
+    c.card.remove();
   }
   function closeAll(pinnedToo) { for (const c of [...cards]) if (pinnedToo || !c.pinned) closeCard(c); }
 
@@ -606,14 +650,18 @@
     play: () => setMode(false), pause: () => setMode(true), back: () => btnLive.click(), modes: () => modeLog.slice(), closeAll: () => closeAll(true),
     seek: (t, asLive) => { if (asLive) { clock.seek(t); scrubbed = false; liveT = t; } else seekTo(t); },
     cards: () => cards.map((c) => ({ id: c.id, kind: c.h.kind, name: c.name, t: c.t, pinned: c.pinned, z: c.z, el: c.card })),
+    aspect: () => aspect, setAspect, fit: () => ({ ...fit, vw: innerWidth, vh: innerHeight, cw: CW, ch: CH }),
+    hud: () => ({ mode: hudMode, shown: !!hudShown, line: lineOn }), setHud: (m, line) => { if (HUDS.includes(m)) hudMode = m; if (line !== undefined) lineOn = !!line; },
     hitAt: (x, y, container) => { const h = hitWin(x, y, container); return h && { kind: h.kind, name: nameOf(h) }; },
     // a window point over a thing of this kind on screen now (grid scan), preferring the inside of its box
     probe(kind, o) {
       o = o || {}; let best = null;
       const step = o.step || 16;
       for (let fy = step / 2; fy < CH; fy += step) for (let fx = step / 2; fx < CW; fx += step) {
-        const wx = fit.ox + fx * fit.s, wy = fit.oy + fy * fit.s, top = document.elementFromPoint(wx, wy);
-        if (top && top !== ov && top !== film) continue; // covered by a card or the HUD
+        const wx = fit.ox + fx * fit.s, wy = fit.oy + fy * fit.s;
+        if (wx < 1 || wy < 1 || wx > innerWidth - 1 || wy > innerHeight - 1) continue; // cropped off in fill mode
+        const top = document.elementFromPoint(wx, wy);
+        if (top !== ov && top !== film) continue; // covered by a card or the HUD
         const h = hitFilm(fx, fy, o.container); if (!h || h.kind !== kind) continue;
         if (o.name && !o.name.test(nameOf(h))) continue;
         const r = h.el.getBoundingClientRect(), d = Math.min(fx - r.left, r.right - fx, fy - r.top, r.bottom - fy);

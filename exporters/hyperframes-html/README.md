@@ -108,22 +108,32 @@ grid when `window.KIT` exists; stacked-alpha clips are decoded into a transparen
 time, the scene (`[data-shot]`), the element, the source file with its manifest facts, and, with `--project`, the
 workbench shot (title, cast, locations, note), clip use, lyric line, script line and nearby notes. Cards drag by the
 header, resize at the corner, zoom with Ctrl+wheel or `- 100% +`, pin (or double-click the header). Closing (Esc, x,
-click outside) flies the card back to where that element is now in the film, or fades it out where it was lifted
-from when the element is gone.
+click outside) removes the card. Nothing animates: cards, outlines and the HUD appear and disappear at once.
 
 Paused (Space, the HUD button or Alt+click): the film's document takes the pointer, so everything is natively
 selectable / copyable, images drag out, right-click is the browser's own; double-click lifts. The film's own
 click-to-toggle (standalone mode) is stopped by a capture listener while paused. Space resumes from the paused ms
 (the audio clock is paused, not seeked) and clears the selection.
 
-HUD (bottom-left, hides after 2.5 s without pointer movement while playing): play/pause, time, scrubber, `live`
-(after a scrub or an arrow seek: back to where the film would be now had you not scrubbed), hint. Keys: Space,
-Esc, Left/Right seek 5 s, I toggles the outlines.
+Clean screen: the HUD (bottom-left: play/pause, time, scrubber, `live` = back to where the film would be now had you
+not scrubbed, hint) is hidden until the pointer reaches the bottom 48 px, or for 1.5 s after Space / an arrow; it
+hides 1.2 s after the pointer leaves that zone. Outlines show only while the pointer moves (hidden after 1.5 s
+still). The "click anything" hint goes away after the first lift. The system pointer is always visible: the film
+hides it for its drawn XP cursor (`#screen {cursor: none}`), so the layer injects a style into the film document
+(not into any file) that restores it (I-beam on text while paused, a hand over liftable things).
 
-`verify-interactive.mjs` plays, lifts a text, a window, an image, a video clip, a sprite dancer and a stacked-alpha
+Keys: Space, Esc, Left/Right seek 5 s, I outlines, **H** HUD auto / always / never, **L** a 2 px progress line while
+the HUD is hidden (off by default), **A** aspect fit / fill. H, L and A are remembered per viewer (localStorage).
+Aspect: `fit` shows the whole film letterboxed; `fill` covers any window shape with one uniform scale and crops the
+overflow, centred, or around `interactive.html?focus=x,y` (0..1). Never stretched. Hit-testing, lifting, pausing and
+selection map through the same transform in both. See `ASPECT.md` for a composition that really adapts to the window.
+
+`verify-interactive.mjs` checks the clean screen (HUD hidden by default, bottom-edge show/hide, keys, no
+transitions, the pointer never `none`), plays, lifts a text, a window, an image, a video clip, a sprite dancer and a stacked-alpha
 dancer while playing (hover, click, content, drag, Ctrl+wheel, select, Esc), compares the audio-clock progress over
 6 s with a plain-playback baseline (within 50 ms, no stalls or jumps), then checks paused selection, double-click
-lift and resume from the paused ms. Screenshots and `verify-interactive.json` go to `<outDir>-verify/interactive/`.
+lift and resume from the paused ms, and finally fit / fill at 1280x720, 1080x1920, 2560x1080 and 1024x768 (geometry,
+hover, click lift, paused double-click lift on the same thing; `aspect-<w>x<h>-<mode>.png` with a card lifted). Screenshots and `verify-interactive.json` go to `<outDir>-verify/interactive/`.
 
 Limits: needs http (same origin); `--project` packages the project's shot titles, cast names, script and notes text
 (private file paths are dropped); clones show computed styles, so CSS animations inside them are frozen and

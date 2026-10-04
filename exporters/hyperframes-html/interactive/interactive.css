@@ -50,9 +50,15 @@ body.ix-noinspect #ix-hover, body.ix-paused #ix-hover { display: none !important
 .ix-sel, .ix-sel * { user-select: text !important; -webkit-user-select: text !important; cursor: text; }
 
 #ix-hud { position: fixed; left: 0; bottom: 0; z-index: 30; display: flex; align-items: center; height: 20px; background: var(--ix-bg);
-  border-top: 1px solid var(--ix-line); border-right: 1px solid var(--ix-line); font: var(--ix-mono); color: var(--ix-dim); user-select: none; transition: opacity .35s; }
-body.ix-idle #ix-hud { opacity: 0; }
-#ix-hud:hover, body.ix-paused #ix-hud, body.ix-scrubbed #ix-hud { opacity: 1 !important; }
+  border-top: 1px solid var(--ix-line); border-right: 1px solid var(--ix-line); font: var(--ix-mono); color: var(--ix-dim); user-select: none; }
+/* no transitions anywhere: the bar is there (bottom 48 px, a key, H = always) or it is not */
+body:not(.ix-hud-on) #ix-hud { display: none; }
+#ix-line { position: fixed; left: 0; right: 0; bottom: 0; height: 2px; z-index: 30; pointer-events: none; display: none; background: rgba(255,255,255,.12); }
+#ix-line i { display: block; height: 100%; width: 0; background: var(--ix-acc); }
+body.ix-line-on #ix-line { display: block; }
+#ix-toast { position: fixed; left: 50%; top: 10px; transform: translateX(-50%); z-index: 40; pointer-events: none; padding: 3px 8px;
+  background: var(--ix-bg); border: 1px solid var(--ix-line); color: var(--ix-fg); font: var(--ix-mono); white-space: nowrap; }
+#ix-toast[hidden], #ix-hint[hidden] { display: none; }
 #ix-hud button { border-left: 0; border-right: 1px solid var(--ix-line); font-size: 10px; min-width: 22px; }
 #ix-live { color: var(--ix-acc) !important; }
 #ix-time { padding: 0 6px; color: var(--ix-fg); min-width: 92px; }

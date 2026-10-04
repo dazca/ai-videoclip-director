@@ -4,12 +4,17 @@
 //   node interactive/verify-interactive.mjs <outDir> [--report <dir>] [--at text=20,window=110,image=86,video=160,dancer=116,alpha=258]
 //   (alpha = a stacked-alpha dancer clip)
 //
+// 0. clean screen: the HUD is hidden at start, shows at the bottom edge (48 px), hides 1.2 s after the pointer leaves;
+//    a key shows it briefly; H cycles auto / always / never; L the progress line; nothing has a transition
 // 1. clock baseline: 6 s of plain playback, audio-clock progress vs wall time
-// 2. while playing, one run per kind (text, window, image, video, dancer): hover, click to lift, check the card's
-//    content, drag it, Ctrl+wheel zoom, (text) select inside it by a mouse drag, Esc to close (animates back), for
-//    6 s of wall time each; the film clock must progress like the baseline (within 50 ms) and never jump
-// 3. paused mode: Space pauses (clock holds), a mouse drag selects text in the film document, double-click lifts,
-//    Space resumes from the paused ms
+// 2. while playing, one run per kind (text, window, image, video, dancer): hover, click to lift (instantly: no
+//    animation), check the card's content, drag it, Ctrl+wheel zoom, (text) select inside it by a mouse drag, outlines
+//    hide when the pointer is still for 1.5 s, Esc closes instantly, for 6 s of wall time each; the film clock must
+//    progress like the baseline (within 50 ms) and never jump
+// 3. paused mode: Space pauses (clock holds), the system pointer is visible over the film's elements, a mouse drag
+//    selects text in the film document, double-click lifts, Space resumes from the paused ms
+// 4. aspect: fit and fill at 1280x720, 1080x1920, 2560x1080, 1024x768: geometry, hit-test, hover, click-lift and
+//    paused double-click lift land on the same thing; a screenshot of each with a card lifted
 // Screenshots + verify-interactive.json in <report> (default <outDir>-verify/interactive). Exit code 1 on a failure.
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -54,6 +59,50 @@ async function jumps(m0, m1) { // largest deviation between film steps and wall 
   }, m0.w, m1.w);
 }
 async function playAt(t) { await page.evaluate((t) => { IX.seek(t, true); IX.play(); }, t); await sleep(900); }
+const noAnim = () => page.evaluate(() => [...document.querySelectorAll('.ix-card, #ix-hud, #ix-hover, #ix-line, #ix-toast')].every((e) => !e.getAnimations().length && getComputedStyle(e).transitionDuration.split(',').every((d) => parseFloat(d) === 0)));
+const disp = (id) => page.evaluate((id) => getComputedStyle(document.getElementById(id)).display, id);
+// the preferences are per viewer (localStorage): start from the defaults
+await page.evaluate(() => { try { for (const k of Object.keys(localStorage)) if (k.startsWith('ix.')) localStorage.removeItem(k); } catch (e) {} IX.setAspect('fit'); IX.setHud('auto', false); });
+
+// ---------------------------------------------------------------- 0. clean screen
+{
+  await page.mouse.move(640, 300); await sleep(300);
+  const h0 = { shown: (await page.evaluate(() => IX.hud())).shown, hud: await disp('ix-hud'), line: await disp('ix-line') };
+  check('HUD hidden by default (nothing on screen, progress line off)', !h0.shown && h0.hud === 'none' && h0.line === 'none', h0);
+  await page.mouse.move(640, 700, { steps: 3 }); await sleep(120);
+  const h1 = await disp('ix-hud');
+  check('HUD shows at the bottom edge (bottom 48 px)', h1 === 'flex', h1);
+  await page.mouse.move(640, 300, { steps: 3 }); await sleep(600);
+  const h2 = await disp('ix-hud');
+  await sleep(900);
+  const h3 = await disp('ix-hud');
+  check('HUD hides 1.2 s after the pointer leaves the zone', h2 === 'flex' && h3 === 'none', { at600ms: h2, at1500ms: h3 });
+  await page.keyboard.press('ArrowRight'); await sleep(100);
+  const h4 = await disp('ix-hud');
+  await page.keyboard.press('ArrowLeft'); await sleep(1700);
+  const h5 = await disp('ix-hud');
+  check('an arrow / Space shows the HUD briefly', h4 === 'flex' && h5 === 'none', { after: h4, later: h5 });
+  check('HUD, outline, line, toast: no transition / animation', await noAnim());
+  await page.keyboard.press('h'); const m1 = await page.evaluate(() => IX.hud().mode); await page.keyboard.press('h'); const m2 = await page.evaluate(() => IX.hud().mode);
+  await page.keyboard.press('h'); const m3 = await page.evaluate(() => [IX.hud().mode, localStorage.getItem('ix.hud')]);
+  check('H cycles the HUD mode auto -> always -> never -> auto (remembered)', m1 === 'always' && m2 === 'never' && m3[0] === 'auto' && m3[1] === 'auto', [m1, m2, m3]);
+  await page.keyboard.press('l'); await sleep(100);
+  const ln = await page.evaluate(() => [getComputedStyle(document.getElementById('ix-line')).display, parseFloat(document.querySelector('#ix-line i').style.width)]);
+  await page.keyboard.press('l');
+  check('L toggles a 2 px progress line while the HUD is hidden', ln[0] === 'block' && ln[1] > 0, ln);
+  // outlines only while the pointer moves (the wallpaper stays put, so the same point is still over something)
+  const pw = await page.evaluate(() => IX.probe('image') || IX.probe('window') || IX.probe('element'));
+  if (pw) {
+    await page.mouse.move(pw.x - 2, pw.y); await page.mouse.move(pw.x, pw.y); await sleep(100);
+    const moving = await page.evaluate(() => document.getElementById('ix-hover').style.display);
+    await sleep(1700);
+    const still = await page.evaluate(() => document.getElementById('ix-hover').style.display);
+    await page.mouse.move(pw.x + 1, pw.y); await sleep(80);
+    const again = await page.evaluate(() => document.getElementById('ix-hover').style.display);
+    check('outline only while the pointer moves (hidden after 1.5 s still, back on the next move)', moving === 'block' && still === 'none' && again === 'block', { moving, still, again });
+  }
+  await page.mouse.move(5, 5);
+}
 
 // ---------------------------------------------------------------- 1. baseline
 await playAt(fit(DUR ? Math.min(100, DUR * 0.3) : 100));
@@ -80,15 +129,28 @@ for (const [key, t] of Object.entries(AT)) {
   await playAt(t);
   const run = { kind: key, at: t };
   m0 = await mark();
-  const pt = await page.evaluate((k, n) => IX.probe(k, n ? { name: new RegExp(n) } : {}), kind, nameRe);
+  let pt = await page.evaluate((k, n) => IX.probe(k, n ? { name: new RegExp(n) } : {}), kind, nameRe);
   if (!pt) { check(`${kind}: something to lift at ${t} s`, false); R.runs.push(run); continue; }
   run.target = pt.name;
   await page.mouse.move(pt.x, pt.y, { steps: 4 }); await sleep(250);
   const hover = await page.evaluate(() => { const h = document.getElementById('ix-hover'); return h.style.display === 'block' ? h.textContent : null; });
   check(`${kind}: hover outline + label`, !!hover, hover);
-  if (kind === 'text') await shot('1-hover-outline');
+  if (kind === 'text') {
+    await shot('1-hover-outline');
+    const cur = await page.evaluate(() => getComputedStyle(document.getElementById('ix-overlay')).cursor);
+    check('system pointer over the film while playing (hand over a liftable thing)', cur === 'pointer', cur);
+    run.hint0 = await page.evaluate(() => !document.getElementById('ix-hint').hidden);
+  }
   const n0 = await page.evaluate(() => IX.cards().length);
-  await page.mouse.click(pt.x, pt.y); await sleep(500);
+  { // the film keeps running: if the thing moved away meanwhile, aim again
+    const now = await page.evaluate((x, y) => IX.hitAt(x, y), pt.x, pt.y);
+    if (!now || now.kind !== kind) { const p2 = await page.evaluate((k, n) => IX.probe(k, n ? { name: new RegExp(n) } : {}), kind, nameRe); if (p2) { pt = p2; await page.mouse.move(pt.x, pt.y); } }
+  }
+  await page.mouse.click(pt.x, pt.y);
+  const inst = await page.evaluate(() => { const cs = document.querySelectorAll('.ix-card'), c = cs[cs.length - 1]; return c && { anims: c.getAnimations().length, transform: getComputedStyle(c).transform, opacity: getComputedStyle(c).opacity }; });
+  check(`${kind}: the card appears instantly (no animation)`, inst && inst.anims === 0 && inst.transform === 'none' && inst.opacity === '1', inst);
+  if (kind === 'text') { const gone = await page.evaluate(() => document.getElementById('ix-hint').hidden); check('the "click anything" hint is gone after the first lift', run.hint0 && gone, { before: run.hint0, hiddenAfter: gone }); delete run.hint0; }
+  await sleep(500);
   const card = await page.evaluate((k) => { const c = IX.cards().pop(); return c && { kind: c.kind, name: c.name, z: c.z, n: IX.cards().length }; });
   check(`${kind}: click lifts a ${kind} card`, card && card.kind === kind && card.n === n0 + 1, card);
   // wait for decoding where needed, then check what is in the card
@@ -118,16 +180,14 @@ for (const [key, t] of Object.entries(AT)) {
   await page.mouse.move(bb.x, bb.y); await page.keyboard.down('Control'); await page.mouse.wheel({ deltaY: -200 }); await page.keyboard.up('Control'); await sleep(100);
   const z1 = await page.evaluate(() => IX.cards().pop().z);
   check(`${kind}: Ctrl+wheel zooms the card`, z1 > z0, { from: +z0.toFixed(3), to: +z1.toFixed(3) });
-  // close with Esc: it animates back
+  // close with Esc: the card simply disappears, at once
   await page.mouse.move(5, 5);
   const before = await page.evaluate(() => document.querySelectorAll('.ix-card').length);
-  await page.keyboard.press('Escape'); await sleep(60);
-  const anim = await page.evaluate(() => { const cs = document.querySelectorAll('.ix-card'), c = cs[cs.length - 1]; return c ? { anims: c.getAnimations().length, transform: getComputedStyle(c).transform } : null; });
-  await sleep(400);
-  const after = await page.evaluate(() => document.querySelectorAll('.ix-card').length);
-  check(`${kind}: Esc closes with an animation back to the film`, anim && anim.anims > 0 && after === before - 1, { anim, before, after });
+  await page.keyboard.press('Escape');
+  const after = await page.evaluate(() => ({ n: document.querySelectorAll('.ix-card').length, anims: document.getAnimations().length }));
+  check(`${kind}: Esc closes instantly (no fly-back)`, after.n === before - 1 && after.anims === 0, { before, after });
   if (kind === 'window') {
-    // ctrl-click several, then pin one and click outside: unpinned ones fly back, the pinned one stays
+    // ctrl-click several, then pin one and click outside: unpinned ones close, the pinned one stays
     const pw = await page.evaluate(() => IX.probe('window'));
     if (pw) { await page.mouse.click(pw.x, pw.y); await sleep(300); }
     const p2 = await page.evaluate(() => IX.probe('text') || IX.probe('button') || IX.probe('image')); // a point not under the card
@@ -136,7 +196,7 @@ for (const [key, t] of Object.entries(AT)) {
       const two = await page.evaluate(() => IX.cards().length);
       check('several cards at once (Ctrl+click keeps the others)', two >= 2, two);
       await page.evaluate(() => document.querySelector('.ix-card [data-a="pin"]').click());
-      await page.mouse.click(4, 4); await sleep(450); // closes only (a click outside never lifts while unpinned cards are open)
+      await page.mouse.click(4, 4); await sleep(50); // closes only (a click outside never lifts while unpinned cards are open)
       const left = await page.evaluate(() => IX.cards().map((c) => c.pinned));
       check('click outside closes the unpinned cards, the pinned one stays', left.length === 1 && left[0] === true, left);
       await page.evaluate(() => document.querySelector('.ix-card [data-a="close"]').click()); await sleep(400);
@@ -160,6 +220,15 @@ const tp = await page.evaluate(() => IX.t());
 await sleep(1500);
 const tp2 = await page.evaluate(() => IX.t());
 check('Space pauses; the clock holds', await page.evaluate(() => IX.paused() && !IX.playing()) && Math.abs(tp2 - tp) < 0.001, { paused: tp, after1500ms: tp2 });
+{ // paused: the film document has the pointer; its own CSS hides the cursor (#screen {cursor: none}), the layer restores it
+  const cur = await page.evaluate(() => {
+    const d = IX.film().document, f = IX.fit(), out = {};
+    for (const [x, y] of [[200, 200], [640, 360], [1000, 500], [100, 650], [700, 120]]) for (const el of d.elementsFromPoint((x - f.ox) / f.s, (y - f.oy) / f.s).slice(0, 5))
+      out[el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (typeof el.className === 'string' && el.className ? '.' + el.className.split(' ')[0] : '')] = getComputedStyle(el).cursor;
+    out['#screen'] = getComputedStyle(d.getElementById('screen')).cursor; return out;
+  });
+  check('paused: system pointer visible over every film element (computed cursor never none)', Object.values(cur).every((c) => c !== 'none'), cur);
+}
 const ft = await page.evaluate(() => IX.probe('text', { step: 12 }));
 if (ft) {
   const span = await page.evaluate((x, y) => {
@@ -199,6 +268,49 @@ check('ArrowRight seeks +5 s and offers "live"', tb.t - ta > 4.5 && tb.live, { f
 await page.evaluate(() => IX.back()); await sleep(300);
 const tc = await page.evaluate(() => IX.t());
 check('"live" returns to where the film would be', Math.abs(tc - (ta + 0.6)) < 0.4, { live: +tc.toFixed(2) });
+
+// ---------------------------------------------------------------- 4. aspect: fit / fill on any window shape
+const SIZES = [[1280, 720], [1080, 1920], [2560, 1080], [1024, 768]];
+R.aspect = [];
+for (const [vw, vh] of SIZES) for (const mode of ['fit', 'fill']) {
+  const tag = `${vw}x${vh} ${mode}`;
+  await page.evaluate(() => { IX.closeAll(); IX.play(); });
+  await page.setViewport({ width: vw, height: vh, deviceScaleFactor: 1 });
+  await page.evaluate((m) => IX.setAspect(m), mode);
+  await playAt(AT.window ?? fit(110));
+  const g = await page.evaluate(() => { const f = IX.fit(), r = document.getElementById('ix-film').getBoundingClientRect(); return { ...f, r: { x: r.left, y: r.top, w: r.width, h: r.height } }; });
+  const eps = 1.5, inside = g.r.x >= -eps && g.r.y >= -eps && g.r.x + g.r.w <= vw + eps && g.r.y + g.r.h <= vh + eps;
+  const covers = g.r.x <= eps && g.r.y <= eps && g.r.x + g.r.w >= vw - eps && g.r.y + g.r.h >= vh - eps;
+  const uniform = Math.abs(g.r.w / g.r.h - g.cw / g.ch) < 0.01;
+  const centred = Math.abs(g.r.x + g.r.w / 2 - vw / 2) < eps && Math.abs(g.r.y + g.r.h / 2 - vh / 2) < eps;
+  check(`${tag}: geometry (${mode === 'fit' ? 'whole film inside, touching two edges' : 'covers the window, centred crop'}, never stretched)`,
+    uniform && centred && (mode === 'fit' ? inside && (Math.abs(g.r.w - vw) < eps || Math.abs(g.r.h - vh) < eps) : covers),
+    { scale: +g.s.toFixed(4), film: { x: Math.round(g.r.x), y: Math.round(g.r.y), w: Math.round(g.r.w), h: Math.round(g.r.h) } });
+  const A0 = { size: tag, scale: +g.s.toFixed(4) };
+  const pt = await page.evaluate(() => IX.probe('window') || IX.probe('text') || IX.probe('image'));
+  if (!pt) { check(`${tag}: something to lift on screen`, false); R.aspect.push(A0); continue; }
+  await page.mouse.move(pt.x - 3, pt.y); await page.mouse.move(pt.x, pt.y, { steps: 2 }); await sleep(120);
+  const hv = await page.evaluate((x, y) => { const h = document.getElementById('ix-hover'), r = h.getBoundingClientRect(); return { on: h.style.display === 'block', contains: x >= r.left - 1 && x <= r.right + 1 && y >= r.top - 1 && y <= r.bottom + 1, label: h.textContent, hit: IX.hitAt(x, y) }; }, pt.x, pt.y);
+  check(`${tag}: hit-test + hover outline land on the thing under the pointer`, hv.on && hv.contains && hv.hit && hv.hit.name === pt.name, { probe: pt.name, hit: hv.hit && hv.hit.name, label: hv.label });
+  await page.mouse.click(pt.x, pt.y); await sleep(250);
+  const lc = await page.evaluate(() => { const c = IX.cards().pop(); return c && { kind: c.kind, name: c.name }; });
+  check(`${tag}: click lifts that thing`, lc && lc.name === pt.name, lc);
+  await page.mouse.move(Math.min(vw - 10, pt.x + 30), Math.max(10, pt.y - 30)); await sleep(80);
+  await page.screenshot({ path: join(REPORT, `aspect-${vw}x${vh}-${mode}.png`) });
+  A0.lifted = lc;
+  // paused: the film's own document takes the pointer through the same transform; a double-click lifts the same thing
+  await page.evaluate(() => { IX.closeAll(); IX.pause(); }); await sleep(150);
+  const pp = await page.evaluate(() => IX.probe('window') || IX.probe('text') || IX.probe('image'));
+  if (pp) {
+    await page.mouse.click(pp.x, pp.y, { count: 2 }); await sleep(250);
+    const dc = await page.evaluate(() => { const c = IX.cards().pop(); return c && c.name; });
+    check(`${tag}: paused double-click lifts the thing under the pointer`, dc === pp.name, { probe: pp.name, lifted: dc });
+    A0.pausedLift = dc;
+  }
+  await page.evaluate(() => { IX.closeAll(); IX.play(); });
+  R.aspect.push(A0);
+}
+await page.evaluate(() => IX.setAspect('fit'));
 
 await browser.close(); await srv.close();
 R.errors = [...new Set(errors)];
