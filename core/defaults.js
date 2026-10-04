@@ -11,6 +11,8 @@ import { store, toast, PROJECT, prefs } from '../js/store.js';
 import { fmt, upperBound } from '../js/timeline.js';
 import { PAGES } from '../tabs/registry.js';
 
+const REPO_URL = 'https://github.com/dazca/ai-videoclip-director';
+
 const WB = () => window.WB;
 const APPROVABLE = /^(shot|use|script|job|character|location|prop):/;
 const song = () => store.song;
@@ -215,7 +217,9 @@ add('Window', [
   } },
   { id: 'window.closePage', title: 'Close page', when: (c) => tabs()?.custom().some(p => p.id === c.tab), run: (c) => tabs().closePage(c.tab) },
   { id: 'window.cheat', title: 'Keyboard cheat sheet', group: 'Help', keys: ['?'], run: () => cheatsheet.toggle() },
-  { id: 'help.readme', title: 'README (how it works, files, API)', group: 'Help', run: () => window.open('README.md', '_blank') },
+  { id: 'help.readme', title: 'README (how it works, files, API)', group: 'Help', run: () => window.open(REPO_URL + '#readme', '_blank', 'noopener') },
+  { id: 'help.source', title: 'Source code on GitHub', group: 'Help', run: () => window.open(REPO_URL, '_blank', 'noopener') },
+  { id: 'help.issue', title: 'Report a problem or suggest a feature', group: 'Help', run: () => window.open(REPO_URL + '/issues/new', '_blank', 'noopener') },
   { id: 'help.menu', title: 'Open the menu bar (keyboard)', group: 'Help', keys: ['F10'], run: () => { tabs().setTopbar(true); openBar('File', { keyboard: true }); } },
   { id: 'help.about', title: 'About the workbench', group: 'Help', run: () => toast(`Director Workbench v2 · project ${PROJECT} · ${commands.list().length} commands`) },
 ]);
@@ -250,7 +254,7 @@ menus.contribute('menubar:Generate', ['gen.regenerate', 'gen.newCostume', 'gen.r
   { label: () => { const it = store.requests?.items || []; const q = it.filter(r => r.status === 'approved' || r.status === 'queued').reduce((s, r) => s + (r.est_cost || 0), 0); const spent = (store.costs?.items || []).reduce((s, x) => s + x.usd, 0); return `spent $${spent.toFixed(0)} + queued $${q.toFixed(2)} / cap $${store.costs?.cap_usd ?? '?'}`; }, disabled: true }]);
 menus.contribute('menubar:Window', [() => tabs().pages().slice(0, 9).map((p, i) => `window.tab${i + 1}`),
   ...PAGE_SUBMENUS(), '-', 'window.newPage', 'window.closePage', '-', 'view.dock', 'view.palette', 'view.topbar']);
-menus.contribute('menubar:Help', ['window.cheat', 'view.palette', 'edit.keybindings', 'help.menu', '-', 'help.readme', 'help.about']);
+menus.contribute('menubar:Help', ['window.cheat', 'view.palette', 'edit.keybindings', 'help.menu', '-', 'help.readme', 'help.source', 'help.issue', 'help.about']);
 
 // ------------------------------------------------------------------ context menus
 menus.contribute('timeline', ['marker.add', 'note.add', 'loop.fromHere', 'edit.selectSection', 'view.zoomSection', 'edit.copyTime']);

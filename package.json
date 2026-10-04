@@ -26,5 +26,13 @@
   },
   "devDependencies": {
     "puppeteer-core": "^25.12.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dazca/ai-videoclip-director.git"
+  },
+  "homepage": "https://github.com/dazca/ai-videoclip-director#readme",
+  "bugs": {
+    "url": "https://github.com/dazca/ai-videoclip-director/issues"
   }
 }
