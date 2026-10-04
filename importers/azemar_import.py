@@ -6,20 +6,26 @@ with that production's private folders next to the workbench; for your own song 
 
 Run with a Python that has numpy + soundfile:
     python importers/azemar_import.py [--no-peaks] [--no-thumbs] [--reset-state]
-    AZEMAR_BASE=<folder that holds project/, resources/, character-lab/>   (default: the workbench's parent folder)
+    AZEMAR_BASE=<folder that holds project/, resources/, character-lab/>   (default: WORKBENCH_MEDIA_BASE, else
+    media_base of workbench.config.json, else the workbench's parent folder, like lib/store.mjs)
 
-Reads project/ and resources/ (read only). Writes only under workbench/data/azemar/.
+Reads project/ and resources/ (read only). Writes only under <data folder>/azemar/ (WORKBENCH_DATA, else data_dir of
+workbench.config.json, else workbench/data), each file via temp file + rename (the server watches the folder).
 approvals.json and notes.json are created only if missing (the page and the agent edit them afterwards);
 pass --reset-state to overwrite them with the initial state.
 All times in the output are integer milliseconds. Media paths starting with "project/" or "resources/" are
 relative to the base folder (served by serve.mjs at /media/<path>); other paths are relative to the data folder.
 """
-import base64, json, os, re, subprocess, sys, datetime
+import base64, json, os, re, shutil, subprocess, sys, time, datetime
 from collections import Counter, OrderedDict
 
 WB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BASE = os.path.abspath(os.environ.get('AZEMAR_BASE') or os.path.dirname(WB))
-OUT = os.path.join(os.environ.get('WORKBENCH_DATA') or os.path.join(WB, 'data'), 'azemar')
+try:   # same configuration and precedence as lib/store.mjs (env vars win; relative paths are relative to the workbench)
+    CFG = json.load(open(os.environ.get('WORKBENCH_CONFIG') or os.path.join(WB, 'workbench.config.json'), encoding='utf-8')) or {}
+except (OSError, ValueError):
+    CFG = {}
+BASE = os.path.abspath(os.environ.get('AZEMAR_BASE') or os.path.join(WB, os.environ.get('WORKBENCH_MEDIA_BASE') or CFG.get('media_base') or '..'))
+OUT = os.path.join(os.path.abspath(os.path.join(WB, os.environ.get('WORKBENCH_DATA') or CFG.get('data_dir') or 'data')), 'azemar')
 FINAL = os.path.join(BASE, 'project', 'audio', 'out', 'final')
 ARGS = set(sys.argv[1:])
 NOW = datetime.datetime.now().isoformat(timespec='seconds')
@@ -31,13 +37,33 @@ def load(p): return json.load(open(p, encoding='utf-8'))
 def rel(p): return os.path.relpath(p, BASE).replace('\\', '/')
 
 
+def warn(*a): print('skip:', *a, file=sys.stderr)
+
+
+def write_atomic(path, text):
+    # temp file + rename; Windows refuses the rename while a reader has the file open: retry, then copy over it
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        f.write(text)
+    for i in range(13):
+        try:
+            os.replace(tmp, path); return
+        except PermissionError:
+            if i == 12:
+                shutil.copyfile(tmp, path); os.remove(tmp); return
+            time.sleep((15 + i * 10) / 1000)
+
+
 def dump(name, obj, only_if_missing=False):
     path = os.path.join(OUT, name)
     if only_if_missing and os.path.exists(path) and '--reset-state' not in ARGS:
         print('keep', name); return
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(obj, f, ensure_ascii=False, indent=1)
+    if isinstance(obj, dict) and 'rev' in obj and os.path.exists(path):
+        # a shared {rev} file being reset: go above the rev an open page holds, so its next save gets a conflict
+        try: obj['rev'] = max(obj['rev'], int(load(path).get('rev') or 0) + 1)
+        except (OSError, ValueError, AttributeError, TypeError): pass
+    write_atomic(path, json.dumps(obj, ensure_ascii=False, indent=1))
     print('wrote', name, os.path.getsize(path), 'B')
 
 
@@ -74,8 +100,9 @@ line_list = []
 for L in lines.values():
     ws = L.pop('words'); v = L.pop('voices')
     # words monotone inside the line
-    for i in range(1, len(ws)):
-        ws[i]['t0'] = max(ws[i]['t0'], ws[i - 1]['t0'])
+    for i in range(len(ws)):
+        if i: ws[i]['t0'] = max(ws[i]['t0'], ws[i - 1]['t0'])
+        ws[i]['t1'] = max(ws[i]['t1'], ws[i]['t0'] + 1)   # keep t0 < t1
     line_list.append({**L, 'voice': v.most_common(1)[0][0], 't0': ws[0]['t0'], 't1': max(x['t1'] for x in ws),
                       'text': ' '.join(x['w'] for x in ws), 'words': ws})
 line_list.sort(key=lambda l: l['t0'])
@@ -153,6 +180,7 @@ for u in sorted(edl, key=lambda u: (u['start'], u['id'])):
     seen.add(k)
     t0, t1 = ms(u['start']), ms(u['end'])
     if t1 - t0 < 1: t1 = t0 + 448  # zero-length uses (a one-frame insert) get one beat so they stay visible
+    if u['id'] not in STILL: warn('EDL clip without a start still in STILL:', u['id']); continue
     uses.append({'id': f"{u['id']}@{t0}", 'clip': u['id'], 't0': t0, 't1': t1, 'in_ms': ms(u['in']), 'take': u['take'],
                  'label': u['label'], 'file': f"project/gen/out/{u['id']}/{u['id']}_{u['take']}.mp4",
                  'start_image': f"project/gen/out/{STILL[u['id']]}/{STILL[u['id']]}_0_0.png", 'location': LOC_OF_STILL[STILL[u['id']]],
@@ -193,10 +221,11 @@ jobs = {}
 for f in ['jobs_v1.json', 'jobs_v2.json']:
     d = load(P('project', 'gen', f))
     for j in (d['jobs'] if isinstance(d, dict) else d): jobs[j['id']] = j
-for d in sorted(os.listdir(P('project', 'gen', 'out'))):
+OUT_DIRS = sorted(d for d in os.listdir(P('project', 'gen', 'out')) if os.path.isdir(P('project', 'gen', 'out', d)))
+for d in OUT_DIRS:
     jp = P('project', 'gen', 'out', d, 'job.json')
     if os.path.exists(jp) and d not in jobs: jobs[d] = load(jp)['job']
-outs = {d: sorted(os.listdir(P('project', 'gen', 'out', d))) for d in os.listdir(P('project', 'gen', 'out'))}
+outs = {d: sorted(os.listdir(P('project', 'gen', 'out', d))) for d in OUT_DIRS}
 
 ledger = []
 for raw in open(P('project', 'LEDGER.md'), encoding='utf-8'):
@@ -395,17 +424,21 @@ def add_media(path, kind, label, entities=(), shot_ids=(), take=None, job=None, 
     return m
 
 out_dir = P('project', 'gen', 'out')
-for d in sorted(os.listdir(out_dir), key=lambda x: (x[0], int(re.sub(r'\D', '', x) or 0), x)):
+for d in sorted(OUT_DIRS, key=lambda x: (x[0], int(re.sub(r'\D', '', x) or 0), x)):
     for f in sorted(os.listdir(os.path.join(out_dir, d))):
         if f.endswith('.json'): continue
         path = f'project/gen/out/{d}/{f}'
         if d.startswith('G'):
-            take = int(re.search(r'_(\d+)\.mp4$', f).group(1)); us = use_by_clip_take.get((d, take), [])
+            m_ = re.search(r'_(\d+)\.mp4$', f)
+            if not m_ or d not in STILL: warn('not a known clip take:', path); continue
+            take = int(m_.group(1)); us = use_by_clip_take.get((d, take), [])
             st_ = STILL[d]
             add_media(path, 'clip', f'{d} take {take}', STILL_CAST.get(st_, []) + [LOC_ID[LOC_OF_STILL[st_]]] + PROPS_OF_STILL.get(st_, []) + (['her'] if d in HER_CLIPS else []),
                       shots_of_uses(us), take, d, d, [u['id'] for u in us], {'start_image': img(st_)})
         elif d.startswith('I') or d.startswith('A') or d.startswith('H0'):
-            take = int(re.search(r'_0_(\d)\.png$', f).group(1))
+            m_ = re.search(r'_0_(\d+)\.png$', f)
+            if not m_: warn('not a still take:', path); continue
+            take = int(m_.group(1))
             if d.startswith('A') or d == 'I14':
                 av = [e for e in STILL_CAST.get(d, []) if e.startswith('avatar')]
                 sh = shots_with_cast(av[0]) if av and take == 0 else []
@@ -445,6 +478,7 @@ for stage, kind in [('a_basics', 'sheet'), ('b_variations', 'variation')]:
     for model in sorted(os.listdir(root)):
         if not os.path.isdir(os.path.join(root, model)) or model == 'runs': continue
         for f in sorted(os.listdir(os.path.join(root, model))):
+            if '__' not in f: warn('not a character-lab output:', f'{stage}/{model}/{f}'); continue
             sub = f.split('__')[1]
             add_media(f'character-lab/outputs/{stage}/{model}/{f}', kind, f'{sub} · {model.replace("fal-", "")} #{f[-5]}', ['dani'], [], None, None, sub,
                       {'model': model.replace('fal-', ''), 'sheet': sub, 'grid': 3 if sub in ('heads3x3', 'expressions', 'expressions_match') else 0})
@@ -497,7 +531,7 @@ for m in MEDIA:
 her_face = 'thumbs/face_her.jpg'
 if '--no-thumbs' not in ARGS and not os.path.exists(os.path.join(OUT, her_face)):
     ff(['-i', P(img('H0')), '-frames:v', '1', '-vf', 'crop=iw*0.36:iw*0.36:iw*0.32:ih*0.035,scale=240:-2', '-q:v', '4', os.path.join(OUT, her_face)])
-with open(probe_path, 'w', encoding='utf-8') as f: json.dump(probe_cache, f)
+write_atomic(probe_path, json.dumps(probe_cache))
 dump('media.json', {'generated': NOW, 'private_rule': 'paths under project/gen/refs/ and character-lab/refs/ are crops of real photos: local only, never exported',
                     'count': len(MEDIA), 'by_kind': dict(Counter(m['kind'] for m in MEDIA)), 'items': MEDIA})
 

@@ -92,6 +92,21 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 
 4. **Snapshot before big edits** (`snapshot_save`); a restore snapshots the current state first, so it is undoable.
 5. Register every new file (`media_add`, or automatically on `request_update` done) so it shows up in the page.
 
+## Security model (local server)
+
+- The server binds **127.0.0.1** only. `--lan`, `WB_HOST` or config `host` opts in to the network; remote clients
+  still cannot write unless `allow_remote_ops` is set, and never get files flagged private.
+- Requests must use an allowed **Host** (localhost / 127.0.0.1 / [::1] on the server's port) and, when sent by a
+  browser, no foreign **Origin** (blocks CSRF and DNS rebinding).
+- Every write (POST) must be `application/json` and carry the per-run token in the **`x-wb-token`** header. The server
+  injects it into `index.html` / `dock.html` as `<meta name="wb-token">` and `window.__WB_TOKEN__`; the page and the
+  MCP server pick it up automatically. Set `WB_TOKEN` to fix it for scripts.
+- Paths with `..`, `.`, backslashes or NUL are rejected; dot-folders are never served; private files (by rule or
+  `private: true` in `media.json`) live under `private/<kind>/` and are never exported or packaged.
+- Approvals are the director's: `approve` (and `shot_update` to approved/locked) need `director_approved: true`, which
+  an agent must only pass when the human explicitly approved in the conversation. A cost cap of **0 blocks all paid
+  requests**. A snapshot restore bumps each file's `rev` (stale pages get 409 instead of overwriting).
+
 ## MCP server
 
 ```

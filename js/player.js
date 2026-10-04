@@ -6,9 +6,22 @@ export class Player {
   constructor(tl) {
     this.tl = tl;
     this.audio = new Audio(); this.audio.preload = 'auto';
-    if (store.song.audio.mix) this.audio.src = mediaUrl(store.song.audio.mix);
     this.t = 0; this.playing = false; this.video = null;
-    this.audio.addEventListener('ended', () => this.pause());
+    this.setSource();
+    // at the song end the media can end before the rAF loop sees t >= loop.t1: wrap a loop here instead of stopping
+    this.audio.addEventListener('ended', () => {
+      const L = this.tl.loop;
+      if (!L || !this.playing) return this.pause();
+      this.audio.currentTime = L.t0 / 1000; this.t = L.t0;
+      this.audio.play().catch(() => this.pause()); this.syncVideo(true);
+    });
+  }
+  // (re)point the audio at the song's mix; a data reload keeps the element (and playback) unless the mix changed
+  setSource() {
+    const src = store.song.audio?.mix ? mediaUrl(store.song.audio.mix) : '';
+    if (src === this.src) return;
+    this.pause(); this.src = src;
+    if (src) this.audio.src = src; else this.audio.removeAttribute('src');
   }
   time() { return this.playing ? this.audio.currentTime * 1000 : this.t; }
   async play() {
@@ -34,7 +47,7 @@ export class Player {
     document.dispatchEvent(new CustomEvent('wb:play', { detail: false }));
   }
   toggle() { this.playing ? this.pause() : this.play(); }
-  stop() { this.pause(); this.audio.src = ''; this.video?.remove(); }
+  stop() { this.pause(); this.audio.removeAttribute('src'); this.src = null; this.video?.remove(); }
   seek(ms) {
     this.t = Math.max(0, Math.min(store.song.duration_ms, Math.round(ms)));
     if (this.playing) this.audio.currentTime = this.t / 1000;

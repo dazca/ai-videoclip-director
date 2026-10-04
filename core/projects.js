@@ -1,9 +1,10 @@
 // Projects and snapshots (server endpoints in serve.mjs), plus the exports (JSON bundle, shot list CSV, storyboard).
 // Projects live in workbench/data/<id>/; snapshots in data/<id>/.snapshots/<timestamp>-<slug>/ (small JSON files only).
-import { store, PROJECT, api, mediaUrl, toast, prefs, isPrivatePath } from '../js/store.js';
+import { store, PROJECT, api, mediaUrl, toast, prefs, isPrivatePath, postJSON, config, esc } from '../js/store.js';
 
+// GET reads directly; every write goes through the page's shared write helper (it carries the write token)
 async function call(path, body) {
-  const r = await fetch(api(path), body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const r = await (body === undefined ? fetch(api(path)) : postJSON(path, body));
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || r.status);
   return j;
@@ -21,6 +22,8 @@ export const projects = {
   recent() { return prefs.get('recentProjects', []).filter(id => id !== PROJECT); },
   remember() { prefs.set('recentProjects', [PROJECT, ...prefs.get('recentProjects', []).filter(x => x !== PROJECT)].slice(0, 8)); },
   open(id) { const u = new URL(location.href); u.searchParams.set('project', id); location.href = u.toString(); },
+  // the server's default project (a bare / redirects there when the page has not read /api/config)
+  openDefault() { if (config.default_project) this.open(config.default_project); else location.href = location.pathname.replace(/[^/]*$/, ''); },
   async create(id) { if (!validId(id)) throw new Error('bad id'); await call('/api/projects/new', { id }); await this.refresh(); return id; },
   async duplicate(to, { from = PROJECT, template = false } = {}) { if (!validId(to)) throw new Error('bad id'); await call('/api/projects/duplicate', { from, to, reset_state: template }); await this.refresh(); return to; },
   async remove(id) { await call('/api/projects/delete', { id }); await this.refresh(); },
@@ -36,7 +39,6 @@ function download(name, text, type = 'application/json') {
 }
 const fmt = (ms) => { const s = Math.max(0, ms) / 1000, m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(3).padStart(6, '0')}`; };
 const csv = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 
 function scrub(v) {
   if (Array.isArray(v)) return v.filter(x => !isPrivatePath(x) && !(x && typeof x === 'object' && (x.private === true || isPrivatePath(x.path)))).map(scrub);
@@ -57,14 +59,17 @@ export const exporter = {
   },
   storyboard() {
     const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    const abs = (p) => { const u = mediaUrl(p); return u.startsWith('/') ? location.origin + u : base + u; };
+    const abs = (p) => { const u = mediaUrl(p); return /^(https?:|data:image\/|blob:)/.test(u) ? u : u.startsWith('/') ? location.origin + u : base + u; };
+    // the page is meant to be printed and shared: private thumbs (crops of real photos) stay out, like in bundleData()
+    const pub = (p) => p && !isPrivatePath(p) && !store.mediaByPath?.[p]?.private;
     const html = `<!doctype html><meta charset="utf-8"><title>${esc(PROJECT)} storyboard</title><style>
       body{font:11px/1.3 "Segoe UI",Arial,sans-serif;margin:8mm;color:#111} h1{font-size:14px;margin:0 0 6px}
       .g{display:grid;grid-template-columns:repeat(4,1fr);gap:6px} .s{break-inside:avoid;border:1px solid #bbb;padding:3px}
       .s img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block;background:#eee} .s b{font-size:11px} .s i{color:#666;font-style:normal}
       @page{size:A4 landscape;margin:8mm}</style>
-      <h1>${esc(PROJECT)} · storyboard · ${store.shots.length} shots · ${new Date().toISOString().slice(0, 10)}</h1><div class="g">${store.shots.map(s => `<div class="s"><img src="${esc(abs(s.thumb))}"><b>${esc(s.id)}</b> <i>${fmt(s.t0)}–${fmt(s.t1)} · ${esc(s.kind)} · ${esc(store.state('shot:' + s.id))}</i><div>${esc(s.title)}</div></div>`).join('')}</div>`;
-    const w = window.open('', '_blank'); if (!w) { download(`${PROJECT}-storyboard.html`, html, 'text/html'); return; }
-    w.document.write(html); w.document.close();
+      <h1>${esc(PROJECT)} · storyboard · ${store.shots.length} shots · ${new Date().toISOString().slice(0, 10)}</h1><div class="g">${store.shots.map(s => `<div class="s">${pub(s.thumb) ? `<img src="${esc(abs(s.thumb))}">` : '<img alt="">'}<b>${esc(s.id)}</b> <i>${fmt(s.t0)}–${fmt(s.t1)} · ${esc(s.kind)} · ${esc(store.state('shot:' + s.id))}</i><div>${esc(s.title)}</div></div>`).join('')}</div>`;
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+    const w = window.open(url, '_blank'); if (!w) { URL.revokeObjectURL(url); download(`${PROJECT}-storyboard.html`, html, 'text/html'); return; }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   },
 };

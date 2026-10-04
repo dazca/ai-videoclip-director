@@ -1,7 +1,7 @@
 // Undo / redo for every page edit (per session; snapshots are the durable history).
 // store.mutate() reports {file, field, label, before, after}; we keep only the keyed differences (approval items,
 // notes by id, requests by id, section overrides), so undo re-applies just those entries through store.mutate on the
-// CURRENT file: an agent's unrelated edits made in between are kept.
+// CURRENT file: an agent's unrelated edits made in between are kept, and an entry it changed since is left alone.
 import { store, toast } from '../js/store.js';
 
 // a keyed view of each writable file's collection
@@ -23,9 +23,15 @@ function diff(field, a, b) {
   }
   return out;
 }
+// an entry is undone / redone only while it still holds what this step left there: if the agent (or another page) has
+// changed it since, re-applying the whole stale copy would drop that work (outputs, actual cost, a resolution)
+const canon = (v) => JSON.stringify(v, (k, x) => x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : x);
+const current = (field, d, key) => { const c = COLL[field].get(d); return COLL[field].map ? c[key] : c.find(x => x.id === key); };
+const unchanged = (field, d, ch, side) => canon(current(field, d, ch.key)) === canon(ch[side === 'before' ? 'after' : 'before']);
 function apply(field, d, changes, side) {
   const C = COLL[field], c = C.get(d);
   for (const ch of changes) {
+    if (!unchanged(field, d, ch, side)) continue;
     const v = ch[side];
     if (C.map) { if (v === undefined) delete c[ch.key]; else c[ch.key] = structuredClone(v); continue; }
     const i = c.findIndex(x => x.id === ch.key);
@@ -48,8 +54,10 @@ export const history = {
   },
   async step(from, to, side, verb) {
     const e = from.pop(); if (!e) { toast(`nothing to ${verb}`); return false; }
-    await store.mutate(e.file, (d) => apply(e.field, d, e.changes, side), { record: false });
-    to.push(e); toast(`${verb}: ${e.label}`);
+    const ok = e.changes.filter(ch => unchanged(e.field, store[e.field], ch, side)), kept = e.changes.length - ok.length;
+    if (!ok.length) { toast(`not ${verb === 'undo' ? 'undone' : 'redone'}: ${e.label} changed since`); document.dispatchEvent(new CustomEvent('wb:history')); return false; }
+    await store.mutate(e.file, (d) => apply(e.field, d, ok, side), { record: false });
+    to.push({ ...e, changes: ok }); toast(`${verb}: ${e.label}${kept ? ` (${kept} item(s) changed since, kept as they are)` : ''}`);
     document.dispatchEvent(new CustomEvent('wb:history'));
     return true;
   },

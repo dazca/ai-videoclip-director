@@ -200,6 +200,21 @@ open pages over SSE; returns `{pages, delivered}` once they ack via `POST /api/u
 `POST /api/reveal {path}` (Explorer at a media file). Writes are temp file + rename with retries (Windows locks);
 small files are served in one read so no handle stays open.
 
+## Security model (local server)
+
+- The server binds **127.0.0.1** only. `--lan`, `WB_HOST` or config `host` opts in to the network; remote clients
+  still cannot write unless `allow_remote_ops` is set, and never get files flagged private.
+- Requests must use an allowed **Host** (localhost / 127.0.0.1 / [::1] on the server's port) and, when sent by a
+  browser, no foreign **Origin** (blocks CSRF and DNS rebinding).
+- Every write (POST) must be `application/json` and carry the per-run token in the **`x-wb-token`** header. The server
+  injects it into `index.html` / `dock.html` as `<meta name="wb-token">` and `window.__WB_TOKEN__`; the page and the
+  MCP server pick it up automatically. Set `WB_TOKEN` to fix it for scripts.
+- Paths with `..`, `.`, backslashes or NUL are rejected; dot-folders are never served; private files (by rule or
+  `private: true` in `media.json`) live under `private/<kind>/` and are never exported or packaged.
+- Approvals are the director's: `approve` (and `shot_update` to approved/locked) need `director_approved: true`, which
+  an agent must only pass when the human explicitly approved in the conversation. A cost cap of **0 blocks all paid
+  requests**. A snapshot restore bumps each file's `rev` (stale pages get 409 instead of overwriting).
+
 ## Export: HTML package of a HyperFrames composition (`exporters/hyperframes-html/`)
 
 The film's composition itself, packaged 1:1 to play in any browser: every file it uses is copied byte-identical in its

@@ -2,6 +2,7 @@
 // Verify an HTML package made by export.mjs against the MP4 render of the same composition.
 //
 //   node verify.mjs <outDir> --against <render.mp4> [--n 12 | --times 4,18.5,...] [--play 6] [--report <dir>]
+//                   [--max-mad 5] [--min-psnr 20]
 //
 // 1. integrity: every asset in manifest.json is present with the recorded sha256
 // 2. serves outDir, opens index.html headless (viewport = composition size, so the player shows it at 1:1), waits for
@@ -12,6 +13,8 @@
 // 4. playback: player.play() for --play s, the clock must advance
 // 5. requests: no 4xx/5xx except files the composition probes that are missing in the source too
 //    (manifest.missing_in_source), no network failures, no page errors
+// Exit code 1 on any failure: integrity, requests, page errors, media still pending at a capture, a frame above
+// --max-mad (% of 255, default 5) or below --min-psnr (dB, default 20). The render's own noise is ~1-2 % / ~30 dB.
 // Writes <report>/verify.json and side-by-side JPEGs (package | render). Default report dir: <outDir>-verify.
 import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -38,12 +41,18 @@ R.integrity = { assets: M.assets.length, problems: bad };
 say(`integrity: ${M.assets.length} assets, ${bad.length ? bad.length + ' problems: ' + bad.slice(0, 5).join(', ') : 'all present with the recorded sha256'}`);
 
 // ---------- render facts and frame times
-const vs = (ffprobe(RENDER).streams || []).find((s) => s.codec_type === 'video');
-const [fa, fb] = vs.r_frame_rate.split('/').map(Number), FPS = fa / fb;
+const MAX_MAD = Number(argv('--max-mad', 5)), MIN_PSNR = Number(argv('--min-psnr', 20));
+if (Number.isNaN(MAX_MAD) || Number.isNaN(MIN_PSNR)) { console.error('--max-mad and --min-psnr take numbers'); process.exit(2); }
+const probe = ffprobe(RENDER);
+const vs = probe && (probe.streams || []).find((s) => s.codec_type === 'video');
+if (!vs) { console.error(`cannot read a video stream from ${RENDER} (ffprobe failed or the file has no video)`); process.exit(2); }
+const [fa, fb] = String(vs.r_frame_rate || '').split('/').map(Number), FPS = fa / (fb || 1);
+if (!(FPS > 0)) { console.error(`cannot read the frame rate of ${RENDER} (r_frame_rate ${vs.r_frame_rate})`); process.exit(2); }
 const startPts = Number(vs.start_time) || 0;
 let times;
 if (argv('--times')) times = argv('--times').split(',').map(Number);
 else { const n = Number(argv('--n', 12)); times = Array.from({ length: n }, (_, k) => D * (k + 0.5) / n); }
+if (!times.length || times.some((t) => !Number.isFinite(t))) { console.error('need at least one frame time: --n >= 1 or --times a,b,c (numbers)'); process.exit(2); }
 const frames = times.map((t) => Math.min(Math.round(t * FPS), Math.floor((D - 1e-3) * FPS)));
 
 // ---------- 2. load
@@ -63,6 +72,7 @@ const tReady = Date.now() - t0;
 await page.waitForFunction(() => document.querySelector('hyperframes-player').assetsReady, { timeout: 300000, polling: 100 }).catch(() => {});
 const tAssets = Date.now() - t0;
 const cf = page.frames().find((f) => f.url().includes('/composition/'));
+if (!cf) { console.error('composition iframe not found in the player'); await browser.close(); await srv.close(); process.exit(1); }
 await page.waitForFunction(() => { try { const w = document.querySelector('hyperframes-player').iframeElement.contentWindow; return !!(w.__hf || w.__player); } catch { return false; } }, { timeout: 20000, polling: 100 }).catch(() => {});
 const rt = await cf.evaluate(() => ({ runtime: !!(window.__hf || window.__player), scripts: [...document.scripts].map((s) => s.src).filter((s) => /hyperframe\.runtime/.test(s)) }));
 R.load = { readyMs: tReady, assetsReadyMs: tAssets, runtimeLoaded: rt.runtime, runtimeScript: rt.scripts.map((s) => s.replace(srv.url, '/')) };
@@ -128,8 +138,13 @@ R.requests = {
 };
 const avg = (k) => res.reduce((s, x) => s + x[k], 0) / res.length;
 R.summary = { frames: res.length, madPctMean: +avg('madPct').toFixed(3), madPctMax: Math.max(...res.map((x) => x.madPct)), psnrMean: +avg('psnr').toFixed(2), psnrMin: Math.min(...res.map((x) => x.psnr)) };
+const badFrames = res.filter((x) => x.madPct > MAX_MAD || x.psnr < MIN_PSNR).map((x) => x.t), pendingFrames = res.filter((x) => x.pendingMedia.length).map((x) => x.t);
+R.thresholds = { maxMadPct: MAX_MAD, minPsnr: MIN_PSNR, failedFrames: badFrames, pendingMediaFrames: pendingFrames };
 writeFileSync(join(REPORT, 'verify.json'), JSON.stringify(R, null, 1));
 say(`frames vs ${RENDER}: ${res.length} times, MAD mean ${R.summary.madPctMean} % (max ${R.summary.madPctMax}), PSNR mean ${R.summary.psnrMean} dB (min ${R.summary.psnrMin})`);
 say(`requests: ${R.requests.total}, failed: ${R.requests.failed.length ? R.requests.failed.join(', ') : 'none'}; expected-missing probes: ${R.requests.expectedMissing.length}; network failures: ${netFails.length || 'none'}; external: ${R.requests.external.length || 'none'}; page errors: ${R.requests.pageErrors.length ? R.requests.pageErrors.slice(0, 3).join(' | ') : 'none'}`);
+if (badFrames.length) say(`FAIL frames above MAD ${MAX_MAD} % or below PSNR ${MIN_PSNR} dB at t = ${badFrames.join(', ')}`);
+if (pendingFrames.length) say(`FAIL media still decoding at the capture at t = ${pendingFrames.join(', ')}`);
 say(`-> ${join(REPORT, 'verify.json')}`);
-process.exitCode = bad.length || R.requests.failed.length || netFails.length || R.requests.external.length ? 1 : 0;
+process.exitCode = bad.length || R.requests.failed.length || netFails.length || R.requests.external.length || R.requests.pageErrors.length ||
+  badFrames.length || pendingFrames.length ? 1 : 0;

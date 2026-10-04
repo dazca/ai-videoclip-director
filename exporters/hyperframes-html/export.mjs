@@ -4,7 +4,7 @@
 // manifest.json.
 //
 //   node export.mjs <compositionDir> <outDir> [--entry index.html] [--sample-fps 10] [--hyperframes <dir>]
-//                   [--hf-version 0.8.114] [--interactive [--project <workbench project dir>]]
+//                   [--hf-version 0.8.114] [--project <workbench project dir>] [--interactive]
 //
 // outDir/
 //   index.html                     wrapper: the official player, full window, its own controls, nothing else
@@ -16,9 +16,14 @@
 // What is collected: static references (HTML src/href/poster/srcset/data-composition-src, inline and linked CSS url()
 // and @import, string literals in loaded scripts that name an existing file) plus every request the composition makes
 // at runtime, recorded while a headless Chrome steps the whole timeline through the player (sample-fps per second).
+//
+// PRIVATE files (the workbench rule: thumbs/priv_*, any private/ folder, the configured private_media regex, and with
+// --project the media flagged private in its media.json) are never packaged: if the composition uses one, the export
+// is refused (exit 3) and nothing is written, because the composition would still reference it.
 import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync, copyFileSync, realpathSync, rmSync, readdirSync } from 'node:fs';
 import { join, resolve, dirname, relative, extname, posix, sep, basename } from 'node:path';
 import { serve, launch, kindOf, mimeOf, sha256, mediaInfo, sleep, argv, flag } from './lib.mjs';
+import { CFG, isPrivate, isMediaRootPath, readJSON } from '../../lib/store.mjs';
 import { addInteractive } from './interactive/build.mjs';
 
 const VALUED = ['--entry', '--sample-fps', '--hyperframes', '--hf-version', '--project'];
@@ -29,9 +34,12 @@ if (!compArg || !outArg) {
 }
 const COMP = resolve(compArg), OUT = resolve(outArg), ENTRY = argv('--entry', 'index.html').replace(/\\/g, '/');
 const SFPS = Number(argv('--sample-fps', 10));
+if (!(SFPS > 0 && SFPS <= 60)) { console.error(`--sample-fps must be a number in (0, 60], got ${argv('--sample-fps')}`); process.exit(2); }
 const CDIR = 'composition', HDIR = '_hyperframes';
 if (!existsSync(join(COMP, ENTRY))) { console.error(`entry not found: ${join(COMP, ENTRY)}`); process.exit(2); }
-if (OUT === COMP) { console.error('outDir must differ from the composition folder'); process.exit(2); }
+const fold = (p) => process.platform === 'win32' ? p.toLowerCase() : p;
+if (fold(OUT) === fold(COMP)) { console.error('outDir must differ from the composition folder'); process.exit(2); }
+if (fold(COMP).startsWith(fold(OUT) + sep)) { console.error('the composition folder is inside outDir: clearing outDir would delete it'); process.exit(2); }
 if (OUT.startsWith(COMP + sep)) console.warn('note: outDir is inside the composition folder; it is never collected (requests only reach the composition through the server).');
 const log = (s) => console.log(s);
 const toPosix = (p) => p.split(sep).join('/');
@@ -89,6 +97,7 @@ const wrapper = `<!doctype html>
 // ---------------------------------------------------------------- 3. static references
 const staticRefs = new Map(); // composition-relative posix path -> Set(of referrers)
 const external = new Set();
+const absoluteRefs = new Set(); // composition-relative paths referenced root-absolute ("/x"): rewritten in the package
 function addRef(fromFileRel, ref, baseRel) {
   if (!ref) return;
   ref = ref.trim().replace(/^['"]|['"]$/g, '');
@@ -99,6 +108,7 @@ function addRef(fromFileRel, ref, baseRel) {
   try { p = decodeURIComponent(clean); } catch { p = clean; }
   p = p.startsWith('/') ? posix.normalize(p.slice(1)) : posix.normalize(posix.join(baseRel, p));
   if (p.startsWith('..')) { (staticRefs.outside ||= new Set()).add(`${fromFileRel}: ${ref}`); return; }
+  if (ref.startsWith('/')) absoluteRefs.add(p);
   if (!staticRefs.has(p)) staticRefs.set(p, new Set());
   staticRefs.get(p).add(fromFileRel + (ref.startsWith('/') ? ' (root-absolute)' : ''));
 }
@@ -135,11 +145,20 @@ function scanJsLiterals(rel, src, base) {
     if (!p.startsWith('..') && existsSync(join(COMP, p)) && statSync(join(COMP, p)).isFile()) addRef(rel + ' (js literal)', lit, base);
   }
 }
-const entryBase = posix.dirname(ENTRY) === '.' ? '' : posix.dirname(ENTRY);
+const dirOf = (rel) => posix.dirname(rel) === '.' ? '' : posix.dirname(rel);
+const entryBase = dirOf(ENTRY);
+// the directory a file's relative URLs resolve against: its own for HTML and CSS; for scripts and data, the document
+// that loads them (the entry when it is one of the loaders or nothing static loads it)
+function docBaseOf(rel) {
+  const k = kindOf(rel);
+  if (k === 'html' || k === 'css') return dirOf(rel);
+  const docs = [...(staticRefs.get(rel) || [])].map((r) => r.replace(/( \((root-absolute|js literal)\))+$/, '')).filter((r) => kindOf(r) === 'html');
+  return docs.length && !docs.includes(ENTRY) ? dirOf(docs.sort()[0]) : entryBase;
+}
 scanFile(ENTRY, entryBase);
 for (let changed = true; changed;) { // follow css/js/html found statically
   changed = false;
-  for (const p of [...staticRefs.keys()]) if (!scanned.has(p) && ['css', 'script', 'html'].includes(kindOf(p))) { scanFile(p, kindOf(p) === 'html' ? (posix.dirname(p) === '.' ? '' : posix.dirname(p)) : entryBase); changed = true; }
+  for (const p of [...staticRefs.keys()]) if (!scanned.has(p) && ['css', 'script', 'html'].includes(kindOf(p))) { scanFile(p, docBaseOf(p)); changed = true; }
 }
 log(`static scan: ${staticRefs.size} references (${[...staticRefs.keys()].filter((p) => existsSync(join(COMP, p))).length} exist), ${external.size} external URLs`);
 
@@ -271,7 +290,6 @@ const urlToRel = (u) => {
 };
 const files = new Map(); // rel -> {sources:Set, absolute:bool, requests:n, status}
 const missing = new Map(); // rel -> {statuses, method}
-const absoluteRefs = new Set();
 const touch = (rel, src) => { if (!files.has(rel)) files.set(rel, { sources: new Set(), requests: 0, bytesServed: 0 }); files.get(rel).sources.add(src); return files.get(rel); };
 for (const r of srv.log) {
   let p = r.path.replace(/^\//, '');
@@ -296,7 +314,33 @@ files.delete(''); // never the folder itself
 for (const p of [...files.keys()]) if (!existsSync(join(COMP, p)) || !statSync(join(COMP, p)).isFile()) files.delete(p);
 for (const p of missing.keys()) if (files.has(p)) missing.delete(p); // a later request succeeded
 
-// ---------------------------------------------------------------- 6. copy byte-identical
+// ---------------------------------------------------------------- 6. PRIVATE files: never packaged
+// A path is tested as the composition names it, and base-relative (media base) both as reached and after following
+// junctions/symlinks, so the configured base-relative private_media regex applies too. With --project, files flagged
+// private in that project's media.json are matched by their real path.
+const baseRel = (absPath) => { const r = toPosix(relative(CFG.mediaBase, absPath)); return r.startsWith('..') ? null : r; };
+const privateReal = new Set();
+if (argv('--project')) {
+  const PD = resolve(argv('--project')), media = readJSON(join(PD, 'media.json'), {}) || {};
+  for (const m of media.items || []) if (m && typeof m.path === 'string' && (m.private === true || m.status === 'private' || isPrivate(m.path))) {
+    const f = isMediaRootPath(m.path) ? resolve(CFG.mediaBase, m.path) : resolve(PD, m.path);
+    try { privateReal.add(fold(realpathSync(f))); } catch { privateReal.add(fold(f)); }
+  }
+}
+const privateUsed = [];
+for (const rel of [...files.keys()].sort()) {
+  const src = join(COMP, rel); let real = src; try { real = realpathSync(src); } catch {}
+  if (isPrivate(rel) || isPrivate(baseRel(src)) || isPrivate(baseRel(real)) || privateReal.has(fold(real)) || privateReal.has(fold(resolve(src)))) privateUsed.push(rel);
+}
+if (privateUsed.length) {
+  console.error(`refusing to export: the composition uses ${privateUsed.length} PRIVATE file(s) (local only, never exported):`);
+  for (const p of privateUsed.slice(0, 20)) console.error(`  ${p}`);
+  if (privateUsed.length > 20) console.error(`  ... and ${privateUsed.length - 20} more`);
+  console.error('replace them in the composition (or move them out of the private rule) and export again; nothing was written.');
+  process.exit(3);
+}
+
+// ---------------------------------------------------------------- 7. copy byte-identical
 if (existsSync(OUT)) {
   // only ever clear a previous export of ours
   const prev = join(OUT, 'manifest.json');
@@ -327,13 +371,13 @@ for (const rel of [...files.keys()].sort()) {
 for (const p of absoluteRefs) {
   for (const a of assets.filter((x) => ['html', 'css', 'script', 'data'].includes(x.kind))) {
     const f = join(OUT, a.path), s = readFileSync(f, 'utf8');
-    const fileDir = posix.dirname(a.path.slice(CDIR.length + 1)), base = a.kind === 'css' ? fileDir : entryBase;
-    const relTo = posix.relative(base === '.' ? '' : base, p) || p;
+    const base = docBaseOf(a.path.slice(CDIR.length + 1));
+    const relTo = posix.relative(base, p) || p;
     const re = new RegExp(`(["'(])/${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(["')])`, 'g');
     const n = (s.match(re) || []).length;
     if (n) {
-      writeFileSync(f, s.replace(re, `$1${relTo}$2`));
-      const h = sha256(f); a.rewritten = { original_sha256: a.sha256 }; a.sha256 = h; a.bytes = statSync(f).size;
+      writeFileSync(f, s.replace(re, (m, q1, q2) => q1 + relTo + q2));
+      const h = sha256(f); a.rewritten ||= { original_sha256: a.sha256 }; a.sha256 = h; a.bytes = statSync(f).size;
       rewrites.push({ file: a.path, what: `root-absolute reference x${n}`, from: `/${p}`, to: relTo });
     }
   }
@@ -376,7 +420,7 @@ function usageOf(rel, a) {
   return u;
 }
 
-// ---------------------------------------------------------------- 7. manifest
+// ---------------------------------------------------------------- 8. manifest
 const totals = {};
 for (const a of assets) { const t = totals[a.kind] ||= { files: 0, bytes: 0 }; t.files++; t.bytes += a.bytes; }
 const pkgBytes = (p) => statSync(join(OUT, p)).size;

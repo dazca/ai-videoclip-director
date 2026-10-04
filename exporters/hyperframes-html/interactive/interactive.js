@@ -36,12 +36,18 @@
   // ------------------------------------------------------------------ clock
   // The film's clock is its master <audio> (standalone mode). Compositions without a standalone driver are driven
   // here: the HyperFrames timeline is seeked to the audio time each frame (see drive).
+  // Without an <audio> element a wall clock (performance.now) stands in for it.
+  const wall = { t: 0, since: null };
+  const wallT = () => { const t = wall.since === null ? wall.t : wall.t + (performance.now() - wall.since) / 1000; return DUR ? Math.min(t, DUR) : t; };
   const clock = {
-    t: () => A ? A.currentTime : 0,
-    playing: () => !!A && !A.paused && !A.ended,
-    play: () => A && A.play().catch(() => setMode(true)),
-    pause: () => A && A.pause(),
-    seek: (t) => { if (A) A.currentTime = Math.max(0, Math.min(DUR - 0.01, t)); },
+    t: () => A ? A.currentTime : wallT(),
+    playing: () => A ? !A.paused && !A.ended : wall.since !== null && !(DUR && wallT() >= DUR),
+    play: () => { if (A) return A.play().catch(() => setMode(true)); if (DUR && wallT() >= DUR) { wall.t = 0; wall.since = null; } if (wall.since === null) wall.since = performance.now(); },
+    pause: () => { if (A) return A.pause(); wall.t = wallT(); wall.since = null; },
+    seek: (t) => {
+      t = Math.max(0, Math.min(DUR - 0.01, t));
+      if (A) A.currentTime = t; else { wall.t = t; if (wall.since !== null) wall.since = performance.now(); }
+    },
   };
   const fmt = (t) => { t = Math.max(0, t || 0); const m = Math.floor(t / 60), s = t - m * 60; return m + ':' + (s < 10 ? '0' : '') + s.toFixed(3); };
   const fmtShort = (t) => fmt(t).slice(0, -2);
@@ -58,8 +64,12 @@
   addEventListener('resize', layout);
 
   // ------------------------------------------------------------------ boot
+  // the iframe precedes this script, so the film may have finished loading before it runs: boot now in that case
+  let booted = false;
   film.addEventListener('load', boot);
+  try { const d = film.contentDocument; if (d && d.readyState === 'complete' && d.URL !== 'about:blank') setTimeout(boot); } catch (e) { setTimeout(boot); }
   async function boot() {
+    if (booted) return; booted = true;
     try { W = film.contentWindow; doc = W.document; void doc.body; } catch (e) {
       return fatal('The interactive layer needs the package served over http (same origin).<br>node serve.mjs &lt;package&gt; and open /interactive.html');
     }
@@ -153,8 +163,10 @@
   function driveFilm(t, playing) {
     try { drive.seek(t, false); } catch (e) {}
     for (const v of doc.querySelectorAll('video[data-start]')) {
-      const s = +v.getAttribute('data-start'), d = +v.getAttribute('data-duration') || 1e9, m = (+v.getAttribute('data-media-start') || 0) + (t - s);
+      const rate = +v.getAttribute('data-playback-rate') || 1;
+      const s = +v.getAttribute('data-start'), d = +v.getAttribute('data-duration') || 1e9, m = (+v.getAttribute('data-media-start') || 0) + (t - s) * rate;
       if (t < s || t >= s + d) { if (!v.paused) v.pause(); continue; }
+      if (v.playbackRate !== rate) v.playbackRate = rate;
       if (Math.abs(v.currentTime - m) > 0.15) v.currentTime = m;
       if (playing && v.paused) v.play().catch(() => {}); else if (!playing && !v.paused) v.pause();
     }
@@ -445,10 +457,11 @@
     lines.push(`<b>${fmt(t)}</b> song time` + (shotId ? ` · scene <b>${esc(shotId)}</b>` : '') + ` · ${esc(h.kind)} <b>${esc(nameOf(h))}</b>`);
     const tagLine = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/).slice(0, 3).join('.') : '');
     const src = h.src ? rel(h.src) : '';
-    let fileLine = 'element ' + tagLine;
+    let fileLine = 'element ' + esc(tagLine);
     if (src) {
       fileLine = 'file <b>' + esc(src) + '</b>';
-      const a = manifest && manifest.assets && manifest.assets.find((x) => x.path === 'composition/' + src);
+      const pkg = pkgRel(h.src); // manifest paths are relative to the package root, not to the entry's folder
+      const a = manifest && manifest.assets && manifest.assets.find((x) => x.path === pkg);
       if (a) fileLine += ' · ' + [a.width && a.height ? a.width + '×' + a.height : '', a.codec, a.duration ? a.duration + ' s' : '', (a.bytes / 1048576).toFixed(1) + ' MB'].filter(Boolean).join(' · ');
     }
     lines.push(fileLine);
@@ -472,7 +485,8 @@
     }
     return lines.map((l) => '<div>' + l + '</div>').join('');
   }
-  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const pkgRel = (u) => { try { const b = new URL('.', location.href).href, a = new URL(u, doc.baseURI).href; return a.startsWith(b) ? decodeURIComponent(a.slice(b.length).split(/[?#]/)[0]) : null; } catch (e) { return null; } };
 
   // ------------------------------------------------------------------ cards
   function alive(el) {

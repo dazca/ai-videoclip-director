@@ -2,9 +2,15 @@
 // Writable (shared with the agent, each {rev, ...}): approvals.json, notes.json, requests.json, overrides.json, settings.json.
 // Every page edit goes through store.mutate(), which records an undo step (core/history.js) unless {record:false}.
 // the server redirects a bare / to ?project=<its default project>
-export const PROJECT = new URLSearchParams(location.search).get('project') || 'demo';
+// same id rule as the server (lib/store.mjs validId); anything else falls back to the demo
+const QP = new URLSearchParams(location.search).get('project');
+export const PROJECT = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/.test(QP || '') ? QP : 'demo';
 export const DATA = `data/${PROJECT}/`;
 export const api = (p) => `${p}${p.includes('?') ? '&' : '?'}project=${encodeURIComponent(PROJECT)}`;
+// HTML escape for every project value put into innerHTML (attributes included)
+export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+// every page write to the server goes through here (the one place to attach auth headers)
+export const postJSON = (path, body) => fetch(api(path), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
 // server config (GET /api/config, read at boot): the media roots and the PRIVATE path rule of this machine
 export const config = { media_roots: [], default_project: null };
@@ -12,9 +18,10 @@ export const config = { media_roots: [], default_project: null };
 // relative to the project's data folder
 export function mediaUrl(p) {
   if (!p) return '';
-  if (config.media_roots.some(r => p.startsWith(r))) return '/media/' + p.split('/').map(encodeURIComponent).join('/');
+  const enc = (s) => s.split('/').map(encodeURIComponent).join('/');
+  if (config.media_roots.some(r => p === r || p.startsWith(r.replace(/\/?$/, '/')))) return '/media/' + enc(p);
   if (/^(https?:|data:|blob:|\/)/.test(p)) return p;
-  return DATA + p;
+  return DATA + enc(p);
 }
 
 async function getJSON(name, dflt) {
@@ -28,7 +35,7 @@ function b64ToInt8(s) { const bin = atob(s); const a = new Int8Array(bin.length)
 
 // file -> store field, and the default content when the file does not exist yet
 export const WRITABLE = {
-  'approvals.json': ['approvals', { rev: 0, states: ['draft', 'review', 'changes', 'approved', 'locked'], items: {} }],
+  'approvals.json': ['approvals', { rev: 0, states: ['draft', 'review', 'changes', 'approved', 'locked', 'archived'], items: {} }],
   'notes.json': ['notes', { rev: 0, notes: [] }],
   'requests.json': ['requests', { rev: 0, items: [] }],
   'overrides.json': ['overrides', { rev: 0, sections: {} }],
@@ -57,7 +64,10 @@ export const store = {
     const [song, events, energy, script, shots, costs, index] = await Promise.all(
       ['song.json', 'events.json', 'energy.json', 'script.json', 'shots.json', 'costs.json', 'entities/index.json'].map(f => getJSON(f)));
     Object.assign(this, { song, events, energy, script, shots: shots.shots, uses: shots.uses, costs });
-    await Promise.all(Object.entries(WRITABLE).map(async ([f, [field, d]]) => { this[field] = await getJSON(f, d); }));
+    await Promise.all(Object.entries(WRITABLE).map(async ([f, [field, d]]) => {
+      const v = await getJSON(f, d);
+      if (this._saving[f]) this._missed.add(f); else this[field] = v;   // a save is in flight: re-read it after
+    }));
     this.entities = await Promise.all(index.map(e => getJSON(e.path)));
     this.entityById = Object.fromEntries(this.entities.map(e => [e.id, e]));
     this.media = (await getJSON('media.json', { items: [] })).items || [];
@@ -80,14 +90,17 @@ export const store = {
     if (files.some(f => FULL.test(f))) { await this.loadAll(); this.emit('all'); return; }
     for (const file of files) {
       // our own saves come back here too: apply only when the file differs from what the page has (agent edit, restore)
-      if (WRITABLE[file]) { const [field, d] = WRITABLE[file]; const v = await getJSON(file, d); if (JSON.stringify(v) !== JSON.stringify(this[field])) { this[field] = v; this.emit(field); } }
+      // while a page save of that file is in flight the fetched copy may predate it: re-read once the save settles
+      if (WRITABLE[file]) { const [field, d] = WRITABLE[file]; const v = await getJSON(file, d); if (this._saving[file]) { this._missed.add(file); continue; } if (JSON.stringify(v) !== JSON.stringify(this[field])) { this[field] = v; this.emit(field); } }
       else if (/^peaks\//.test(file)) { const id = file.slice(6, -5); delete this.peaks[id]; await this.loadPeaks([id]); this.emit('peaks'); }
     }
   },
   listen() {
     try {
       const es = new EventSource(api('/api/events'));
-      let pending = new Set(), timer = 0;
+      let pending = new Set(), timer = 0, opened = false;
+      // after a reconnect (server restart) re-read everything: changes made while disconnected sent no event
+      es.onopen = () => { if (opened) this.reload(['song.json']); opened = true; };
       es.onmessage = (ev) => {
         const { project, file, ui } = JSON.parse(ev.data);
         if (project !== PROJECT && project !== '*') return;
@@ -106,10 +119,11 @@ export const store = {
       for (const key of keys) d.items[key] = { ...(d.items[key] || {}), state, by: 'director', at: nowIso(), ...(comment ? { comment } : {}) };
     }, { label: `${state} ${keys.length === 1 ? keys[0] : keys.length + ' items'}` });
   },
+  // click on a chip: draft/review -> approved -> changes -> draft; locked (or an unknown state) does not move
   cycle(key) {
-    const order = ['draft', 'approved', 'changes'];
-    const s = this.state(key);
-    return this.setState(key, order[(order.indexOf(s) + 1) % order.length] || 'approved');
+    const next = { draft: 'approved', review: 'approved', approved: 'changes', changes: 'draft' }[this.state(key)];
+    if (!next) { toast(`${key} is ${this.state(key)}: not changed by a click`); return Promise.resolve(); }
+    return this.setState(key, next);
   },
   // ---- notes
   addNote(t, text, line_id, extra) {
@@ -146,17 +160,28 @@ export const store = {
     const base = before.rev || 0;
     this[field] = local; this.emit(field);
     if (record) this.onMutate?.({ file, field, label, before, after: local });
+    this._saving[file] = (this._saving[file] || 0) + 1;
+    let saved = local;
     try {
-      let r = await fetch(api('/api/save/' + file), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ base_rev: base, data: local }) });
+      let r = await postJSON('/api/save/' + file, { base_rev: base, data: local });
       if (r.status === 409) {
-        const cur = await r.json(); fn(cur);
-        r = await fetch(api('/api/save/' + file), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ base_rev: cur.rev || 0, data: cur }) });
-        this[field] = cur;
+        const server = await r.json(), cur = structuredClone(server); fn(cur);
+        r = await postJSON('/api/save/' + file, { base_rev: cur.rev || 0, data: cur });
+        this[field] = r.ok ? cur : server;      // a failed retry shows the server copy, not the unsaved change
+        saved = cur;
       }
-      if (r.ok) { this[field].rev = (await r.json()).rev; } else throw new Error(await r.text());
-    } catch (e) { console.warn('save failed', file, e); toast(`not saved: ${file} (${e.message || e})`); }
-    finally { this.emit(field); }
+      if (!r.ok) throw new Error(await r.text());
+      const rev = (await r.json()).rev;
+      // adopt the new rev only on the object that was saved; anything else here (a later edit, a reload) is re-read
+      if (this[field] === saved) saved.rev = rev; else this._missed.add(file);
+    } catch (e) { console.warn('save failed', file, e); toast(`not saved: ${file} (${e.message || e})`); this._missed.add(file); }
+    finally {
+      if (!--this._saving[file] && this._missed.delete(file)) this.reload([file]);
+      this.emit(field);
+    }
   },
+  _saving: {},            // file -> saves in flight
+  _missed: new Set(),     // files whose reload was skipped (or whose save failed) while a save was in flight
 };
 
 export function toast(msg) {

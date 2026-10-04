@@ -61,10 +61,10 @@ export function serve(mounts, port = 0) {
     if (range && st.size > 0) {
       let a = range[1] ? +range[1] : st.size - +range[2], b = range[1] && range[2] ? Math.min(+range[2], st.size - 1) : st.size - 1;
       if (a < 0) a = 0;
-      if (a >= st.size) { rec.status = 416; res.writeHead(416, { 'Content-Range': `bytes */${st.size}` }).end(); return; }
+      if (Number.isNaN(a) || Number.isNaN(b) || a > b || a >= st.size) { rec.status = 416; res.writeHead(416, { 'Content-Range': `bytes */${st.size}` }).end(); return; }
       rec.status = 206; rec.bytes = b - a + 1;
       res.writeHead(206, { ...H, 'Content-Range': `bytes ${a}-${b}/${st.size}`, 'Content-Length': b - a + 1 });
-      createReadStream(file, { start: a, end: b }).on('error', () => res.destroy()).pipe(res);
+      try { createReadStream(file, { start: a, end: b }).on('error', () => res.destroy()).pipe(res); } catch { res.destroy(); }
     } else {
       rec.status = 200; rec.bytes = st.size;
       res.writeHead(200, { ...H, 'Content-Length': st.size });

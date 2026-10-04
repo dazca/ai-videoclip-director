@@ -84,7 +84,7 @@ add('File', [
   { id: 'file.exportCsv', title: 'Export shot list CSV', run: () => exporter.shotList() },
   { id: 'file.exportBoard', title: 'Export storyboard page (print to PDF)', run: () => exporter.storyboard() },
   { id: 'file.settings', title: 'Project settings', hidden: true, run: () => tabs().show('settings') },
-  { id: 'file.delete', title: 'Delete a project…', run: async () => { await projects.refresh(); const id = await ui.pick({ title: 'Delete which project? (cannot be undone; the default project is protected)', items: projects.list.filter(p => !p.default).map(p => ({ label: p.id, detail: p.title, value: p.id })) }); if (!id) return; if (!(await ui.confirm(`Delete ${id} and all its snapshots?`))) return; try { await projects.remove(id); toast('deleted ' + id); if (id === PROJECT) projects.open('azemar'); } catch (e) { toast('not deleted: ' + e.message); } } },
+  { id: 'file.delete', title: 'Delete a project…', run: async () => { await projects.refresh(); const id = await ui.pick({ title: 'Delete which project? (cannot be undone; the default project is protected)', items: projects.list.filter(p => !p.default).map(p => ({ label: p.id, detail: p.title, value: p.id })) }); if (!id) return; if (!(await ui.confirm(`Delete ${id} and all its snapshots?`))) return; try { await projects.remove(id); toast('deleted ' + id); if (id === PROJECT) projects.openDefault(); } catch (e) { toast('not deleted: ' + e.message); } } },
 ]);
 
 add('Edit', [
@@ -278,7 +278,9 @@ export function contextArgs(target, clientX, clientY) {
   const head = target.closest('.tl .head');
   if (head && tl) { names.push('header'); args.col = tl.byId[head.dataset.col]; return { names, args }; }
   const ent = target.closest('[data-ent]');
-  if (ent) { names.push('entity'); args.entity = store.entityById[ent.dataset.ent]; args.item = `${args.entity.kind}:${args.entity.id}`; return { names, args }; }
+  // the DOM can briefly hold ids a live reload just removed: an unknown entity / line / clip falls back to the generic menus
+  const entity = ent && store.entityById?.[ent.dataset.ent];
+  if (entity) { names.push('entity'); args.entity = entity; args.item = `${entity.kind}:${entity.id}`; return { names, args }; }
   if (tl && target.closest('.tl .sheet')) {
     const colEl = target.closest('.col'); args.col = colEl ? tl.byId[colEl.dataset.col] : tl.colAtClientX(clientX);
     args.t = tl.timeAtClientY(clientY);
@@ -287,11 +289,16 @@ export function contextArgs(target, clientX, clientY) {
     if (cast) { names.push('cast'); args.entity = store.entityById[cast.dataset.id]; args.shot = shotAt(args.t); args.item = `character:${cast.dataset.id}`; }
     else if (selEl) {
       const [k, id] = [args.item.slice(0, args.item.indexOf(':')), args.item.slice(args.item.indexOf(':') + 1)];
-      if (k === 'line') { names.push('lyric'); args.line = song().lines.find(l => l.id === id); const w = target.closest('span[data-t]'); args.t = w ? Number(w.dataset.t) : args.line.t0; }
-      if (k === 'section') { names.push('section'); args.section = song().sections.find(s => s.id === id); }
-      if (k === 'shot') { names.push('shot'); args.shot = store.shots.find(s => s.id === id); }
-      if (k === 'use') { names.push('clip'); args.use = store.uses.find(u => u.id === id); args.shot = shotOfUse(args.use); }
-      if (k === 'note') { names.push('note'); args.note = store.notes.notes.find(n => n.id === id); }
+      const line = k === 'line' && song().lines.find(l => l.id === id);
+      if (line) { names.push('lyric'); args.line = line; const w = target.closest('span[data-t]'); args.t = w ? Number(w.dataset.t) : line.t0; }
+      const section = k === 'section' && song().sections.find(s => s.id === id);
+      if (section) { names.push('section'); args.section = section; }
+      const shot = k === 'shot' && store.shots.find(s => s.id === id);
+      if (shot) { names.push('shot'); args.shot = shot; }
+      const use = k === 'use' && store.uses.find(u => u.id === id);
+      if (use) { names.push('clip'); args.use = use; args.shot = shotOfUse(use); }
+      const note = k === 'note' && store.notes.notes.find(n => n.id === id);
+      if (note) { names.push('note'); args.note = note; }
     }
     if (args.col && (args.col.def.kind === 'lane' || args.col.strip)) names.push('ruler');
     names.push('timeline');

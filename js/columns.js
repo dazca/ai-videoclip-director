@@ -2,18 +2,19 @@
 // A text column has build(c) -> c.items [{t0, t1?, el}], optional prepare/measure/tick/act/refresh/dblclick.
 // A lane column has draw(c, env). Adding a column = adding one object here.
 import { el, fmt, secColor, upperBound } from './timeline.js';
-import { mediaUrl } from './store.js';
+import { mediaUrl, esc } from './store.js';
 
 const LH = 14;              // lyric visual line height (px), 12 px type
 const RAMP = Array.from({ length: 32 }, (_, i) => { const a = i / 31; const l = 14 + a * 70; return `hsl(210, ${12 + a * 20}%, ${l}%)`; });
 const STEM_COLORS = { vocals: '#9db7d6', backing: '#b7a6d9', bass: '#93c2a2', drums: '#cfae80' };
 const ICON = { stop: '■', drop: '▼', count: '#', silence: '∅', beat: '♩', spoken: '“', word: 'w', end: '⏹', line: '·', section: '§' };
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+const num = (v, d = 0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
+const cssColor = (c, d = '#888') => /^#[0-9a-f]{3,8}$/i.test(c || '') ? c : d;
 
 export function makeColumns(tl, store) {
   const song = store.song, dur = song.duration_ms;
   const st = (k) => store.state(k);
-  const chip = (k, label) => `<span class="chip s-${st(k)}" data-act="st" data-k="${esc(k)}" title="${esc(k)}: ${st(k)} (click: approve / needs changes / draft)">${esc(label)}</span>`;
+  const chip = (k, label) => `<span class="chip s-${esc(st(k))}" data-act="st" data-k="${esc(k)}" title="${esc(k)}: ${esc(st(k))} (click: approve / needs changes / draft)">${esc(label)}</span>`;
   const seekAct = (c, a) => { if (a.dataset.act === 'seek') tl.seek(Number(a.dataset.t)); if (a.dataset.act === 'st') store.cycle(a.dataset.k); };
   const refreshChips = (c, what) => { if (what !== 'approvals') return false; for (const ch of c.body.querySelectorAll('.chip[data-k], .st[data-k]')) { const s = st(ch.dataset.k); ch.className = ch.className.replace(/\bs-\w+/, 's-' + s); ch.title = `${ch.dataset.k}: ${s}`; } return false; };
   const shotSpans = store.shots.map(s => ({ t0: s.t0, t1: s.t1, s }));
@@ -55,7 +56,7 @@ export function makeColumns(tl, store) {
     // ---------------------------------------------------------------- sections
     { id: 'sections', title: 'section', kind: 'text', w: 54, mode: 'follow', stripColor: '#888',
       build(c) {
-        addItems(c, song.sections, (s) => `<div class="sec" data-act="loop" data-sel="section:${s.id}" data-t0="${s.t0}" data-t1="${s.t1}" title="${esc(store.secLabel(s))} · click: loop this section · ${esc(s.transitions || '')}" style="--sc:${secColor(s.id, 0.9)};--sb:${secColor(s.id, 0.22)}"><b>${esc(store.secLabel(s))}</b><i>E${s.energy} · W${s.world_pct ?? '?'} · OL ${esc(s.overload_text ?? '')}</i></div>`);
+        addItems(c, song.sections, (s) => `<div class="sec" data-act="loop" data-sel="section:${esc(s.id)}" data-t0="${num(s.t0)}" data-t1="${num(s.t1)}" title="${esc(store.secLabel(s))} · click: loop this section · ${esc(s.transitions || '')}" style="--sc:${esc(secColor(s.id, 0.9))};--sb:${esc(secColor(s.id, 0.22))}"><b>${esc(store.secLabel(s))}</b><i>E${esc(s.energy)} · W${esc(s.world_pct ?? '?')} · OL ${esc(s.overload_text ?? '')}</i></div>`);
       },
       act(c, a) {
         const t0 = Number(a.dataset.t0), t1 = Number(a.dataset.t1);
@@ -85,7 +86,7 @@ export function makeColumns(tl, store) {
           groups.forEach((g, gi) => {
             const e = el('div', `it vl v-${L.voice}${gi === 0 ? ' l0' : ''}${gi === groups.length - 1 ? ' ll' : ''}`);
             e.dataset.line = L.id; e.dataset.sel = 'line:' + L.id;
-            e.innerHTML = g.map(i => { const wd = L.words[i]; return `<span data-act="seek" data-t="${wd.t0}"${wd.p < 0.2 ? ' class="lo"' : ''}>${esc(wd.w)}</span>`; }).join(' ');
+            e.innerHTML = g.map(i => { const wd = L.words[i]; return `<span data-act="seek" data-t="${num(wd.t0)}"${wd.p < 0.2 ? ' class="lo"' : ''}>${esc(wd.w)}</span>`; }).join(' ');
             frag.appendChild(e);
             const t0 = L.words[g[0]].t0;
             c.items.push({ t0, el: e, line: L, first: gi === 0 });
@@ -115,7 +116,7 @@ export function makeColumns(tl, store) {
       build(c) {
         const groups = [];
         for (const e of store.events) { if (e.kind === 'section' || e.kind === 'line') continue; const g = groups[groups.length - 1]; if (g && Math.abs(g.t0 - e.t) < 2) g.list.push(e); else groups.push({ t0: e.t, list: [e] }); }
-        addItems(c, groups, (g) => g.list.map(e => `<div class="ev k-${e.kind}" data-act="seek" data-t="${e.t}" title="${fmt(e.t, true)} ${esc(e.kind)}: ${esc(e.note)}"><i>${ICON[e.kind] || '·'}</i>${esc(e.note || e.id)}</div>`).join(''));
+        addItems(c, groups, (g) => g.list.map(e => `<div class="ev k-${esc(e.kind)}" data-act="seek" data-t="${num(e.t)}" title="${fmt(e.t, true)} ${esc(e.kind)}: ${esc(e.note)}"><i>${ICON[e.kind] || '·'}</i>${esc(e.note || e.id)}</div>`).join(''));
       }, act: seekAct },
 
     // ---------------------------------------------------------------- waveform (mix)
@@ -123,9 +124,12 @@ export function makeColumns(tl, store) {
 
     // ---------------------------------------------------------------- stems
     { id: 'stems', title: 'stems', kind: 'lane', w: 64, hidden: true, draw(c, env) {
-      const ids = song.audio.stems.map(s => s.id);
-      const missing = ids.filter(id => !store.peaks[id]);
-      if (missing.length) { if (!c.loading) { c.loading = true; store.loadPeaks(missing).then(() => { c.loading = false; tl.drawLanes(); }); } return; }
+      // stems without a peaks file are remembered (no refetch every frame) and left out; the others still draw
+      c.failed ||= new Set();
+      const all = (song.audio?.stems || []).map(s => s.id);
+      const missing = all.filter(id => !store.peaks[id] && !c.failed.has(id));
+      if (missing.length) { if (!c.loading) { c.loading = true; store.loadPeaks(missing).then(() => { for (const id of missing) if (!store.peaks[id]) c.failed.add(id); c.loading = false; tl.drawLanes(); }); } return; }
+      const ids = all.filter(id => store.peaks[id]); if (!ids.length) return;
       gridLines(env);
       const n = ids.length, sw = env.w / n;
       ids.forEach((id, i) => { drawPeaks(env, store.peaks[id], Math.round(i * sw), Math.max(1, Math.round(sw) - (sw > 4 ? 1 : 0)), STEM_COLORS[id]); });
@@ -150,13 +154,13 @@ export function makeColumns(tl, store) {
     // ---------------------------------------------------------------- script (TREATMENT section 2)
     { id: 'script', title: 'script', kind: 'text', w: 230, mode: 'drive', stripColor: '#9db7d6',
       build(c) {
-        addItems(c, store.script.lines, (s) => `<div class="sc" data-sel="script:${s.id}" title="${esc(s.lyric)}"><i class="m m-${s.mode.replace('→', '')}">${esc(s.mode)}</i><span class="st s-${st('script:' + s.id)}" data-act="st" data-k="script:${s.id}"></span>${esc(s.action)}</div>`);
+        addItems(c, store.script.lines, (s) => `<div class="sc" data-sel="script:${esc(s.id)}" title="${esc(s.lyric)}"><i class="m m-${esc(String(s.mode ?? '').replace('→', ''))}">${esc(s.mode)}</i><span class="st s-${esc(st('script:' + s.id))}" data-act="st" data-k="script:${esc(s.id)}"></span>${esc(s.action)}</div>`);
       }, act: seekAct, refresh: refreshChips },
 
     // ---------------------------------------------------------------- shots (storyboard, render frame)
     { id: 'shots', title: 'shots', kind: 'text', w: 104, mode: 'follow', stripColor: '#c9ccd1',
       build(c) {
-        addItems(c, store.shots, (s) => `<div class="shot k-${s.kind}" data-act="seek" data-sel="shot:${s.id}" data-t="${s.t0}" title="${esc(s.id)} · ${s.kind} · ${fmt(s.t0, true)}–${fmt(s.t1, true)} · ${esc(s.title)}"><div class="cap">${chip('shot:' + s.id, '')}<b>${esc(s.id)}</b> <i>${s.kind}</i></div><img loading="lazy" src="${mediaUrl(s.thumb)}" alt=""></div>`);
+        addItems(c, store.shots, (s) => `<div class="shot k-${esc(s.kind)}" data-act="seek" data-sel="shot:${esc(s.id)}" data-t="${num(s.t0)}" title="${esc(s.id)} · ${esc(s.kind)} · ${fmt(s.t0, true)}–${fmt(s.t1, true)} · ${esc(s.title)}"><div class="cap">${chip('shot:' + s.id, '')}<b>${esc(s.id)}</b> <i>${esc(s.kind)}</i></div><img loading="lazy" src="${esc(mediaUrl(s.thumb))}" alt=""></div>`);
       }, act: seekAct, refresh: refreshChips,
       dblclick(c, t) { if (!tl.player.video) tl.player.toggleVideo(); tl.seek(t); } },
 
@@ -172,34 +176,34 @@ export function makeColumns(tl, store) {
           const u = { ...u0, lane: k }; cluster.push(u); list.push(u); cEnd = Math.max(cEnd, u0.t1);
         }
         flush();
-        addItems(c, list, (u) => `<div class="use loc-${u.location}" data-act="seek" data-sel="use:${u.id}" data-t="${u.t0}" title="${esc(u.clip)} take ${u.take} · in ${(u.in_ms / 1000).toFixed(2)} s · ${fmt(u.t0, true)}–${fmt(u.t1, true)} · ${esc(u.label)}"><div class="cap">${chip('use:' + u.id, '')}<b>${u.clip}</b>.${u.take} <i>+${(u.in_ms / 1000).toFixed(1)}</i></div><img loading="lazy" src="${mediaUrl(u.thumb)}" alt=""></div>`);
+        addItems(c, list, (u) => `<div class="use loc-${esc(u.location)}" data-act="seek" data-sel="use:${esc(u.id)}" data-t="${num(u.t0)}" title="${esc(u.clip)} take ${esc(u.take)} · in ${(num(u.in_ms) / 1000).toFixed(2)} s · ${fmt(u.t0, true)}–${fmt(u.t1, true)} · ${esc(u.label)}"><div class="cap">${chip('use:' + u.id, '')}<b>${esc(u.clip)}</b>.${esc(u.take)} <i>+${(num(u.in_ms) / 1000).toFixed(1)}</i></div><img loading="lazy" src="${esc(mediaUrl(u.thumb))}" alt=""></div>`);
         c.items.forEach((it) => { it.el.style.left = `${it.x.lane / it.x.nLanes * 100}%`; it.el.style.width = `${100 / it.x.nLanes}%`; it.el.style.right = 'auto'; });
       }, act: seekAct, refresh: refreshChips },
 
     // ---------------------------------------------------------------- cast per shot
     { id: 'cast', title: 'cast', kind: 'text', w: 40, mode: 'follow', stripColor: '#ff7ab8',
       build(c) {
-        addItems(c, shotSpans, ({ s }) => s.cast.map(id => { const e = store.entityById[id]; const lab = e?.short || (e?.name || id).split(/[s·-]+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase(); return `<span class="cast" data-id="${id}" style="--cc:${e?.color || '#888'}" title="${esc(e?.name || id)}: ${esc(e?.role || '')}">${lab}</span>`; }).join('') + (s.locations.length ? `<span class="loc">${s.locations.join('')}</span>` : ''));
+        addItems(c, shotSpans, ({ s }) => (s.cast || []).map(id => { const e = store.entityById[id]; const lab = e?.short || String(e?.name || id).split(/[\s·-]+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase(); return `<span class="cast" data-id="${esc(id)}" style="--cc:${cssColor(e?.color)}" title="${esc(e?.name || id)}: ${esc(e?.role || '')}">${esc(lab)}</span>`; }).join('') + (s.locations?.length ? `<span class="loc">${esc(s.locations.join(''))}</span>` : ''));
       } },
 
     // ---------------------------------------------------------------- status / approval per shot (+ the clip uses in it)
     { id: 'status', title: 'status', kind: 'text', w: 60, mode: 'follow', stripColor: '#7fbf8f',
       build(c) {
-        addItems(c, shotSpans, ({ s }) => chip('shot:' + s.id, s.id.replace(/^c\d-/, '')) + s.clips.map(u => chip('use:' + u, u.split('@')[0])).join(''));
+        addItems(c, shotSpans, ({ s }) => chip('shot:' + s.id, s.id.replace(/^c\d-/, '')) + (s.clips || []).map(u => chip('use:' + u, String(u).split('@')[0])).join(''));
       }, act: seekAct, refresh: refreshChips },
 
     // ---------------------------------------------------------------- cost
     { id: 'cost', title: 'cost $', kind: 'text', w: 80, mode: 'drive', hidden: true, stripColor: '#cfae80',
       build(c) {
         const groups = []; let run = 0;
-        for (const x of store.costs.items) { run += x.usd; const g = groups[groups.length - 1]; if (g && g.t0 === x.t) { g.list.push(x); g.run = run; } else groups.push({ t0: x.t, list: [x], run }); }
-        addItems(c, groups, (g) => g.list.map(x => `<div class="cost" data-act="seek" data-t="${g.t0}" title="${esc(x.tool)} ${x.date}"><b>${x.usd.toFixed(2)}</b> ${esc(x.id)}</div>`).join('') + `<div class="run">Σ ${g.run.toFixed(2)} / ${store.costs.cap_usd}</div>`);
+        for (const x of store.costs.items) { run += num(x.usd); const g = groups[groups.length - 1]; if (g && g.t0 === x.t) { g.list.push(x); g.run = run; } else groups.push({ t0: x.t, list: [x], run }); }
+        addItems(c, groups, (g) => g.list.map(x => `<div class="cost" data-act="seek" data-t="${num(g.t0)}" title="${esc(x.tool)} ${esc(x.date)}"><b>${num(x.usd).toFixed(2)}</b> ${esc(x.id)}</div>`).join('') + `<div class="run">Σ ${num(g.run).toFixed(2)} / ${esc(store.costs.cap_usd)}</div>`);
       }, act: seekAct },
 
     // ---------------------------------------------------------------- notes (pinned to time; dblclick to add)
     { id: 'notes', title: 'notes', kind: 'text', w: 180, mode: 'drive', stripColor: '#f5a524',
       build(c) {
-        addItems(c, store.notes.notes.map(n => ({ ...n, t0: n.t })), (n) => `<div class="note n-${n.status}" data-sel="note:${n.id}"><span class="nst" data-act="nt" data-id="${n.id}" title="${n.status} (click to toggle)">●</span><b>${esc(n.by)}</b> ${esc(n.text)}</div>`);
+        addItems(c, store.notes.notes.map(n => ({ ...n, t0: n.t })), (n) => `<div class="note n-${esc(n.status)}" data-sel="note:${esc(n.id)}"><span class="nst" data-act="nt" data-id="${esc(n.id)}" title="${esc(n.status)} (click to toggle)">●</span><b>${esc(n.by)}</b> ${esc(n.text)}</div>`);
       },
       act(c, a) { if (a.dataset.act === 'nt') store.toggleNote(a.dataset.id); },
       refresh(c, what) { if (what !== 'notes') return false; this.build(c); return true; },

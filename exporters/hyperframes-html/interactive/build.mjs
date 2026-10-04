@@ -11,10 +11,13 @@
 import { readFileSync, writeFileSync, existsSync, copyFileSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isPrivate } from '../../../lib/store.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-// paths that never leave the machine (the workbench PRIVATE rule)
-const PRIVATE = /(^|\/)private\/|thumbs\/priv_|gen\/refs\/|character-lab\/refs\/|character-lab\/base\//;
+// paths that never leave the machine: the workbench PRIVATE rule (lib/store.mjs isPrivate: thumbs/priv_*, private/,
+// the configured private_media regex), media flagged private in the project's media.json, and, so a config without
+// private_media still holds them back, the owner's reference folders this layer always excluded
+const LEGACY_PRIVATE = /(^|\/)gen\/refs\/|(^|\/)character-lab\/(refs|base)\//;
 
 export function addInteractive(outDir, o = {}) {
   const OUT = resolve(outDir);
@@ -22,7 +25,7 @@ export function addInteractive(outDir, o = {}) {
   const entry = (o.entry ? 'composition/' + o.entry : M.composition.entry).split('/').map(encodeURIComponent).join('/');
   const title = (o.title || M.composition.title || 'film') + ' · interactive';
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-  const html = readFileSync(join(HERE, 'interactive.html'), 'utf8').replace('%TITLE%', esc(title)).replace('%ENTRY%', esc(entry + '?standalone=1'));
+  const html = readFileSync(join(HERE, 'interactive.html'), 'utf8').replace('%TITLE%', () => esc(title)).replace('%ENTRY%', () => esc(entry + '?standalone=1'));
   writeFileSync(join(OUT, 'interactive.html'), html);
   copyFileSync(join(HERE, 'interactive.js'), join(OUT, 'interactive.js'));
   copyFileSync(join(HERE, 'interactive.css'), join(OUT, 'interactive.css'));
@@ -36,8 +39,10 @@ export function addInteractive(outDir, o = {}) {
 
 function projectData(dir) {
   const read = (f) => { const p = join(dir, f); return existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : null; };
-  const safe = (p) => (p && !PRIVATE.test(String(p).replace(/\\/g, '/')) ? p : undefined);
   const shots = read('shots.json') || {}, song = read('song.json') || {}, script = read('script.json') || {}, notes = read('notes.json') || {}, ents = read('entities/index.json') || [];
+  const norm = (p) => String(p).replace(/\\/g, '/');
+  const flagged = new Set(((read('media.json') || {}).items || []).filter((m) => m && m.path && (m.private === true || m.status === 'private')).map((m) => norm(m.path)));
+  const safe = (p) => (p && !isPrivate(norm(p)) && !LEGACY_PRIVATE.test(norm(p)) && !flagged.has(norm(p)) ? p : undefined);
   return {
     project: dir.split(/[\\/]/).pop(),
     shots: (shots.shots || []).map((s) => ({ id: s.id, t0: s.t0, t1: s.t1, section: s.section, kind: s.kind, title: s.title, cast: s.cast, locations: s.locations, clips: s.clips, note: s.note || undefined })),

@@ -1,13 +1,17 @@
-// End-to-end test of the MCP server on the DEMO project (never on anyone's real project):
-//   node mcp/test.mjs          (npm run test:mcp)
-// Starts serve.mjs on a spare port, opens the demo page in headless Chromium (when puppeteer-core + a Chromium are
-// available; otherwise an SSE client stands in for the page), spawns mcp/server.mjs over stdio with the official SDK
-// client and exercises: tools/list, song_get, timeline_query, note_add + note_resolve, request_create + request_update
-// (the approval and cap rules, done -> cost + media), snapshot_save + snapshot_restore, ui_focus, resources, the
-// director-session prompt, and the offline (files only) mode. At the end the demo files are restored byte for byte.
+// End-to-end test of the MCP server on a SCRATCH COPY of the demo project (never on data/demo itself, never on anyone's
+// real project):
+//   node mcp/test.mjs          (npm run test:mcp; TEST_PORT picks the port, default 8146)
+// Copies data/demo to a temp folder, starts serve.mjs on it, opens the page in headless Chromium (when puppeteer-core +
+// a Chromium are available; otherwise an SSE client stands in for the page), spawns mcp/server.mjs over stdio with the
+// official SDK client and exercises: tools/list, song_get, timeline_query, note_add + note_resolve, request_create +
+// request_update (the approval and cap rules, done -> cost + media), snapshot_save + snapshot_restore, ui_focus,
+// resources, the director-session prompt, the guard rules (edit voids approval, director-only approvals, media kind,
+// CSRF / Host / token checks, path traversal and the PRIVATE rule) and the offline (files only) mode. The temp folder
+// is removed at the end, whatever happens; data/demo must be byte-identical afterwards.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -17,26 +21,39 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 const WB = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const PROJECT = 'demo', PORT = Number(process.env.TEST_PORT || 8146), URL_ = `http://localhost:${PORT}`;
-const DATA = path.resolve(WB, process.env.WORKBENCH_DATA || 'data'), D = path.join(DATA, PROJECT);
-if (!fs.existsSync(path.join(D, 'song.json'))) { console.error('no data/demo: run node tools/make_demo.mjs first'); process.exit(1); }
+const ORIG = path.join(WB, 'data', PROJECT);
+if (!fs.existsSync(path.join(ORIG, 'song.json'))) { console.error('no data/demo: run node tools/make_demo.mjs first'); process.exit(1); }
 
-// ---------------------------------------------------------------- bookkeeping so the demo ends exactly as it started
-const hashAll = () => Object.fromEntries(walk(D).filter(f => !f.startsWith('.snapshots/')).map(f => [f, crypto.createHash('sha1').update(fs.readFileSync(path.join(D, f))).digest('hex')]));
-function walk(dir, rel = '') { const out = []; for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) { const r = rel ? `${rel}/${e.name}` : e.name; if (e.isDirectory()) out.push(...walk(dir, r)); else out.push(r); } return out; }
-const before = hashAll();
-const snapsBefore = new Set(fs.existsSync(path.join(D, '.snapshots')) ? fs.readdirSync(path.join(D, '.snapshots')) : []);
+// ---------------------------------------------------------------- scratch data folder, media base and config
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-mcptest-'));
+const DATA = path.join(TMP, 'data'), D = path.join(DATA, PROJECT), MB = path.join(TMP, 'mediabase');
+fs.cpSync(ORIG, D, { recursive: true, filter: (f) => !f.includes(`${path.sep}.snapshots`) });
+for (const [f, t] of [['roots/a.txt', 'public'], ['refs/face.jpg', 'private ref'], ['secret/s.txt', 'outside any root']]) { fs.mkdirSync(path.dirname(path.join(MB, f)), { recursive: true }); fs.writeFileSync(path.join(MB, f), t); }
+fs.writeFileSync(path.join(TMP, 'config.json'), JSON.stringify({ media_roots: ['roots/', 'refs/'], private_media: '^refs/' }));
+Object.assign(process.env, { WORKBENCH_DATA: DATA, WORKBENCH_MEDIA_BASE: MB, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: PROJECT });
+delete process.env.WB_TOKEN; delete process.env.WB_HOST;
+const S = await import('../lib/store.mjs');   // after the env: the same data folder and config as the server
+
+const walk = (dir, rel = '') => { const out = []; for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) { const r = rel ? `${rel}/${e.name}` : e.name; if (e.isDirectory()) out.push(...walk(dir, r)); else out.push(r); } return out; };
+const hashAll = (dir) => Object.fromEntries(walk(dir).map(f => [f, crypto.createHash('sha1').update(fs.readFileSync(path.join(dir, f))).digest('hex')]));
+const origBefore = hashAll(ORIG);
 
 const results = []; let failed = 0;
 const check = (name, ok, detail) => { results.push({ name, ok: !!ok }); if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail !== undefined ? ' ' + JSON.stringify(detail).slice(0, 400) : ''}`); };
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
-
+let srv = null, browser = null, page = null, mcp = null; const sse = { files: [], ui: [] };
+try {
 // ---------------------------------------------------------------- the workbench server
-const srv = spawn(process.execPath, [path.join(WB, 'serve.mjs'), String(PORT)], { stdio: 'pipe', env: { ...process.env, WB_PROJECT: PROJECT } });
+srv = spawn(process.execPath, [path.join(WB, 'serve.mjs'), String(PORT)], { stdio: 'pipe', env: process.env });
 srv.stderr.on('data', d => process.stderr.write('server: ' + d));
 await new Promise((ok, bad) => { srv.stdout.once('data', ok); srv.once('exit', (c) => bad(new Error('server exited ' + c))); });
+// the per-run write token, read the way the page and the MCP server get it: from the served page
+const TOKEN = /<meta name="wb-token" content="([^"]+)">/.exec(await (await fetch(`${URL_}/?project=${PROJECT}`)).text())?.[1];
+check('the page carries the per-run write token', /^[0-9a-f]{48}$/.test(TOKEN || ''), TOKEN?.length);
+const post = (p, body, headers = {}) => fetch(URL_ + p, { method: 'POST', headers: { 'content-type': 'application/json', 'x-wb-token': TOKEN, ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) })
+  .then(async r => ({ status: r.status, body: await r.json().catch(() => null) }));
 
 // ---------------------------------------------------------------- "the open page": a real browser if we can, else an SSE client
-let browser = null, page = null; const sse = { files: [], ui: [] };
 try {
   const require = createRequire(path.join(WB, 'package.json'));
   const puppeteer = require('puppeteer-core');
@@ -56,7 +73,7 @@ try {
   (async () => {
     const r = await fetch(`${URL_}/api/events?project=${PROJECT}`, { signal: ctl.signal }); const dec = new TextDecoder(); let buf = '';
     for await (const chunk of r.body) { buf += dec.decode(chunk); let i; while ((i = buf.indexOf('\n\n')) >= 0) { const m = buf.slice(0, i); buf = buf.slice(i + 2); const d = /^data: (.*)$/m.exec(m); if (!d) continue; const j = JSON.parse(d[1]);
-      if (j.ui) { sse.ui.push(j.ui); fetch(`${URL_}/api/ui/ack?project=${PROJECT}`, { method: 'POST', body: JSON.stringify({ id: j.ui.id }) }); } else sse.files.push(j.file); } }
+      if (j.ui) { sse.ui.push(j.ui); post(`/api/ui/ack?project=${PROJECT}`, { id: j.ui.id }); } else sse.files.push(j.file); } }
   })().catch(() => {});
   await wait(300);
 }
@@ -79,8 +96,8 @@ const call = async (client, name, args = {}) => {
   try { return JSON.parse(text); } catch (e) { return text; }
 };
 
-const mcp = await connect({ WORKBENCH_URL: URL_ });
-try {
+mcp = await connect({ WORKBENCH_URL: URL_ });
+{
   // 1. tools
   const tools = (await mcp.listTools()).tools.map(t => t.name);
   const EXPECT = ['status', 'projects', 'snapshot_save', 'snapshot_list', 'snapshot_restore', 'song_get', 'timeline_query', 'shots_list', 'shot_get', 'shot_update', 'entities_list', 'entity_get', 'entity_upsert',
@@ -105,6 +122,7 @@ try {
   // 3. snapshot first (the round trip below restores to it)
   const snap = await call(mcp, 'snapshot_save', { message: 'mcp test: start' });
   check('snapshot_save', !!snap.id && fs.existsSync(path.join(D, '.snapshots', snap.id, 'notes.json')), snap);
+  const revs = Object.fromEntries(['notes.json', 'requests.json', 'approvals.json'].map(f => [f, JSON.parse(fs.readFileSync(path.join(D, f), 'utf8')).rev]));
 
   // 4. note_add -> live in the page; note_resolve with a reply
   const note = await call(mcp, 'note_add', { t: 8000, text: 'mcp test: Bo enters on the downbeat now', about: 'shot:s3-grid' });
@@ -157,10 +175,14 @@ try {
   const rs = await call(mcp, 'snapshot_restore', { snapshot: snap.id });
   const notesAfter = await call(mcp, 'notes_list');
   const reqAfter = await call(mcp, 'requests_list');
-  const filesBack = ['notes.json', 'requests.json', 'costs.json', 'approvals.json', 'shots.json', 'media.json'].every(f => fs.readFileSync(path.join(D, f)).equals(fs.readFileSync(path.join(D, '.snapshots', snap.id, f))));
+  // content back exactly; the shared {rev} files get a rev above the pre-restore one (a stale page gets 409, never overwrites)
+  const noRev = (b) => { const j = JSON.parse(b); delete j.rev; return JSON.stringify(j); };
+  const filesBack = ['costs.json', 'shots.json', 'media.json'].every(f => fs.readFileSync(path.join(D, f)).equals(fs.readFileSync(path.join(D, '.snapshots', snap.id, f))))
+    && ['notes.json', 'requests.json', 'approvals.json'].every(f => noRev(fs.readFileSync(path.join(D, f), 'utf8')) === noRev(fs.readFileSync(path.join(D, '.snapshots', snap.id, f), 'utf8'))
+      && JSON.parse(fs.readFileSync(path.join(D, f), 'utf8')).rev > revs[f]);
   const pageBack = await pageHas((id, s) => s ? true : !window.WB.store.notes.notes.some(n => n.id === id), note.id);
   const snaps = await call(mcp, 'snapshot_list');
-  check('snapshot_restore round trip (byte-identical, previous state kept, page reloaded)', rs.restored === snap.id && !notesAfter.some(n => n.id === note.id) && !reqAfter.some(r => r.id === rq.id) && filesBack && pageBack && snaps.some(s => s.id === rs.previous && s.auto),
+  check('snapshot_restore round trip (content identical, rev moves forward, previous state kept, page reloaded)', rs.restored === snap.id && !notesAfter.some(n => n.id === note.id) && !reqAfter.some(r => r.id === rq.id) && filesBack && pageBack && snaps.some(s => s.id === rs.previous && s.auto),
     { restored: rs.restored, previous: rs.previous, changed: rs.changed, filesBack, pageBack });
 
   // 9. resources + prompt
@@ -171,9 +193,54 @@ try {
   check('resources + director-session prompt', resources.includes('workbench://docs/claude') && resources.includes('workbench://docs/readme') && /requests\.json/.test(ff.contents[0].text) && JSON.parse(pf.contents[0].text).duration_ms === 20000
     && /APPROVED/.test(prompt.messages[0].content.text) && /fix the chorus colours/.test(prompt.messages[0].content.text), { resources: resources.length });
   fs.rmSync(out, { force: true });
-} finally { await mcp.close(); }
 
-// 10. offline: the server is unreachable -> the same tools work on the files; ui_focus explains
+  // 10. guard rules (agent side)
+  const g1 = await call(mcp, 'request_create', { kind: 'generate', prompt: 'guard: cheap', est_cost: 0.1 });
+  await call(mcp, 'request_update', { id: g1.id, status: 'approved', director_approved: true, by: 'director' });
+  const keepApproved = await call(mcp, 'request_update', { id: g1.id, status: 'approved', prompt: 'guard: EXPENSIVE', est_cost: 9 });
+  const editQueue = await call(mcp, 'request_update', { id: g1.id, status: 'queued', prompt: 'guard: different', est_cost: 5 });
+  const editOnly = await call(mcp, 'request_update', { id: g1.id, prompt: 'guard: edited' });
+  check('an edit voids the approval (edit + status in one call refused; edit alone -> draft)', /409/.test(keepApproved.error || '') && /409/.test(editQueue.error || '') && editOnly.request?.status === 'draft' && editOnly.request?.est_cost === 0.1,
+    { keepApproved: keepApproved.error, editQueue: editQueue.error, after: editOnly.request?.status });
+  const sneaky = await post(`/api/op/request_create?project=${PROJECT}`, { kind: 'generate', est_cost: 0, extra: { status: 'approved', id: 'x', note: 'kept' } });
+  check('request_create: extra cannot set status / id', sneaky.status === 200 && sneaky.body.status === 'draft' && sneaky.body.id !== 'x' && sneaky.body.note === 'kept', sneaky.body);
+  const ap0 = await call(mcp, 'approve', { keys: ['shot:s2-wall'] });
+  const lock0 = await call(mcp, 'shot_update', { id: 's2-wall', status: 'locked' });
+  const ap1 = await call(mcp, 'approve', { keys: ['shot:s2-wall'], director_approved: true });
+  const apState = (await call(mcp, 'approvals_get', { keys: ['shot:s2-wall'] })).items['shot:s2-wall'];
+  const bogus = await post(`/api/op/set_states?project=${PROJECT}`, { keys: ['shot:s2-wall'], state: 'bogus' });
+  check('approve / lock need director_approved; unknown states refused', /403/.test(ap0.error || '') && /403/.test(lock0.error || '') && ap1.state === 'approved' && apState?.by === 'director' && bogus.status === 400,
+    { ap0: ap0.error, lock0: lock0.error, by: apState?.by, bogus: bogus.status });
+  const src = path.join(TMP, 'kind-src.txt'); fs.writeFileSync(src, 'x');
+  const kindBad = await post(`/api/op/media_add?project=${PROJECT}`, { path: src, kind: '../../../escaped' });
+  const kindMcp = await call(mcp, 'media_add', { path: src, kind: '../x' });
+  const privAdd = await call(mcp, 'media_add', { path: src, kind: 'ref', private: true });
+  check('media_add: kind cannot leave the project; a private copy lands under private/', kindBad.status === 400 && !!kindMcp.error && !fs.existsSync(path.join(TMP, 'escaped')) && privAdd.media?.path === 'private/ref/kind-src.txt' && S.isPrivate(privAdd.media.path),
+    { http: kindBad.status, mcp: kindMcp.error?.slice(0, 80), priv: privAdd.media?.path });
+
+  // 11. guard rules (HTTP side): CSRF, DNS rebinding, token, traversal, the deny-list
+  const plain = await post(`/api/op/costs_get?project=${PROJECT}`, '{}', { 'content-type': 'text/plain' });
+  const foreign = await post(`/api/op/costs_get?project=${PROJECT}`, {}, { origin: 'http://evil.example' });
+  const own = await post(`/api/op/costs_get?project=${PROJECT}`, {}, { origin: URL_ });
+  const noTok = await post(`/api/save/notes.json?project=${PROJECT}`, { base_rev: 0, data: {} }, { 'x-wb-token': '' });
+  const badTok = await post(`/api/projects/delete?project=${PROJECT}`, { id: 'x' }, { 'x-wb-token': 'f'.repeat(48) });
+  const rebound = await new Promise((ok) => http.get({ host: '127.0.0.1', port: PORT, path: `/data/${PROJECT}/song.json`, headers: { host: `evil.example:${PORT}` } }, r => { r.resume(); ok(r.statusCode); }).on('error', () => ok(0)));
+  check('writes need JSON + own Origin + the token; foreign Host refused', plain.status === 415 && foreign.status === 403 && own.status === 200 && noTok.status === 403 && badTok.status === 403 && rebound === 403,
+    { plain: plain.status, foreign: foreign.status, own: own.status, noTok: noTok.status, badTok: badTok.status, rebound });
+  const st_ = async (u) => (await fetch(URL_ + u)).status;
+  const paths = { mediaOk: await st_('/media/roots/a.txt'), mediaEsc: await st_('/media/roots%2F..%2Fsecret%2Fs.txt'), mediaEsc2: await st_('/media/roots%2F..%2Frefs%2Fface.jpg'),
+    bslash: await st_(`/data/${PROJECT}/thumbs%5Cm_I1.jpg`), dataEsc: await st_(`/data/${PROJECT}/..%2F..%2Fconfig.json`), tools: await st_('/TOOLS/verify.mjs'), lib: await st_('/Lib/store.mjs'),
+    git: await st_('/.GIT/config'), cfg: await st_('/WORKBENCH.CONFIG.JSON'), snaps: await st_(`/data/${PROJECT}/.SNAPSHOTS/x`), page: await st_('/app.js') };
+  check('path traversal, %5C, case tricks and the deny-list', paths.mediaOk === 200 && paths.mediaEsc === 400 && paths.mediaEsc2 === 400 && paths.bslash === 400 && paths.dataEsc === 400
+    && paths.tools === 403 && paths.lib === 403 && paths.git === 403 && paths.cfg === 403 && paths.snaps === 403 && paths.page === 200, paths);
+  check('PRIVATE rule ignores case and separators; media roots are checked after normalising', S.isPrivate('Thumbs/Priv_x.jpg') && S.isPrivate('a\\private\\b.png') && S.isPrivate('REFS/face.jpg')
+    && !S.mediaRootFile('roots/../secret/s.txt') && !S.mediaRootFile('roots/../refs/face.jpg') && !!S.mediaRootFile('roots/a.txt') && S.isFlaggedPrivate('private/ref/kind-src.txt', [PROJECT]));
+  const lanIp = Object.values(os.networkInterfaces()).flat().find(a => a && a.family === 'IPv4' && !a.internal)?.address;
+  const lan = lanIp ? await new Promise((ok) => http.get({ host: lanIp, port: PORT, path: '/', timeout: 1500 }, r => { r.resume(); ok(r.statusCode); }).on('error', (e) => ok(e.code)).on('timeout', function () { this.destroy(); ok('timeout'); })) : 'no LAN address';
+  check('the server listens on 127.0.0.1 only (not reachable on the LAN address)', typeof lan === 'string', { lanIp, lan });
+}
+
+// 12. offline: the server is unreachable -> the same tools work on the files; ui_focus explains
 {
   const off = await connect({ WORKBENCH_URL: 'http://localhost:9' });
   const st = await call(off, 'status');
@@ -183,16 +250,32 @@ try {
   await off.close();
 }
 
-// ---------------------------------------------------------------- leave the demo exactly as we found it
-if (browser) await browser.close(); sse.stop?.();
-srv.kill(); await wait(300);
-for (const s of fs.existsSync(path.join(D, '.snapshots')) ? fs.readdirSync(path.join(D, '.snapshots')) : []) if (!snapsBefore.has(s)) fs.rmSync(path.join(D, '.snapshots', s), { recursive: true, force: true });
-if (!snapsBefore.size && fs.existsSync(path.join(D, '.snapshots')) && !fs.readdirSync(path.join(D, '.snapshots')).length) fs.rmSync(path.join(D, '.snapshots'), { recursive: true });
-const after = hashAll();
-for (const f of Object.keys(after)) if (!before[f]) fs.rmSync(path.join(D, f));            // files the test created (copied output, its thumbnails)
-for (const dir of ['media/clip', 'media', 'thumbs']) { const p = path.join(D, dir); if (fs.existsSync(p) && !fs.readdirSync(p).length) fs.rmSync(p, { recursive: true }); }
-const final = hashAll();
-const same = Object.keys(before).length === Object.keys(final).length && Object.entries(before).every(([f, h]) => final[f] === h);
-check('demo project restored byte for byte', same, same ? undefined : { changed: Object.keys(before).filter(f => final[f] !== before[f]), extra: Object.keys(final).filter(f => !before[f]) });
+// 13. data layer: corrupt files are not overwritten, a template-less project works, cap 0 means nothing paid, entity ids hold
+{
+  const nf = path.join(D, 'notes.json'), good = fs.readFileSync(nf, 'utf8'), broken = good.slice(0, -5);
+  fs.writeFileSync(nf, broken);
+  let err = null; try { S.ops.note_add(PROJECT, { t: 1000, text: 'x' }); } catch (e) { err = e; }
+  check('a corrupt JSON file is refused, not overwritten', err?.code === 500 && fs.readFileSync(nf, 'utf8') === broken, err?.message);
+  fs.writeFileSync(nf, good);
+  S.createProject('nt', 'no template');
+  let ok = true, why = null; try { S.ops.entities_list('nt'); S.ops.song_get('nt'); } catch (e) { ok = false; why = e.message; }
+  const r = S.ops.request_create('nt', { kind: 'generate', est_cost: 1 });
+  S.ops.request_update('nt', { id: r.id, status: 'approved', director_approved: true });
+  let capErr = null; try { S.ops.request_update('nt', { id: r.id, status: 'queued' }); } catch (e) { capErr = e.code; }
+  check('createProject without a template; cap 0 refuses paid queueing', ok && Array.isArray(JSON.parse(fs.readFileSync(path.join(DATA, 'nt', 'events.json'), 'utf8'))) && capErr === 402, { why, capErr });
+  const ent = S.ops.entity_upsert(PROJECT, { kind: 'prop', id: 'pp', fields: { id: 'other', kind: 'character' } }).entity;
+  check('entity_upsert: fields cannot change id / kind', ent.id === 'pp' && ent.kind === 'prop', ent);
+}
+} catch (e) { check('test ran to the end', false, String(e.stack || e)); }
+finally {
+  // ---------------------------------------------------------------- clean up whatever happened
+  await mcp?.close().catch(() => {});
+  if (browser) await browser.close().catch(() => {}); sse.stop?.();
+  srv?.kill(); await wait(300);
+  for (let i = 0; i < 5; i++) { try { fs.rmSync(TMP, { recursive: true, force: true }); break; } catch (e) { await wait(300); } }
+}
+const origAfter = hashAll(ORIG);
+const same = Object.keys(origBefore).length === Object.keys(origAfter).length && Object.entries(origBefore).every(([f, h]) => origAfter[f] === h);
+check('data/demo untouched (the test ran on a scratch copy)', same, same ? undefined : { changed: Object.keys(origBefore).filter(f => origAfter[f] !== origBefore[f]), extra: Object.keys(origAfter).filter(f => !origBefore[f]) });
 console.log(`\n${results.length - failed}/${results.length} checks passed`);
 process.exit(failed ? 1 : 0);

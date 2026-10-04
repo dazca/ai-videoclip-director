@@ -11,7 +11,7 @@
 // 3. paused mode: Space pauses (clock holds), a mouse drag selects text in the film document, double-click lifts,
 //    Space resumes from the paused ms
 // Screenshots + verify-interactive.json in <report> (default <outDir>-verify/interactive). Exit code 1 on a failure.
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { serve, launch, sleep, argv } from '../lib.mjs';
 
@@ -19,7 +19,11 @@ const OUT = resolve(process.argv[2] || '');
 if (!process.argv[2] || !existsSync(join(OUT, 'interactive.html'))) { console.error('usage: node interactive/verify-interactive.mjs <outDir> (with interactive.html)'); process.exit(2); }
 const REPORT = resolve(argv('--report', join(OUT.replace(/[\\/]+$/, '') + '-verify', 'interactive')));
 mkdirSync(REPORT, { recursive: true });
-const AT = Object.fromEntries((argv('--at', 'text=20,window=110,image=86,video=160,dancer=116,alpha=258')).split(',').map((kv) => { const [k, v] = kv.split('='); return [k, +v]; }));
+// probe times: --at, else the owner's film defaults; each one is kept inside the film (room for the 6 s run)
+let DUR = 0; try { DUR = Number(JSON.parse(readFileSync(join(OUT, 'manifest.json'), 'utf8')).composition.duration) || 0; } catch {}
+const fit = (t) => (DUR ? Math.max(0, Math.min(t, DUR - 8)) : t);
+if (!argv('--at') && DUR && DUR < 260) console.log(`note: no --at given; the default probe times are for a 4+ minute film, clamped to this ${DUR} s one (pass --at kind=s,...)`);
+const AT = Object.fromEntries((argv('--at', 'text=20,window=110,image=86,video=160,dancer=116,alpha=258')).split(',').map((kv) => { const [k, v] = kv.split('='); return [k, fit(+v)]; }));
 const R = { package: OUT, runs: [], checks: [] };
 const say = (s) => console.log(s);
 const check = (name, ok, detail) => { R.checks.push({ name, ok: !!ok, detail }); say(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail !== undefined ? '  ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); };
@@ -30,7 +34,8 @@ const page = await browser.newPage();
 await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1 });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e && e.message || e)));
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+// interactive.project.json is optional (only with --project): its 404 is not an error
+page.on('console', (m) => { if (m.type() === 'error' && !/\/interactive\.project\.json$/.test((m.location() || {}).url || '')) errors.push(m.text()); });
 await page.goto(srv.url + 'interactive.html', { waitUntil: 'load', timeout: 300000 });
 await page.waitForFunction(() => window.IX && IX.ready && IX.playing(), { timeout: 300000, polling: 100 });
 const shot = (name) => page.screenshot({ path: join(REPORT, name + '.png') });
@@ -49,7 +54,7 @@ async function jumps(m0, m1) { // largest deviation between film steps and wall 
 async function playAt(t) { await page.evaluate((t) => { IX.seek(t, true); IX.play(); }, t); await sleep(900); }
 
 // ---------------------------------------------------------------- 1. baseline
-await playAt(100);
+await playAt(fit(DUR ? Math.min(100, DUR * 0.3) : 100));
 let m0 = await mark(); await sleep(6000); let m1 = await mark();
 const base = progress(m0, m1), baseJump = await jumps(m0, m1);
 R.baseline = { from: m0.a, filmSeconds: +(m1.a - m0.a).toFixed(3), wallSeconds: +((m1.w - m0.w) / 1000).toFixed(3), drift: base, worstStep: baseJump };
@@ -146,7 +151,7 @@ for (const [key, t] of Object.entries(AT)) {
 }
 
 // ---------------------------------------------------------------- 3. paused mode
-await playAt(AT.text || 56);
+await playAt(AT.text ?? fit(56));
 await page.mouse.move(640, 360);
 await page.keyboard.press('Space'); await sleep(200);
 const tp = await page.evaluate(() => IX.t());
@@ -160,7 +165,7 @@ if (ft) {
     const el = W.document.elementFromPoint((x - fr.left) / s, (y - fr.top) / s); const r = W.document.createRange(); r.selectNodeContents(el);
     const b = r.getClientRects()[0]; return b && { x0: fr.left + (b.left + 1) * s, x1: fr.left + (b.right - 1) * s, y: fr.top + (b.top + b.height / 2) * s };
   }, ft.x, ft.y);
-  await page.mouse.move(span.x0, span.y); await page.mouse.down(); await page.mouse.move(span.x1, span.y, { steps: 10 }); await page.mouse.up(); await sleep(150);
+  if (span) { await page.mouse.move(span.x0, span.y); await page.mouse.down(); await page.mouse.move(span.x1, span.y, { steps: 10 }); await page.mouse.up(); await sleep(150); }
   const sel = await page.evaluate(() => IX.film().getSelection().toString());
   check('paused: text in the film is selectable (mouse drag -> getSelection in the film)', sel.trim().length > 0, sel.slice(0, 60));
   check('paused: a click inside the film does not resume it (standalone click toggle stopped)', await page.evaluate(() => IX.paused() && !IX.playing()));

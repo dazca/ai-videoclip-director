@@ -53,7 +53,14 @@ node exporters/hyperframes-html/interactive/verify-interactive.mjs <outDir>     
      only), the font stacks of on-screen text, and `system_fonts`: text that depends on fonts installed on the viewer's
      machine, as it depended on the render machine's.
 
-`outDir` is cleared only if it is empty or holds a previous export (it checks `manifest.json`).
+`outDir` is cleared only if it is empty or holds a previous export (it checks `manifest.json`), and never when the
+composition folder is inside it.
+
+**PRIVATE files are never packaged.** If the composition uses a file matching the workbench PRIVATE rule
+(`thumbs/priv_*`, any `private/` folder, the configured `private_media` regex, tested on the path as the composition
+names it and base-relative after following junctions) or, with `--project <workbench project dir>`, a file flagged
+private in that project's `media.json`, the export stops with exit code 3 and writes nothing: the composition would
+still reference it. The interactive layer drops private clip/start-image paths from `interactive.project.json` too.
 
 ## What `verify.mjs` checks
 
@@ -68,7 +75,8 @@ node exporters/hyperframes-html/interactive/verify-interactive.mjs <outDir>     
    server, no page errors.
 
 Report: `<outDir>-verify/verify.json` plus `cmp-<t>.jpg` (package | render) for each time. The exit code is non-zero
-on integrity, request or external-request failures.
+on integrity, request, external-request or page-error failures, on media still decoding at a capture, and on a frame
+above `--max-mad` (% of 255, default 5) or below `--min-psnr` (dB, default 20).
 
 ## Interactive layer (`--interactive`)
 

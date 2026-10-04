@@ -46,9 +46,10 @@ export function installVerify(ctx) {
         }
       }
       const devs = Object.values(m).map(v => Math.abs(v - ref));
-      rows.push({ t, ref: +ref.toFixed(2), maxDev: +Math.max(...devs).toFixed(3), n: devs.length, cols: Object.fromEntries(Object.entries(m).map(([k, v]) => [k, +v.toFixed(2)])) });
+      // a time with nothing measured counts as a failure (Math.max() of nothing is -Infinity)
+      rows.push({ t, ref: +ref.toFixed(2), maxDev: devs.length ? +Math.max(...devs).toFixed(3) : Infinity, n: devs.length, cols: Object.fromEntries(Object.entries(m).map(([k, v]) => [k, +v.toFixed(2)])) });
     }
-    const worst = Math.max(...rows.map(r => r.maxDev));
+    const worst = rows.length ? Math.max(...rows.map(r => r.maxDev)) : Infinity;
     return { pass: worst <= 1, worstPx: worst, rows };
   };
 

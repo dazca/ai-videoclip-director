@@ -75,11 +75,11 @@ export function openLookForm(entity, { mode = 'new', look = null, refs = [] } = 
   const what = isChar ? 'look' : isLoc ? 'angle / time of day' : 'variant';
   const base = look ? (e.looks || []).find(l => l.id === look) : null;
   const title = mode === 'dup' ? `Duplicate look "${base?.name}"` : mode === 'variant' ? `Variant of "${base?.name}"` : `New ${what} · ${e.name}`;
-  const st = { refs: [...new Set([...(base ? base.images.slice(0, 2) : []), ...refs])], colors: base ? [...base.colors] : [] };
+  const st = { refs: [...new Set([...(base ? (base.images || []).slice(0, 2) : []), ...refs])], colors: base ? [...(base.colors || [])] : [] };
   const f = document.createElement('div'); f.className = 'lookform';
   f.innerHTML = `<div class="lh"><b>${esc(title)}</b><i data-x="close" title="Esc">×</i></div>
     <label><span>name</span><input name="name" value="${esc(mode === 'dup' ? base.name + ' copy' : mode === 'variant' ? base.name + ' variant' : '')}" placeholder="${isChar ? 'e.g. rainy commute' : isLoc ? 'e.g. desk from behind, dusk' : 'e.g. board with LEDs on'}"></label>
-    ${isChar ? `<label><span>garments</span><input name="garments" value="${esc(base ? base.garments.join(', ') : '')}" placeholder="comma separated: yellow raincoat, grey beanie, ..."></label>
+    ${isChar ? `<label><span>garments</span><input name="garments" value="${esc(base ? (base.garments || []).join(', ') : '')}" placeholder="comma separated: yellow raincoat, grey beanie, ..."></label>
     <label><span>colours</span><span class="cols"></span><input type="color" name="col" value="#1c2541" title="add a colour"></label>` : ''}
     ${isLoc ? `<label><span>time of day</span><select name="tod">${['8 a.m.', 'morning', 'day', 'dusk', 'night', 'late night', 'early morning'].map(t => `<option>${t}</option>`).join('')}</select></label>
     <label><span>angle</span><input name="angle" placeholder="${esc((e.angles || []).slice(0, 3).join(' / '))}"></label>` : ''}
@@ -110,8 +110,8 @@ export function openLookForm(entity, { mode = 'new', look = null, refs = [] } = 
     const x = ev.target.closest('[data-x]')?.dataset.x;
     if (x === 'close') return f.remove();
     if (x === 'pick') {
-      const items = store.media.filter(m => /\.(png|jpe?g)$/i.test(m.path) && m.kind !== 'contact').sort((a, b) => (b.entities.includes(e.id) ? 1 : 0) - (a.entities.includes(e.id) ? 1 : 0))
-        .map(m => ({ label: m.label, detail: `${m.kind}${m.private ? ' · private' : ''} · ${m.entities.join(' ')}`, value: m.path }));
+      const items = store.media.filter(m => /\.(png|jpe?g)$/i.test(m.path) && m.kind !== 'contact').sort((a, b) => ((b.entities || []).includes(e.id) ? 1 : 0) - ((a.entities || []).includes(e.id) ? 1 : 0))
+        .map(m => ({ label: m.label, detail: `${m.kind}${m.private ? ' · private' : ''} · ${(m.entities || []).join(' ')}`, value: m.path }));
       const p = await ui.pick({ title: `reference image for ${e.name}`, items }); if (p && !st.refs.includes(p)) st.refs.push(p); paint(); return;
     }
     if (x === 'ok') {

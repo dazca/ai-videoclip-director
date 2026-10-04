@@ -22,7 +22,7 @@ export class Timeline {
     this.folds = new Set(prefs.get('folds', []));   // section ids folded to a thin band
     this.hoverCol = null;
     this.perf = { relayouts: [], firstRender: 0 };
-    this.player = new Player(this);
+    this.player = new Player(this);   // lives across rebuilds: a data reload must not stop playback
     this.build();
   }
 
@@ -71,6 +71,7 @@ export class Timeline {
     this.relayout({ all: true });
     this.perf.firstRender = performance.now() - t0;
     this.unsub = store.on((what) => this.onData(what));
+    this.player.setSource();          // the mix may have changed with the data
   }
 
   onData(what) {
@@ -82,7 +83,8 @@ export class Timeline {
     if (what === 'peaks') this.drawLanes();
     if (what === 'overrides') { const c = this.byId.sections; c.def.build(c); c.dirty = true; this.relayout({}); window.WB?.selection?.paint(); }
   }
-  destroy() { this.unsub?.(); this.ro?.disconnect(); this.player.stop(); this.root.innerHTML = ''; }
+  // DOM teardown before build(); the player is kept (playback continues), so build() can follow directly
+  destroy() { this.unsub?.(); this.ro?.disconnect(); this.root.innerHTML = ''; }
 
   applyHeaderMode() {
     this.root.dataset.header = ['full', 'thin', 'none'][this.headerMode];
@@ -232,8 +234,7 @@ export class Timeline {
       e.preventDefault();
       const x0 = e.clientX, y0 = e.clientY, sl = this.scroller.scrollLeft, st = this.scroller.scrollTop;
       const move = (ev) => { this.scroller.scrollLeft = sl - (ev.clientX - x0); this.scroller.scrollTop = st - (ev.clientY - y0); this.follow = false; };
-      const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); };
-      addEventListener('pointermove', move); addEventListener('pointerup', up);
+      onDrag(move);
     });
     this.scroller.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
     // widths: ResizeObserver on the timeline root (window resize), re-warp at most once per frame
@@ -296,8 +297,7 @@ export class Timeline {
     const x0 = e.clientX, w0 = c.collapsed ? STRIP_W - 4 : c.vw;
     c.collapsed = false;
     const move = (ev) => { c.w = Math.max(3, w0 + ev.clientX - x0); this._dragged = true; this.requestRelayout(); };
-    const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); this.save(); setTimeout(() => this._dragged = false, 0); };
-    addEventListener('pointermove', move); addEventListener('pointerup', up);
+    onDrag(move, () => { this.save(); setTimeout(() => this._dragged = false, 0); });
   }
   setWidth(id, w) { const c = this.byId[id]; c.w = w; c.collapsed = false; this.applyColumns(); const dt = this.relayout(); this.save(); return dt; }
   colAtClientX(x) { const r = this.sheet.getBoundingClientRect(); const xx = x - r.left; return this.cols.find(c => !c.hidden && xx >= c.x && xx < c.x + c.vw) || null; }
@@ -335,18 +335,16 @@ export class Timeline {
       const last = vis[vis.length - 1];
       mark.style.left = ((target ? target.x : last.x + last.vw) - 1) + 'px';
     };
-    const up = () => {
-      removeEventListener('pointermove', move); removeEventListener('pointerup', up);
+    onDrag(move, (ev) => {
       if (!on) return;
       c.head.classList.remove('dragging'); mark?.remove();
-      if (target !== c) {
+      if (ev.type === 'pointerup' && target !== c) {
         this.cols.splice(this.cols.indexOf(c), 1);
         const k = target ? this.cols.indexOf(target) : this.cols.length;
         this.cols.splice(k, 0, c);
         this.save(); this.applyColumns(); this.relayout();
       }
-    };
-    addEventListener('pointermove', move); addEventListener('pointerup', up);
+    });
   }
   // drag on the ruler = select a time range (a plain click still seeks)
   dragRange(e) {
@@ -357,8 +355,7 @@ export class Timeline {
       const t = this.timeAtClientY(ev.clientY);
       window.WB.selection.setRange({ t0: Math.min(t0, t), t1: Math.max(t0, t) });
     };
-    const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); if (on) setTimeout(() => this._dragged = false, 0); };
-    addEventListener('pointermove', move); addEventListener('pointerup', up);
+    onDrag(move, () => { if (on) setTimeout(() => this._dragged = false, 0); });
   }
   // wheel: plain = scroll time; Ctrl (and touchpad pinch) = zoom time at the cursor; Alt or Ctrl+Shift = width of the
   // column under the cursor; Shift = horizontal scroll
@@ -420,6 +417,13 @@ export class Timeline {
     const r = this.picker.getBoundingClientRect();
     window.WB.menus.open(window.WB.menus.itemsFor('columns'), { x: r.right - 210, y: r.bottom });
   }
+}
+
+// window-level drag: move on pointermove, end(ev) once on pointerup or pointercancel (touch, lost focus), which also
+// removes the listeners so a cancelled drag does not keep resizing / selecting on later mouse moves
+function onDrag(move, end) {
+  const stop = (ev) => { removeEventListener('pointermove', move); removeEventListener('pointerup', stop); removeEventListener('pointercancel', stop); end?.(ev); };
+  addEventListener('pointermove', move); addEventListener('pointerup', stop); addEventListener('pointercancel', stop);
 }
 
 // ------------------------------------------------------------------ helpers for text columns

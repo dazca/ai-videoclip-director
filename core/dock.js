@@ -49,6 +49,7 @@ export function titleOf(s) {
 const thumbOf = (p) => { const m = store.mediaByPath[p]; return m?.thumb || p; };
 const lock = (p) => isPrivatePath(p) ? '<i class="lock" title="private: crop of a real photo, local only, never exported">🔒</i>' : '';
 function vid(src, { from = 0, to = null, cls = '', packed = false, autoplay = true } = {}) {
+  from = Number(from) || 0; to = to == null ? null : Number(to) || null;   // sources may come from POST /api/ui: numbers only
   const v = `<video class="${cls}" src="${esc(mediaUrl(src))}#t=${(from / 1000).toFixed(2)}" data-from="${from}" ${to ? `data-to="${to}"` : ''} muted playsinline ${autoplay ? 'autoplay' : ''} loop preload="auto"></video>`;
   return packed ? `<div class="pk">${v}</div>` : v;
 }
@@ -63,14 +64,14 @@ function renderSource(s) {
   }
   if (s.kind === 'use') {
     const u = store.uses.find(y => y.id === s.id); if (!u) return miss(s);
-    return vid(u.file, { from: u.in_ms, to: u.in_ms + Math.max(600, u.t1 - u.t0) }) + `<span class="cap">${esc(u.clip)}.${u.take} in ${(u.in_ms / 1000).toFixed(2)} s · ${esc(u.label || '')}</span>`;
+    return vid(u.file, { from: u.in_ms, to: u.in_ms + Math.max(600, u.t1 - u.t0) }) + `<span class="cap">${esc(u.clip)}.${esc(u.take)} in ${(u.in_ms / 1000).toFixed(2)} s · ${esc(u.label || '')}</span>`;
   }
   if (s.kind === 'compare') {
     const takes = store.media.filter(m => m.kind === 'clip' && m.job === s.id).sort((a, b) => a.take - b.take);
     if (!takes.length) return miss(s);
     const using = new Set(store.uses.filter(u => u.clip === s.id).map(u => u.take));
     const from = s.in_ms ?? store.uses.find(u => u.clip === s.id)?.in_ms ?? 0;
-    return `<div class="cmp n${takes.length}">${takes.map(m => `<div class="ct${using.has(m.take) ? ' on' : ''}" data-media="${esc(m.id)}">${vid(m.path, { from, to: from + 2500, cls: 'sync' })}<b>take ${m.take}${using.has(m.take) ? ' · in use' : ''}</b></div>`).join('')}</div>`;
+    return `<div class="cmp n${takes.length}">${takes.map(m => `<div class="ct${using.has(m.take) ? ' on' : ''}" data-media="${esc(m.id)}">${vid(m.path, { from, to: from + 2500, cls: 'sync' })}<b>take ${esc(m.take)}${using.has(m.take) ? ' · in use' : ''}</b></div>`).join('')}</div>`;
   }
   if (s.kind === 'media') {
     const m = store.mediaById[s.id]; if (!m) return miss(s);
@@ -82,7 +83,7 @@ function renderSource(s) {
   if (s.kind === 'entity') return renderEntity(store.entityById?.[s.id]) || miss(s);
   if (s.kind === 'look') {
     const [eid, lid] = s.id.split('/'); const e = store.entityById?.[eid]; const l = e?.looks?.find(x => x.id === lid); if (!l) return miss(s);
-    return `<div class="sheet">${l.images.slice(0, 6).map(p => img(thumbOf(p))).join('')}</div><span class="cap">${esc(l.name)} · ${esc(l.garments.join(', '))}</span>`;
+    return `<div class="sheet">${(l.images || []).slice(0, 6).map(p => img(thumbOf(p))).join('')}</div><span class="cap">${esc(l.name)} · ${esc((l.garments || []).join(', '))}</span>`;
   }
   if (s.kind === 'video' || /\.(mp4|webm)$/i.test(s.src || '')) return vid(s.src, { from: s.in_ms || 0 });
   if (s.src) return img(s.src);
@@ -96,7 +97,7 @@ function renderEntity(e) {
     const looks = (e.looks || []).slice(0, 8);
     const face = e.face || e.thumb, body = e.body;
     return `<div class="sheet ent">${face ? img(thumbOf(face), 'face') : ''}${body ? img(thumbOf(body), 'body') : ''}${sheets.map(p => img(thumbOf(p), 'sh')).join('')}
-      ${looks.length ? `<div class="lk">${looks.map(l => `<div title="${esc(l.name)}">${l.images[0] ? `<img src="${esc(mediaUrl(thumbOf(l.images[0])))}" alt="">` : ''}<i>${esc(l.name)}</i></div>`).join('')}</div>` : ''}</div>
+      ${looks.length ? `<div class="lk">${looks.map(l => `<div title="${esc(l.name)}">${l.images?.[0] ? `<img src="${esc(mediaUrl(thumbOf(l.images[0])))}" alt="">` : ''}<i>${esc(l.name)}</i></div>`).join('')}</div>` : ''}</div>
       <span class="cap">${esc(e.name)} · ${esc(e.identity || e.role || '')}</span>`;
   }
   if (e.kind === 'location') return `<div class="sheet loc">${img(thumbOf(e.establishing || e.refs?.[0]), 'est')}${(e.images || []).slice(1, 7).map(x => img(thumbOf(x.path))).join('')}</div><span class="cap">${esc(e.name)} · ${(e.images || []).length} images · ${(e.clips || []).length} clips</span>`;

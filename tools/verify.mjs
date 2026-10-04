@@ -3,12 +3,16 @@
 // (v2 Part B) the preview dock, media index, privacy of exports, characters and "+ New look", and (v3) the page
 // structure (Timeline / Assets / Review + Settings gear) and the restore chevrons for a hidden top bar / column header.
 //   node tools/verify.mjs [--project <id>] [outDir]     (default project: the server's default; npm run verify = demo)
-// Starts serve.mjs on port 8141 itself (WB_PROJECT = the project under test). Needs the devDependency puppeteer-core
-// (npm install) and a Chromium: $CHROME_PATH, Playwright's cache, or a system Chrome/Edge (tools/chrome.mjs).
-// Every write happens on throw-away copies (<project>-test, <project>-testb, _verify), deleted at the end. The
-// "Part B" block checks the owner's production (its clip ids, characters, private refs) and runs only on "azemar".
+// Copies data/<project> (and data/_template) into a scratch data folder under the OS temp dir and starts serve.mjs
+// on free ports with WORKBENCH_DATA = that folder, so nothing under data/ is written and several runs (or a running
+// workbench on 8140) can coexist. Needs the devDependency puppeteer-core (npm install) and a Chromium: $CHROME_PATH,
+// Playwright's cache, or a system Chrome/Edge (tools/chrome.mjs). Every write happens in the scratch folder
+// (<project>-test, <project>-testb, _verify), deleted at the end, also when a step fails. The "Part B" block checks
+// the owner's production (its clip ids, characters, private refs) and runs only on "azemar".
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -20,8 +24,8 @@ const { findChrome } = await import('./chrome.mjs');
 const { CFG } = await import('../lib/store.mjs');
 const argv = process.argv.slice(2), pi = argv.indexOf('--project');
 const P = pi >= 0 ? argv.splice(pi, 2)[1] : CFG.defaultProject;
-const DATA = CFG.dataRoot, SRCDIR = path.join(DATA, P);
-if (!fs.existsSync(path.join(SRCDIR, 'song.json'))) { console.error(`no project "${P}" in ${DATA} (node tools/make_demo.mjs builds the demo)`); process.exit(1); }
+const SRCROOT = CFG.dataRoot, SRCDIR = path.join(SRCROOT, P);   // read only: the source of the scratch copy
+if (!fs.existsSync(path.join(SRCDIR, 'song.json'))) { console.error(`no project "${P}" in ${SRCROOT} (node tools/make_demo.mjs builds the demo)`); process.exit(1); }
 const OWNER = P === 'azemar';                       // the owner's production: enables the Part B block
 const J = (f) => JSON.parse(fs.readFileSync(path.join(SRCDIR, f), 'utf8'));
 const DUR = J('song.json').duration_ms;
@@ -32,13 +36,61 @@ const MEDIA_N = (J('media.json').items || []).length;
 const OUT = path.resolve(argv[0] || path.join(WB, 'shots'));
 fs.mkdirSync(OUT, { recursive: true });
 const exe = findChrome(); if (!exe) { console.error('no Chromium found: set CHROME_PATH'); process.exit(1); }
-console.log('verify: project', P, '·', DUR, 'ms ·', exe);
 
-const srv = spawn(process.execPath, [path.join(WB, 'serve.mjs'), '8141'], { stdio: 'pipe', env: { ...process.env, WB_PROJECT: P } });
-await new Promise(r => srv.stdout.once('data', r));
-srv.stderr.on('data', d => process.stderr.write('server: ' + d));
-const browser = await puppeteer.launch({ executablePath: exe, headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
+// scratch data folder: a copy of the project (without its snapshots) and the template; the servers write only here
+const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-verify-'));
+for (const d of [P, '_template']) if (fs.existsSync(path.join(SRCROOT, d))) fs.cpSync(path.join(SRCROOT, d), path.join(DATA, d), { recursive: true, filter: (s) => path.basename(s) !== '.snapshots' });
+console.log('verify: project', P, '·', DUR, 'ms ·', exe, '· scratch data', DATA);
+
+// cleanup also runs when a step throws (top-level rejection) or on Ctrl+C: no server, Chromium or scratch data left behind
+const procs = new Set();
+let browser;
+function cleanup() {
+  for (const c of procs) { try { c.kill(); } catch (e) {} }
+  try { browser?.process()?.kill(); } catch (e) {}
+  try { fs.rmSync(DATA, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch (e) { console.error('could not remove', DATA, e.message); }
+}
+process.on('exit', cleanup);
+for (const s of ['SIGINT', 'SIGTERM']) process.on(s, () => process.exit(130));
+
+const freePort = () => new Promise((ok, bad) => { const s = net.createServer(); s.on('error', bad); s.listen(0, () => { const { port } = s.address(); s.close(() => ok(port)); }); });
+// serve.mjs on a free port with WORKBENCH_DATA = the scratch folder; fails (instead of hanging) if it exits or stays silent
+async function startServer(project) {
+  const port = await freePort();
+  const c = spawn(process.execPath, [path.join(WB, 'serve.mjs'), String(port)], { stdio: 'pipe', env: { ...process.env, WORKBENCH_DATA: DATA, WB_PROJECT: project } });
+  procs.add(c); c.on('exit', () => procs.delete(c));
+  let err = ''; c.stderr.on('data', d => { err += d; process.stderr.write(`server ${port}: ` + d); });
+  await new Promise((ok, bad) => {
+    const t = setTimeout(() => bad(new Error(`server on port ${port} did not start within 15 s`)), 15000);
+    c.stdout.once('data', () => { clearTimeout(t); ok(); });
+    c.once('exit', (code) => { clearTimeout(t); bad(new Error(`server on port ${port} exited (${code}): ${err.trim()}`)); });
+  });
+  c.stdout.resume();
+  const base = `http://localhost:${port}`;
+  const st = await fetch(base + '/api/status').then(r => r.json()).catch(() => ({}));
+  if (st.data_dir && path.resolve(st.data_dir) !== path.resolve(DATA)) throw new Error(`server on port ${port} serves ${st.data_dir}, not the scratch folder ${DATA}`);
+  return { proc: c, base, port };
+}
+// headers for the harness's own POSTs. The page gets its per-run write token from the served page (B1), so read it
+// from there: a <meta name="...token..." content>, an inline WB_TOKEN = "...", else /api/config {token|write_token};
+// any cookie the page response sets is sent back too. JSON content type and the server's own Origin, like the page.
+async function writeHeaders(base, project) {
+  const res = await fetch(`${base}/?project=${encodeURIComponent(project)}`).catch(() => null);
+  const html = res ? await res.text() : '';
+  let tok = /<meta\b[^>]*\bname=["'][^"']*token[^"']*["'][^>]*\bcontent=["']([^"']+)/i.exec(html)?.[1]
+    || /<meta\b[^>]*\bcontent=["']([^"']+)["'][^>]*\bname=["'][^"']*token/i.exec(html)?.[1]
+    || /\bWB_TOKEN\s*[:=]\s*["']([^"']+)["']/.exec(html)?.[1];
+  if (!tok) { const c = await fetch(base + '/api/config').then(r => r.json()).catch(() => ({})); tok = c?.token || c?.write_token; }
+  const cookie = (res?.headers.getSetCookie?.() || []).map(c => c.split(';')[0]).join('; ');
+  return { 'content-type': 'application/json', origin: base, ...(tok ? { 'x-wb-token': tok } : {}), ...(cookie ? { cookie } : {}) };
+}
+
+const { base: BASE } = await startServer(P);
+const HDR = await writeHeaders(BASE, P);
+const post = async (p, body, base = BASE, headers = HDR) => { const r = await fetch(base + p, { method: 'POST', headers, body: JSON.stringify(body) }); return { status: r.status, body: await r.json().catch(() => null) }; };
+browser = await puppeteer.launch({ executablePath: exe, headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
 const report = { configs: [] };
+const blockFailed = (name, e) => { console.error(`${name} aborted:`, e?.stack || e); return { pass: false, detail: String(e?.message || e) }; };
 
 async function open(w, h) {
   const pg = await browser.newPage();
@@ -46,7 +98,7 @@ async function open(w, h) {
   pg.on('pageerror', e => console.error('pageerror', e.message));
   pg.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') console.error('console', m.text()); });
   const t0 = Date.now();
-  await pg.goto('http://localhost:8141/', { waitUntil: 'domcontentloaded' });
+  await pg.goto(`${BASE}/?project=${encodeURIComponent(P)}`, { waitUntil: 'domcontentloaded' });
   await pg.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
   await pg.reload({ waitUntil: 'domcontentloaded' });
   await pg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 });
@@ -73,7 +125,7 @@ async function shot(pg, name, setup, atMs = 21000) {
 }
 
 // 1920x1080
-{
+try {
   const { pg, boot, wallMs } = await open(1920, 1080);
   report.boot1920 = { ...boot, wallMs };
   console.log('boot 1920', JSON.stringify(report.boot1920));
@@ -101,9 +153,9 @@ async function shot(pg, name, setup, atMs = 21000) {
   // compact: every lane at 3 px, top bar hidden, thin header
   await shot(pg, '1920_compact_3px', () => { const tl = window.WB.timeline; for (const id of ['wave', 'stems', 'energy']) tl.setWidth(id, 3); tl.setWidth('lyrics', 150); document.body.classList.add('notop'); tl.headerMode = 1; tl.applyHeaderMode(); tl.applyColumns(); tl.relayout(); }, 140000);
   await pg.close();
-}
+} catch (e) { report.configs.push({ name: '1920 (aborted)', align: blockFailed('1920 layouts', e) }); }
 // 1280x800
-{
+try {
   const { pg, boot } = await open(1280, 800);
   report.boot1280 = boot;
   await shot(pg, '1280_default', () => {}, 26000);
@@ -117,17 +169,17 @@ async function shot(pg, name, setup, atMs = 21000) {
   await pg.evaluate(() => new Promise(r => setTimeout(r, 600)));
   await pg.screenshot({ path: path.join(OUT, '1280_locations_tab.png') });
   await pg.close();
-}
+} catch (e) { report.configs.push({ name: '1280 (aborted)', align: blockFailed('1280 layouts', e) }); }
 // ---------------------------------------------------------------- v2: commands, palette, keymap, wheel, menus, undo, snapshots
 // Runs on a working copy "<project>-test" made through the server's own duplicate endpoint, deleted at the end.
-{
-  const B = 'http://localhost:8141', TEST = P + '-test', TD = path.join(DATA, TEST);
-  const post = async (p, body) => { const r = await fetch(B + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, body: await r.json().catch(() => null) }; };
+const v2 = report.v2 = { checks: {} };
+try {
+  const B = BASE, TEST = P + '-test', TD = path.join(DATA, TEST);
   if (fs.existsSync(TD)) await post('/api/projects/delete', { id: TEST });
-  const v2 = report.v2 = { checks: {} };
   const check = (name, ok, detail) => { v2.checks[name] = { pass: !!ok, ...(detail !== undefined ? { detail } : {}) }; console.log(`v2 ${name}: ${ok ? 'PASS' : 'FAIL'}${detail !== undefined ? ' ' + JSON.stringify(detail) : ''}`); };
   const dup = await post('/api/projects/duplicate', { from: P, to: TEST });
-  check('duplicate project', dup.status === 200 && fs.existsSync(path.join(TD, 'song.json')), dup.status);
+  check('duplicate project', dup.status === 200 && fs.existsSync(path.join(TD, 'song.json')), dup);
+  if (!v2.checks['duplicate project'].pass) throw new Error('could not duplicate the project; the v2 checks need the copy');
   const pg = await browser.newPage();
   await pg.setViewport({ width: 1600, height: 900, deviceScaleFactor: 1 });
   pg.on('pageerror', e => console.error('pageerror', e.message));
@@ -265,6 +317,9 @@ async function shot(pg, name, setup, atMs = 21000) {
   const res = await pg.evaluate((id) => window.WB.projects.restore(id), snap.id);
   await wait(900);
   const s1 = read();
+  // restore bumps {rev} above both versions (so stale pages get 409); compare content without rev
+  const norm = (txt) => { if (txt == null) return null; try { const o = JSON.parse(txt); if (o && typeof o === 'object') delete o.rev; return JSON.stringify(o); } catch { return txt; } };
+  for (const k of ['approvals', 'notes', 'requests']) { s0[k] = norm(s0[k]); s1[k] = norm(s1[k]); }
   const pageNotes = await pg.evaluate(() => window.WB.store.notes.notes.some(n => n.text === 'verify: changed after snapshot'));
   const snaps = await (await fetch(`${B}/api/snapshots?project=${TEST}`)).json();
   check('snapshot/restore round trip', changed && s1.approvals === s0.approvals && s1.notes === s0.notes && s1.requests === s0.requests && !pageNotes && snaps.some(s => s.auto && s.id === res.previous),
@@ -373,20 +428,23 @@ async function shot(pg, name, setup, atMs = 21000) {
   await pg.close();
   const del = await post('/api/projects/delete', { id: TEST });
   check('test project deleted', del.status === 200 && !fs.existsSync(TD), del.status);
+  // the guard on the server's default project, tried on the scratch copy (startServer checked the server's data_dir)
   const refuse = await post('/api/projects/delete', { id: P });
-  check('default project protected', refuse.status === 403 && fs.existsSync(path.join(SRCDIR, 'song.json')), refuse.status);
+  check('default project protected', refuse.status === 403 && fs.existsSync(path.join(DATA, P, 'song.json')), refuse.status);
   v2.pass = Object.values(v2.checks).every(c => c.pass);
-}
+} catch (e) { v2.checks.aborted = blockFailed('v2', e); v2.pass = false; }
 // ---------------------------------------------------------------- v2 Part B: preview dock, media index, privacy, characters, "+ New look"
 // Runs on a working copy "azemar-testb" (server duplicate endpoint), deleted at the end. Screenshots pb_*.png.
 // Only on the owner's production: the checks name its clips (G15, I3), characters (dani) and private refs.
-if (OWNER) {
-  const B = 'http://localhost:8141', TEST = 'azemar-testb', TD = path.join(DATA, TEST);
-  const post = async (p, body) => { const r = await fetch(B + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, body: await r.json().catch(() => null) }; };
+if (OWNER) try {
+  const B = BASE, TEST = 'azemar-testb', TD = path.join(DATA, TEST);
   if (fs.existsSync(TD)) await post('/api/projects/delete', { id: TEST });
-  const pb = report.partB = { checks: {} };
+  report.partB = { checks: {} };
+  const pb = report.partB;
   const check = (name, ok, detail) => { pb.checks[name] = { pass: !!ok, ...(detail !== undefined ? { detail } : {}) }; console.log(`partB ${name}: ${ok ? 'PASS' : 'FAIL'}${detail !== undefined ? ' ' + JSON.stringify(detail) : ''}`); };
-  await post('/api/projects/duplicate', { from: 'azemar', to: TEST });
+  const dup = await post('/api/projects/duplicate', { from: 'azemar', to: TEST });
+  check('duplicate project', dup.status === 200 && fs.existsSync(path.join(TD, 'song.json')), dup);
+  if (!pb.checks['duplicate project'].pass) throw new Error('could not duplicate the project; the part B checks need the copy');
   const pg = await browser.newPage();
   await pg.setViewport({ width: 1600, height: 900, deviceScaleFactor: 1 });
   pg.on('pageerror', e => console.error('pageerror', e.message));
@@ -539,29 +597,35 @@ if (OWNER) {
   const del = await post('/api/projects/delete', { id: TEST });
   check('test project deleted', del.status === 200 && !fs.existsSync(TD), del.status);
   pb.pass = Object.values(pb.checks).every(c => c.pass);
-}
-// write path: approve/needs-changes + a note, on a scratch copy of the data (data/_verify), then a stale-rev POST must get 409
-{
-  const SRC = SRCDIR, TMP = path.join(DATA, '_verify');
-  fs.rmSync(TMP, { recursive: true, force: true }); fs.cpSync(SRC, TMP, { recursive: true });
-  const s2 = spawn(process.execPath, [path.join(WB, 'serve.mjs'), '8142'], { stdio: 'pipe', env: { ...process.env, WB_PROJECT: '_verify' } });
-  await new Promise(r => s2.stdout.once('data', r));
+} catch (e) { report.partB = { ...report.partB, checks: { ...report.partB?.checks, aborted: blockFailed('part B', e) }, pass: false }; }
+// write path: approve/needs-changes + a note, on another scratch copy (_verify, its own server), then a stale-rev POST must get 409
+try {
+  const TMP = path.join(DATA, '_verify');
+  fs.rmSync(TMP, { recursive: true, force: true }); fs.cpSync(SRCDIR, TMP, { recursive: true, filter: (s) => path.basename(s) !== '.snapshots' });
+  const { proc: s2, base: B2 } = await startServer('_verify');
+  const readTmp = (f, d) => { try { return JSON.parse(fs.readFileSync(path.join(TMP, f), 'utf8')) || d; } catch (e) { return d; } };
   const pg = await browser.newPage(); await pg.setViewport({ width: 1280, height: 800 });
-  await pg.goto('http://localhost:8142/?project=_verify'); await pg.waitForFunction('document.body.dataset.ready === "1"');
-  const key = await pg.evaluate(async () => { const ch = document.querySelector('.col-status .chip[data-k]'); const k = ch.dataset.k; ch.click(); await new Promise(r => setTimeout(r, 400)); return k; });
+  await pg.goto(`${B2}/?project=_verify`); await pg.waitForFunction('document.body.dataset.ready === "1"');
+  const key = await pg.evaluate(() => document.querySelector('.col-status .chip[data-k]')?.dataset.k);
+  if (!key) throw new Error('no status chip in the timeline');
+  const ap0 = readTmp('approvals.json', { rev: 0, items: {} }), before = ap0.items?.[key]?.state || 'draft';
+  await pg.evaluate(async (k) => { document.querySelector(`.col-status .chip[data-k="${k}"]`).click(); await new Promise(r => setTimeout(r, 400)); }, key);
   await pg.evaluate(async (T) => { await window.WB.store.addNote(T, 'verify: test note'); }, at(61230));
   await new Promise(r => setTimeout(r, 300));
-  const ap = JSON.parse(fs.readFileSync(path.join(TMP, 'approvals.json'), 'utf8')), nt = JSON.parse(fs.readFileSync(path.join(TMP, 'notes.json'), 'utf8'));
-  const stale = await fetch('http://localhost:8142/api/save/approvals.json', { method: 'POST', body: JSON.stringify({ base_rev: 0, data: ap }) });
+  const ap = readTmp('approvals.json', { rev: 0, items: {} }), nt = readTmp('notes.json', { rev: 0, notes: [] });
+  const stale = await fetch(B2 + '/api/save/approvals.json', { method: 'POST', headers: await writeHeaders(B2, '_verify'), body: JSON.stringify({ base_rev: 0, data: ap }) });
   const noteShown = await pg.evaluate(() => [...document.querySelectorAll('.col-notes .note')].some(n => n.textContent.includes('verify: test note')));
-  report.writes = { chip: key, newState: ap.items[key].state, approvalsRev: ap.rev, noteSaved: nt.notes.some(n => n.text === 'verify: test note'), notesRev: nt.rev, noteShownInColumn: noteShown, staleStatus: stale.status };
+  report.writes = { chip: key, stateBefore: before, newState: ap.items?.[key]?.state, approvalsRevBefore: ap0.rev || 0, approvalsRev: ap.rev, noteSaved: (nt.notes || []).some(n => n.text === 'verify: test note'), notesRev: nt.rev, noteShownInColumn: noteShown, staleStatus: stale.status };
   console.log('writes', JSON.stringify(report.writes));
   await pg.close(); s2.kill(); await new Promise(r => setTimeout(r, 300));
-  fs.rmSync(TMP, { recursive: true, force: true });
-}
-fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 1));
+  fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+} catch (e) { report.writes = { error: blockFailed('writes', e).detail }; }
 report.project = P;
-const writesOk = report.writes && report.writes.noteSaved && report.writes.noteShownInColumn && report.writes.staleStatus === 409 && report.writes.newState !== undefined;
+fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 1));
+const w = report.writes || {};
+const writesOk = w.noteSaved && w.noteShownInColumn && w.staleStatus === 409 && w.newState !== undefined && w.newState !== w.stateBefore && w.approvalsRev > w.approvalsRevBefore;
 console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
 process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
-await browser.close(); srv.kill();
+await browser.close();
+for (const c of procs) c.kill();
+await new Promise(r => setTimeout(r, 300));   // let the servers release the scratch folder; cleanup() removes it on exit

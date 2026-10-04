@@ -1,7 +1,7 @@
 // Director workbench shell: a thin hideable top bar (menu bar + pages from tabs/registry.js + transport + gear), the
 // pages (Timeline, Assets, Review with sub-views; Settings), the restore chevron for a hidden bar, and
 // the wiring of the command system (core/): registry, keymap, menus, palette, history, selection, projects, dock.
-import { store, prefs, toast, PROJECT, api } from './js/store.js';
+import { store, prefs, toast, PROJECT, esc, postJSON } from './js/store.js';
 import { PAGES } from './tabs/registry.js';
 import { fmt } from './js/timeline.js';
 import { installVerify } from './js/verify.js';
@@ -38,11 +38,11 @@ function setTopbar(show) { document.body.classList.toggle('notop', !show); prefs
 function renderTop() {
   const nav = $top.querySelector('nav');
   const all = allPages();
-  nav.innerHTML = all.filter(p => p.tab !== false).map(p => { const n = all.indexOf(p) + 1; return `<a data-tab="${p.id}" class="${p.id === active ? 'on' : ''}" title="${n <= 9 ? 'key ' + n : ''}">${p.title}${p.custom ? '<i data-close="' + p.id + '" title="close page">×</i>' : ''}</a>`; }).join('');
+  nav.innerHTML = all.filter(p => p.tab !== false).map(p => { const n = all.indexOf(p) + 1; return `<a data-tab="${esc(p.id)}" class="${p.id === active ? 'on' : ''}" title="${n <= 9 ? 'key ' + n : ''}">${esc(p.title)}${p.custom ? '<i data-close="' + esc(p.id) + '" title="close page">×</i>' : ''}</a>`; }).join('');
   $top.querySelector('[data-gear]')?.classList.toggle('on', active === 'settings');
 }
 function buildTop() {
-  $top.innerHTML = `<nav></nav><span class="proj" title="project (File > Open)">${PROJECT}</span><span class="tr"><button data-play title="Space">▶</button><span class="clock">0:00.000</span><button data-cmd="view.linear" title="T: linear time">lin</button><button data-cmd="view.zoomOut" title="-">−</button><button data-cmd="view.zoomIn" title="+">+</button><button data-cmd="view.palette" title="Ctrl+K: command palette">⌘</button><button data-cmd="view.topbar" title="\`: hide this bar (the small ⌄ at the top right brings it back)">⌃</button><button data-gear data-cmd="edit.settings" title="Settings (Ctrl+,)">⚙</button></span>`;
+  $top.innerHTML = `<nav></nav><span class="proj" title="project (File > Open)">${esc(PROJECT)}</span><span class="tr"><button data-play title="Space">▶</button><span class="clock">0:00.000</span><button data-cmd="view.linear" title="T: linear time">lin</button><button data-cmd="view.zoomOut" title="-">−</button><button data-cmd="view.zoomIn" title="+">+</button><button data-cmd="view.palette" title="Ctrl+K: command palette">⌘</button><button data-cmd="view.topbar" title="\`: hide this bar (the small ⌄ at the top right brings it back)">⌃</button><button data-gear data-cmd="edit.settings" title="Settings (Ctrl+,)">⚙</button></span>`;
   let lastRefresh = 0;
   renderMenuBar($top).addEventListener('pointerover', () => { if (Date.now() - lastRefresh > 3000) { lastRefresh = Date.now(); projects.refresh(); } });
   renderTop();
@@ -75,7 +75,7 @@ function buildPage(p) {
 function renderSubnav(p) {
   const rec = pages[p.id]; if (!rec?.nav) return;
   const cur = viewOfPage(p);
-  rec.nav.innerHTML = p.subs.map(s => { let n = ''; try { n = s.count?.(store) ?? ''; } catch (e) { /* data not loaded yet */ } return `<a data-sub="${s.id}" class="${s.id === cur ? 'on' : ''}" role="tab">${s.title}<i>${n}</i></a>`; }).join('');
+  rec.nav.innerHTML = p.subs.map(s => { let n = ''; try { n = s.count?.(store) ?? ''; } catch (e) { /* data not loaded yet */ } return `<a data-sub="${esc(s.id)}" class="${s.id === cur ? 'on' : ''}" role="tab">${esc(s.title)}<i>${esc(n)}</i></a>`; }).join('');
 }
 // Assets search: hide the cards / rows of the visible view that do not match (text, ids, titles, status chip)
 const ITEM_SEL = '.cgrid > .card, .lgrid > .lc:not(.add), .lib > .lb.card, .pgrid > .pc, .mgrid > .mc, table.tbl tr[id^="clip-"]';
@@ -168,7 +168,7 @@ store.on(() => { const p = pageById(active); if (p?.subs) renderSubnav(p); });
 // page showed it. {open_project?, view?, t?, range?: [t0, t1], select?: [keys], preview?: key | source | path, message?, play?}
 document.addEventListener('wb:ui', async (e) => {
   const u = e.detail || {};
-  const ack = () => fetch(api('/api/ui/ack'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: u.id }) }).catch(() => {});
+  const ack = () => postJSON('/api/ui/ack', { id: u.id }).catch(() => {});
   try {
     if (u.open_project && u.open_project !== PROJECT) { await ack(); return projects.open(u.open_project); }
     if (u.view) await show(u.view);
@@ -205,7 +205,11 @@ addEventListener('keydown', (e) => {
 (async function boot() {
   const t0 = performance.now();
   buildTop();
-  try { await store.loadAll(); } catch (e) { document.body.innerHTML = `<pre class="err">could not load data for project "${PROJECT}": ${e.message}\nRun: node serve.mjs (in the workbench folder) and open http://localhost:8140/</pre>`; return; }
+  try { await store.loadAll(); } catch (e) {
+    const pre = document.createElement('pre'); pre.className = 'err';
+    pre.textContent = `could not load data for project "${PROJECT}": ${e.message}\nRun: node serve.mjs (in the workbench folder) and open http://localhost:8140/`;
+    document.body.replaceChildren(pre); return;
+  }
   keymap.rebuild();
   const tData = performance.now() - t0;
   if (document.fonts) await document.fonts.ready;

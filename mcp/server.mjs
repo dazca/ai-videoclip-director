@@ -7,7 +7,8 @@
 // It talks to the running workbench (serve.mjs) over HTTP (WORKBENCH_URL, default http://localhost:8140), so the open
 // page refreshes the moment a tool writes. When the server is not running it reads/writes the same project files
 // directly (WORKBENCH_DATA, default <workbench>/data) with the same code (lib/store.mjs); only ui_focus needs the server.
-// Env: WORKBENCH_URL, WORKBENCH_DATA, WORKBENCH_PROJECT (initial current project), WORKBENCH_OFFLINE=1 (never use HTTP).
+// Env: WORKBENCH_URL, WORKBENCH_DATA, WORKBENCH_PROJECT (initial current project), WORKBENCH_OFFLINE=1 (never use HTTP),
+// WB_TOKEN (the server's write token; by default read from <meta name="wb-token"> in the server's /index.html).
 import fs from 'node:fs';
 import path from 'node:path';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -29,17 +30,29 @@ async function server() {
   catch (e) { up = null; }
   checkedAt = Date.now(); return up;
 }
+// the server accepts a write only with its per-run token, which it puts in the page it serves
+let token = process.env.WB_TOKEN || null;
+async function getToken(fresh = false) {
+  if (token && !fresh) return token;
+  const html = await (await fetch(`${BASE_URL}/index.html?project=_`, { signal: AbortSignal.timeout(3000) })).text();
+  token = /<meta name="wb-token" content="([^"]+)">/.exec(html)?.[1] || null;
+  if (!token) throw new S.WbError(503, `no write token in ${BASE_URL}/index.html (is it the workbench server?)`);
+  return token;
+}
 async function http(method, p, project, body, timeout = 15000) {
   const u = `${BASE_URL}${p}${p.includes('?') ? '&' : '?'}project=${encodeURIComponent(project)}`;
-  const r = await fetch(u, { method, signal: AbortSignal.timeout(timeout), ...(body !== undefined ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) });
-  const j = await r.json().catch(() => ({}));
+  const go = async (fresh) => fetch(u, { method, signal: AbortSignal.timeout(timeout),
+    ...(body !== undefined ? { headers: { 'content-type': 'application/json', 'x-wb-token': await getToken(fresh) }, body: JSON.stringify(body) } : {}) });
+  let r = await go(false), j = await r.json().catch(() => ({}));
+  if (r.status === 403 && body !== undefined && /x-wb-token/.test(j.error || '') && !process.env.WB_TOKEN) { r = await go(true); j = await r.json().catch(() => ({})); }   // the server restarted: new token
   if (!r.ok) throw new S.WbError(r.status, j.error || `HTTP ${r.status}`);
   return j;
 }
 async function projectOf(args) { return args?.project || current || (await server())?.default_project || S.CFG.defaultProject; }
 async function op(name, args = {}) {
   const { project: _p, ...a } = args; const p = await projectOf(args);
-  if (await server()) return http('POST', '/api/op/' + name, p, a);
+  // ops that may run ffprobe/ffmpeg (thumbnails) get a long timeout, so a slow video does not look like a failure
+  if (await server()) return http('POST', '/api/op/' + name, p, a, ['media_add', 'request_update', 'entity_upsert'].includes(name) ? 180000 : 15000);
   return S.ops[name](p, a);
 }
 const ok = (v) => ({ content: [{ type: 'text', text: typeof v === 'string' ? v : JSON.stringify(v, null, 1) }] });
@@ -50,6 +63,7 @@ const wrap = (fn) => async (args) => { try { return ok(await fn(args || {})); } 
 const project = z.string().optional().describe('Project id (a folder in data/). Default: the session\'s current project (see the `projects` tool, action "open"), else the server\'s default.');
 const time = z.union([z.number(), z.string()]).describe('Song time: integer milliseconds (61230) or "m:ss.mmm" ("1:01.23").');
 const by = z.string().optional().describe('Who is writing (default "agent"). Use "director" only when you relay the director\'s own words.');
+const directorApproved = z.boolean().optional().describe('true only when the director explicitly said so in this conversation (required to approve or lock).');
 const key = z.string().regex(/^[a-z-]+:.+/).describe('An item key "kind:id": shot:<id>, use:<clip use id e.g. G05@20158>, job:<clip id>, script:<s07>, section:<id>, character:<id>, location:<id>, prop:<id>.');
 
 const mcp = new McpServer({ name: 'director-workbench', version: VERSION }, {
@@ -126,9 +140,9 @@ mcp.registerTool('shot_get', {
 }, wrap((a) => op('shot_get', a)));
 mcp.registerTool('shot_update', {
   title: 'Update a shot or clip use',
-  description: 'Change a shot / clip use. status -> approvals ("review" to ask the director to look; set "approved"/"changes" only when the director said so). note -> a note pinned at its start. title -> the shot title. take / in_ms / file -> which take of a clip use plays and from where (clip uses only; the take\'s file is found in the media index). Timing edits beyond that belong in a request. Returns what changed.',
+  description: 'Change a shot / clip use. status -> approvals ("review" to ask the director to look; "approved"/"locked" need director_approved:true, only when the director said so; "changes" only on their word or your review finding). note -> a note pinned at its start. title -> the shot title. take / in_ms / file -> which take of a clip use plays and from where (clip uses only; the take\'s file is found in the media index). Timing edits beyond that belong in a request. Returns what changed.',
   inputSchema: { project, id: z.string().describe('Shot id or clip use id.'), status: z.enum(['draft', 'review', 'changes', 'approved', 'locked']).optional(), comment: z.string().optional().describe('Stored with the status.'),
-    take: z.number().int().min(0).optional(), in_ms: time.optional().describe('In-point inside the clip file.'), file: z.string().optional(), title: z.string().optional(), note: z.string().optional(), by },
+    take: z.number().int().min(0).optional(), in_ms: time.optional().describe('In-point inside the clip file.'), file: z.string().optional(), title: z.string().optional(), note: z.string().optional(), by, director_approved: directorApproved },
 }, wrap((a) => op('shot_update', a)));
 
 // ------------------------------------------------------------------ entities
@@ -156,7 +170,7 @@ mcp.registerTool('media_list', {
 mcp.registerTool('media_add', {
   title: 'Register a generated file',
   description: 'Add a new file to the media index so it appears in Assets > Media, the preview dock and context menus; makes its thumbnail (and an 8-frame scrub strip for videos) with ffmpeg. path: absolute, relative to the project folder, or under a media root; files outside both are copied into data/<project>/media/<kind>/ (copy:false refuses instead). Link it with entities, shots, uses, job (the request or clip id) and take. Files whose path matches the PRIVATE rule (or private:true) stay local and are never exported.',
-  inputSchema: { project, path: z.string(), kind: z.string().optional().describe('render, clip, still, sheet, variation, audio, ref… (default still).'), label: z.string().optional(),
+  inputSchema: { project, path: z.string(), kind: z.string().regex(/^[a-z0-9_-]{1,32}$/).optional().describe('render, clip, still, sheet, variation, audio, ref… (default still).'), label: z.string().optional(),
     entities: z.array(z.string()).optional(), shots: z.array(z.string()).optional(), uses: z.array(z.string()).optional(), job: z.string().optional(), take: z.number().int().optional(),
     status: z.enum(['used', 'picked', 'unused']).optional(), cost_usd: z.number().optional(), private: z.boolean().optional(), copy: z.boolean().optional() },
 }, wrap((a) => op('media_add', a)));
@@ -181,9 +195,9 @@ mcp.registerTool('approvals_get', {
   inputSchema: { project, keys: z.array(key).optional(), prefix: z.string().optional(), state: z.string().optional() },
 }, wrap((a) => op('approvals_get', a)));
 mcp.registerTool('approve', {
-  title: 'Approve items', description: 'Set items to approved. Approval is the DIRECTOR\'s decision: call this only when the director explicitly approved these items in this conversation (by defaults to "director"). To ask for a review instead, use shot_update status "review".',
-  inputSchema: { project, keys: z.array(key).min(1), comment: z.string().optional(), by },
-}, wrap((a) => op('set_states', { ...a, state: 'approved', by: a.by || 'director' })));
+  title: 'Approve items', description: 'Set items to approved. Approval is the DIRECTOR\'s decision: call this only when the director explicitly approved these items in this conversation, with director_approved:true (refused otherwise; by defaults to "director"). To ask for a review instead, use shot_update status "review".',
+  inputSchema: { project, keys: z.array(key).min(1), comment: z.string().optional(), by, director_approved: directorApproved },
+}, wrap((a) => op('set_states', { ...a, state: 'approved', by: a.by || (a.director_approved ? 'director' : 'agent') })));
 mcp.registerTool('request_changes', {
   title: 'Request changes', description: 'Set items to "changes" with a comment saying what must change (the director\'s words, or your review finding). The item shows red in the status column.',
   inputSchema: { project, keys: z.array(key).min(1), comment: z.string(), by },
@@ -202,10 +216,10 @@ mcp.registerTool('request_create', {
 }, wrap((a) => op('request_create', a)));
 mcp.registerTool('request_update', {
   title: 'Advance or edit a request',
-  description: 'Move a request through draft -> approved -> queued -> running -> done (or rejected). Rules enforced: draft -> approved only with director_approved:true when the director said so in this conversation; queued/running are refused when spent + committed + this est_cost would exceed the cost cap; done needs outputs (paths of the generated files) and actual_cost_usd (what the provider charged): the cost is recorded in costs.json and the outputs are registered as media (thumbnails made). rejected needs why. Editing prompt/refs/est_cost of an approved request sends it back to draft.',
+  description: 'Move a request through draft -> approved -> queued -> running -> done (or rejected). Rules enforced: draft -> approved only with director_approved:true when the director said so in this conversation; queued/running are refused when spent + committed + this est_cost would exceed the cost cap; done needs outputs (paths of the generated files) and actual_cost_usd (what the provider charged): the cost is recorded in costs.json and the outputs are registered as media (thumbnails made). rejected needs why. Editing prompt/refs/est_cost of an approved request sends it back to draft (any other status in the same call is refused).',
   inputSchema: { project, id: z.string(), status: z.enum(['draft', 'approved', 'queued', 'running', 'done', 'rejected']).optional(), prompt: z.string().optional(), refs: z.array(z.string()).optional(),
     est_cost: z.number().min(0).optional(), outputs: z.array(z.string()).optional(), actual_cost_usd: z.number().min(0).optional(), why: z.string().optional(), tool: z.string().optional(),
-    director_approved: z.boolean().optional(), register_media: z.boolean().optional(), media_kind: z.string().optional(), by },
+    director_approved: z.boolean().optional(), register_media: z.boolean().optional(), media_kind: z.string().regex(/^[a-z0-9_-]{1,32}$/).optional(), by },
 }, wrap((a) => op('request_update', a)));
 mcp.registerTool('costs_get', {
   title: 'Costs vs cap', description: 'Spending: cap_usd, spent_usd (recorded jobs), committed_usd (approved + queued + running estimates), drafts_usd, remaining_usd, other ledger rows, and the last 10 cost items. Check before proposing or running anything.',
