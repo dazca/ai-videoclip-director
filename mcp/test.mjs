@@ -29,9 +29,11 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-mcptest-'));
 const DATA = path.join(TMP, 'data'), D = path.join(DATA, PROJECT), MB = path.join(TMP, 'mediabase');
 fs.cpSync(ORIG, D, { recursive: true, filter: (f) => !f.includes(`${path.sep}.snapshots`) });
 for (const [f, t] of [['roots/a.txt', 'public'], ['refs/face.jpg', 'private ref'], ['secret/s.txt', 'outside any root']]) { fs.mkdirSync(path.dirname(path.join(MB, f)), { recursive: true }); fs.writeFileSync(path.join(MB, f), t); }
-fs.writeFileSync(path.join(TMP, 'config.json'), JSON.stringify({ media_roots: ['roots/', 'refs/'], private_media: '^refs/' }));
+// agent_approvals: this suite drives the honor-system flow (director_approved:true from the agent); the default
+// (page-only approvals) is covered by tools/security-test.mjs
+fs.writeFileSync(path.join(TMP, 'config.json'), JSON.stringify({ media_roots: ['roots/', 'refs/'], private_media: '^refs/', agent_approvals: true }));
 Object.assign(process.env, { WORKBENCH_DATA: DATA, WORKBENCH_MEDIA_BASE: MB, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: PROJECT });
-delete process.env.WB_TOKEN; delete process.env.WB_HOST;
+delete process.env.WB_TOKEN; delete process.env.WB_HOST; delete process.env.WB_AGENT_APPROVALS;
 const S = await import('../lib/store.mjs');   // after the env: the same data folder and config as the server
 
 const walk = (dir, rel = '') => { const out = []; for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) { const r = rel ? `${rel}/${e.name}` : e.name; if (e.isDirectory()) out.push(...walk(dir, r)); else out.push(r); } return out; };
@@ -171,18 +173,23 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const jumped = await pageHas((t, s) => s ? s.ui.some(u => u.t === t) : Math.abs(window.WB.timeline.player.time() - t) < 50 && window.WB.dock.current()?.id === 'C3@12000', 15500);
   check('ui_focus reaches the open page (delivered + playhead moved + dock shows the clip)', ui.delivered >= 1 && jumped, { ui, jumped });
 
-  // 8. snapshot round trip: restore -> the notes/requests/costs written above are gone, the page reloads
+  // 8. snapshot round trip: restore -> the notes and the requests that never ran are gone, the page reloads; the request
+  // that ran (done) and its recorded cost survive (spend is never rolled back)
   const rs = await call(mcp, 'snapshot_restore', { snapshot: snap.id });
   const notesAfter = await call(mcp, 'notes_list');
   const reqAfter = await call(mcp, 'requests_list');
   // content back exactly; the shared {rev} files get a rev above the pre-restore one (a stale page gets 409, never overwrites)
   const noRev = (b) => { const j = JSON.parse(b); delete j.rev; return JSON.stringify(j); };
-  const filesBack = ['costs.json', 'shots.json', 'media.json'].every(f => fs.readFileSync(path.join(D, f)).equals(fs.readFileSync(path.join(D, '.snapshots', snap.id, f))))
-    && ['notes.json', 'requests.json', 'approvals.json'].every(f => noRev(fs.readFileSync(path.join(D, f), 'utf8')) === noRev(fs.readFileSync(path.join(D, '.snapshots', snap.id, f), 'utf8'))
-      && JSON.parse(fs.readFileSync(path.join(D, f), 'utf8')).rev > revs[f]);
+  const costsNow = JSON.parse(fs.readFileSync(path.join(D, 'costs.json'), 'utf8')), costsSnap = JSON.parse(fs.readFileSync(path.join(D, '.snapshots', snap.id, 'costs.json'), 'utf8'));
+  const filesBack = ['shots.json', 'media.json'].every(f => fs.readFileSync(path.join(D, f)).equals(fs.readFileSync(path.join(D, '.snapshots', snap.id, f))))
+    && ['notes.json', 'approvals.json'].every(f => noRev(fs.readFileSync(path.join(D, f), 'utf8')) === noRev(fs.readFileSync(path.join(D, '.snapshots', snap.id, f), 'utf8'))
+      && JSON.parse(fs.readFileSync(path.join(D, f), 'utf8')).rev > revs[f])
+    && JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')).rev > revs['requests.json']
+    && costsNow.items.length === costsSnap.items.length + 1 && costsNow.items.some(x => x.request === rq.id);
   const pageBack = await pageHas((id, s) => s ? true : !window.WB.store.notes.notes.some(n => n.id === id), note.id);
   const snaps = await call(mcp, 'snapshot_list');
-  check('snapshot_restore round trip (content identical, rev moves forward, previous state kept, page reloaded)', rs.restored === snap.id && !notesAfter.some(n => n.id === note.id) && !reqAfter.some(r => r.id === rq.id) && filesBack && pageBack && snaps.some(s => s.id === rs.previous && s.auto),
+  check('snapshot_restore round trip (content back, rev moves forward, ran request + its cost kept, previous state kept, page reloaded)', rs.restored === snap.id && !notesAfter.some(n => n.id === note.id)
+    && reqAfter.find(r => r.id === rq.id)?.status === 'done' && !reqAfter.some(r => r.id === big.id) && filesBack && pageBack && snaps.some(s => s.id === rs.previous && s.auto),
     { restored: rs.restored, previous: rs.previous, changed: rs.changed, filesBack, pageBack });
 
   // 9. resources + prompt
@@ -209,8 +216,8 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const ap1 = await call(mcp, 'approve', { keys: ['shot:s2-wall'], director_approved: true });
   const apState = (await call(mcp, 'approvals_get', { keys: ['shot:s2-wall'] })).items['shot:s2-wall'];
   const bogus = await post(`/api/op/set_states?project=${PROJECT}`, { keys: ['shot:s2-wall'], state: 'bogus' });
-  check('approve / lock need director_approved; unknown states refused', /403/.test(ap0.error || '') && /403/.test(lock0.error || '') && ap1.state === 'approved' && apState?.by === 'director' && bogus.status === 400,
-    { ap0: ap0.error, lock0: lock0.error, by: apState?.by, bogus: bogus.status });
+  check('approve / lock need director_approved; unknown states refused', /403/.test(ap0.error || '') && /403/.test(lock0.error || '') && ap1.state === 'approved' && apState?.by === 'agent' && apState?.via === 'agent' && bogus.status === 400,
+    { ap0: ap0.error, lock0: lock0.error, by: apState?.by, via: apState?.via, bogus: bogus.status });
   const src = path.join(TMP, 'kind-src.txt'); fs.writeFileSync(src, 'x');
   const kindBad = await post(`/api/op/media_add?project=${PROJECT}`, { path: src, kind: '../../../escaped' });
   const kindMcp = await call(mcp, 'media_add', { path: src, kind: '../x' });

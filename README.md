@@ -177,8 +177,9 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
   `409` and the page re-applies its change on top of the current file, so an agent's edit is never silently lost.
 - To answer a note: append a note with `by: "agent"` at the same `t` (or set `status: "resolved"`). To ask for a
   review: set an item to `state: "review"`.
-- Generation queue: read `requests.json`; run only `status: "approved"` items; set `queued` / `running`, then `done`
-  with `outputs: [paths]` (or `rejected` + `why`); bump `rev`, write whole, as above. The Queue tab shows it live.
+- Generation queue: read `requests.json`; run only `status: "approved"` items that the director approved in the page
+  (a `log` entry `via: "page"`); move them with `request_update` (MCP / `/api/op`): queued / running, then `done` with
+  `outputs: [paths]` (or `rejected` + `why`). The Queue tab shows it live.
 - New columns: one object in `js/columns.js`. New views: one module in `tabs/` plus one line in `tabs/registry.js`,
   as a sub-view under its page (`{ id, title, load, count?(store) }` in the page's `subs`) or, rarely, a new page
   (a module exports `{ mount(el, ctx), show?(ctx) }`; `ctx.store`, `ctx.timeline`, `ctx.goto(ms)`). At runtime:
@@ -196,7 +197,7 @@ open pages over SSE; returns `{pages, delivered}` once they ack via `POST /api/u
 `POST /api/save/<file>` `{base_rev, data}` (409 + current file when stale) · `GET /api/events` (SSE `{project, file}`) ·
 `GET /api/projects` · `POST /api/projects/new {id}` · `POST /api/projects/duplicate {from, to, reset_state?}` ·
 `POST /api/projects/delete {id}` (the default project is refused) · `GET /api/snapshots` · `POST /api/snapshot {message}` ·
-`POST /api/restore {snapshot}` (auto-snapshots first, copies byte-identical, removes files the snapshot did not have) ·
+`POST /api/restore {snapshot}` (auto-snapshots first, copies the snapshot's JSON back, removes files it did not have; costs and requests that ran since are kept) ·
 `POST /api/reveal {path}` (Explorer at a media file). Writes are temp file + rename with retries (Windows locks);
 small files are served in one read so no handle stays open.
 
@@ -207,13 +208,33 @@ small files are served in one read so no handle stays open.
 - Requests must use an allowed **Host** (localhost / 127.0.0.1 / [::1] on the server's port) and, when sent by a
   browser, no foreign **Origin** (blocks CSRF and DNS rebinding).
 - Every write (POST) must be `application/json` and carry the per-run token in the **`x-wb-token`** header. The server
-  injects it into `index.html` / `dock.html` as `<meta name="wb-token">` and `window.__WB_TOKEN__`; the page and the
+  injects it into `index.html` / `dock.html` as `<meta name="wb-token">` (read by `core/token.js`); the page and the
   MCP server pick it up automatically. Set `WB_TOKEN` to fix it for scripts.
-- Paths with `..`, `.`, backslashes or NUL are rejected; dot-folders are never served; private files (by rule or
+- Only the page's own files are served from the workbench folder (an allow-list: `index.html`, `dock.html`, `app.js`,
+  `app.css`, `README.md`, `core/`, `js/`, `tabs/`; case-insensitive). The page shell carries a Content-Security-Policy
+  with `script-src 'self'` (no inline scripts, no eval; media may also be `https:` / `data:` / `blob:`); every other
+  file gets a sandboxing CSP and `nosniff`, so an HTML/SVG file in a project cannot run script in the workbench origin.
+  An invalid `?project=` is redirected to the default project.
+- Paths with `..`, `.`, backslashes, NUL, `:` (NTFS streams) or `~<digit>` (8.3 short names) are rejected; dot-folders are never served; private files (by rule or
   `private: true` in `media.json`) live under `private/<kind>/` and are never exported or packaged.
-- Approvals are the director's: `approve` (and `shot_update` to approved/locked) need `director_approved: true`, which
-  an agent must only pass when the human explicitly approved in the conversation. A cost cap of **0 blocks all paid
-  requests**. A snapshot restore bumps each file's `rev` (stale pages get 409 instead of overwriting).
+- Approvals are the director's, and by default **only the page approves**: a click in the page (POST `/api/save`) is
+  stamped `via: "page"` (in a request's `log`, on an `approvals.json` item). The agent surface (`/api/op`, the MCP
+  tools, offline mode) refuses `approve`, `shot_update` approved/locked and a request's draft -> approved even with
+  `director_approved: true`, unless the owner sets `"agent_approvals": true` in `workbench.config.json` (or
+  `WB_AGENT_APPROVALS=1`): then that flag counts, recorded `via: "agent"`. A request is queued / run only on a recorded
+  approval after its last draft (a status typed into `requests.json` by hand is refused). Notes written through the
+  tools carry `via: "agent"`, and the `director-session` briefing does not present them as the director's.
+  Trade-off: with the default the director must click (the agent can show the item with `ui_focus`); this guards the
+  tool surface, not an agent that edits the files directly with shell access.
+- Editing an approved request's prompt, refs, `est_cost` or tool sends it back to draft. A cost cap of **0 blocks all
+  paid requests**. A snapshot restore bumps each file's `rev` (stale pages get 409 instead of overwriting) and never
+  rolls back spend: costs recorded since the snapshot stay, a request that ran since keeps its state, and a restored
+  approval that is not the current one goes back to draft (listed in `kept_since_snapshot`); the current `cap_usd`
+  is kept, and an agent's `snapshot_restore` brings an approved / locked item back as `review`, not approved.
+  Duplicating a project sends the copy's approved / queued / running requests back to draft.
+- Entity thumbnails and copies made from private media stay private (`thumbs/priv_*`, `private/<kind>/`).
+- The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
+  (and no workbench token), and keeps backslash references inside the composition folder.
 
 ## Export: HTML package of a HyperFrames composition (`exporters/hyperframes-html/`)
 

@@ -19,7 +19,7 @@
 import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { serve, launch, sha256, rgb, ffprobe, sleep, argv } from './lib.mjs';
+import { serve, launch, confine, sha256, rgb, ffprobe, sleep, argv } from './lib.mjs';
 
 const OUT = resolve(process.argv[2] || '');
 const RENDER = argv('--against');
@@ -57,14 +57,14 @@ const frames = times.map((t) => Math.min(Math.round(t * FPS), Math.floor((D - 1e
 
 // ---------- 2. load
 const srv = await serve([{ prefix: '/', dir: OUT }]);
-const browser = await launch();
+const browser = await launch(srv.url);
 const page = await browser.newPage();
 await page.setViewport({ width: W, height: H, deviceScaleFactor: 1 });
 const errors = [], netFails = [], externalReqs = [];
 page.on('pageerror', (e) => errors.push(String(e && e.message || e)));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-page.on('request', (q) => { const u = q.url(); if (/^https?:/.test(u) && !u.startsWith(srv.url)) externalReqs.push(u); });
-page.on('requestfailed', (q) => { const f = q.failure() && q.failure().errorText; if (f !== 'net::ERR_ABORTED') netFails.push(`${q.url()} ${f}`); });
+await confine(page, srv.url, (u) => externalReqs.push(u)); // aborted unfetched, still reported as external
+page.on('requestfailed', (q) => { const f = q.failure() && q.failure().errorText; if (f !== 'net::ERR_ABORTED' && f !== 'net::ERR_BLOCKED_BY_CLIENT') netFails.push(`${q.url()} ${f}`); });
 const t0 = Date.now();
 await page.goto(srv.url + 'index.html', { waitUntil: 'load', timeout: 300000 });
 await page.waitForFunction(() => { const p = document.querySelector('hyperframes-player'); return p && p.ready && p.duration > 0; }, { timeout: 300000, polling: 100 });

@@ -25,7 +25,8 @@ function diff(field, a, b) {
 }
 // an entry is undone / redone only while it still holds what this step left there: if the agent (or another page) has
 // changed it since, re-applying the whole stale copy would drop that work (outputs, actual cost, a resolution)
-const canon = (v) => JSON.stringify(v, (k, x) => x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : x);
+// via / log are the server's provenance stamps on a page save (serve.mjs stampPage), not part of the edit
+const canon = (v) => JSON.stringify(v, (k, x) => k === 'via' || k === 'log' ? undefined : x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : x);
 const current = (field, d, key) => { const c = COLL[field].get(d); return COLL[field].map ? c[key] : c.find(x => x.id === key); };
 const unchanged = (field, d, ch, side) => canon(current(field, d, ch.key)) === canon(ch[side === 'before' ? 'after' : 'before']);
 function apply(field, d, changes, side) {

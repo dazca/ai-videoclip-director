@@ -40,6 +40,8 @@ export const sha256 = (file) => createHash('sha256').update(readFileSync(file)).
 export function serve(mounts, port = 0) {
   const log = [];
   const srv = createServer((req, res) => {
+    // loopback names only: a page on another origin cannot reach this server through DNS rebinding
+    if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/i.test(req.headers.host || '')) { res.writeHead(421).end(); return; }
     let path; try { path = decodeURIComponent(req.url.split('?')[0]); } catch { path = req.url; }
     const rec = { path, method: req.method, status: 0, bytes: 0, file: null }; log.push(rec);
     let file = null, body = null;
@@ -92,14 +94,28 @@ export function findChrome() {
   return findAnyChrome();
 }
 
-export async function launch() {
+// srvUrl: the only server the pages may reach. Everything else (WebSockets too, which request interception never sees)
+// goes to a dead proxy and fails; confine() below aborts the rest before it leaves the page.
+export async function launch(srvUrl) {
   const { default: puppeteer } = await import('puppeteer-core');
   const exe = findChrome();
   if (!exe) throw new Error('no Chrome found: set CHROME_PATH');
   return puppeteer.launch({
     executablePath: exe, headless: true, protocolTimeout: 900000,
     args: ['--hide-scrollbars', '--mute-audio', '--autoplay-policy=no-user-gesture-required', '--disable-background-timer-throttling',
-      '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'],
+      '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
+      ...(srvUrl ? ['--proxy-server=http://127.0.0.1:9', `--proxy-bypass-list=<-loopback>;${new URL(srvUrl).host}`] : [])],
+  });
+}
+
+// The composition's JavaScript runs in these pages: keep every request on the exporter's own server (srvUrl) so it can
+// never reach the workbench or anything else on loopback or the network. data: and blob: stay local; everything else is
+// aborted unfetched and passed to onBlocked (callers still list it as external).
+export async function confine(page, srvUrl, onBlocked = () => {}) {
+  await page.setRequestInterception(true);
+  page.on('request', (q) => {
+    const u = q.url();
+    if (u.startsWith(srvUrl) || /^(data|blob):/i.test(u)) q.continue(); else { onBlocked(u); q.abort('blockedbyclient'); }
   });
 }
 

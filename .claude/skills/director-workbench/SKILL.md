@@ -32,7 +32,8 @@ formats and how to add features.
    `looks[]`. A missing look or angle becomes a generation request, not a guess.
 5. **Storyboard**: one frame per shot (thumbs), reviewed in the page; `ui_focus` to walk the director through it.
 6. **Generation requests**: `request_create` drafts with a concrete prompt, refs, tool and an honest `est_cost`.
-   The director approves in Review > Queue (or tells you; then `request_update` with `director_approved: true`).
+   The director approves in Review > Queue (show it with `ui_focus` view "queue"). Only if the owner enabled
+   `agent_approvals` may you pass `director_approved: true`, and only when they said so in the conversation.
 7. **Run** only approved requests: `request_update` queued -> running -> (call the provider) -> done with `outputs` and
    `actual_cost_usd`; on failure rejected + `why`. Outputs become media automatically; attach them to uses with
    `shot_update` (take, in_ms) and to entities with `entity_upsert`.

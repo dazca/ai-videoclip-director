@@ -13,7 +13,7 @@
 // Screenshots + verify-interactive.json in <report> (default <outDir>-verify/interactive). Exit code 1 on a failure.
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { serve, launch, sleep, argv } from '../lib.mjs';
+import { serve, launch, confine, sleep, argv } from '../lib.mjs';
 
 const OUT = resolve(process.argv[2] || '');
 if (!process.argv[2] || !existsSync(join(OUT, 'interactive.html'))) { console.error('usage: node interactive/verify-interactive.mjs <outDir> (with interactive.html)'); process.exit(2); }
@@ -29,13 +29,15 @@ const say = (s) => console.log(s);
 const check = (name, ok, detail) => { R.checks.push({ name, ok: !!ok, detail }); say(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail !== undefined ? '  ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); };
 
 const srv = await serve([{ prefix: '/', dir: OUT }]);
-const browser = await launch();
+const browser = await launch(srv.url);
 const page = await browser.newPage();
 await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1 });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e && e.message || e)));
 // interactive.project.json is optional (only with --project): its 404 is not an error
 page.on('console', (m) => { if (m.type() === 'error' && !/\/interactive\.project\.json$/.test((m.location() || {}).url || '')) errors.push(m.text()); });
+const blocked = [];
+await confine(page, srv.url, (u) => blocked.push(u)); // the film's JS stays on this server
 await page.goto(srv.url + 'interactive.html', { waitUntil: 'load', timeout: 300000 });
 await page.waitForFunction(() => window.IX && IX.ready && IX.playing(), { timeout: 300000, polling: 100 });
 const shot = (name) => page.screenshot({ path: join(REPORT, name + '.png') });
@@ -201,6 +203,7 @@ check('"live" returns to where the film would be', Math.abs(tc - (ta + 0.6)) < 0
 await browser.close(); await srv.close();
 R.errors = [...new Set(errors)];
 check('no page errors', !R.errors.length, R.errors.slice(0, 5));
+R.external_blocked = [...new Set(blocked)]; if (blocked.length) say(`external URLs (blocked, never fetched): ${R.external_blocked.slice(0, 5).join(', ')}`);
 writeFileSync(join(REPORT, 'verify-interactive.json'), JSON.stringify(R, null, 1));
 const fails = R.checks.filter((c) => !c.ok).length;
 say(`${R.checks.length - fails}/${R.checks.length} checks passed -> ${join(REPORT, 'verify-interactive.json')}`);

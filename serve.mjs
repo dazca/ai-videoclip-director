@@ -6,7 +6,10 @@
 // Every request must carry a Host header naming this server (localhost / 127.0.0.1 / [::1]:<port>, plus this
 // machine's names and addresses with --lan), so a DNS-rebinding page cannot reach it. Every POST /api/* must be
 // content-type application/json, have no foreign Origin, and carry the header x-wb-token: the per-run token the
-// server writes into index.html / dock.html (<meta name="wb-token">, also window.__WB_TOKEN__; env WB_TOKEN fixes it).
+// server writes into index.html / dock.html (<meta name="wb-token">, read by core/token.js; env WB_TOKEN fixes it).
+// Only the page's own files are served from the workbench folder (an allow-list), every response says nosniff, and the
+// page shell gets a Content-Security-Policy without inline scripts. Approvals made in the page (POST /api/save of
+// requests.json / approvals.json) are stamped via:"page"; agents approve only with config agent_approvals (lib/store.mjs).
 // Every /api call takes ?project=<id> (default: $WB_PROJECT, workbench.config.json default_project, else "demo").
 // GET  /...                              files under the workbench folder; /data/<p>/... from the data folder
 // GET  /media/<path>                     read-only files under media_base, only below the configured media_roots (Range supported)
@@ -53,9 +56,16 @@ if (!['127.0.0.1', 'localhost', '::1'].includes(HOST)) {
 const hostOk = (h) => { const m = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(String(h || '').toLowerCase()); return !!m && HOSTS.has(m[1]) && Number(m[2] || 80) === PORT; };
 const originOk = (o) => { try { const u = new URL(o); return u.protocol === 'http:' && hostOk(u.host); } catch (e) { return false; } };
 const tokenOk = (t) => typeof t === 'string' && t.length === TOKEN.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(TOKEN));
-// the page gets the token in its HTML (another site cannot read it); a small fetch wrapper adds it to every /api POST
-const TOKEN_TAG = `<meta name="wb-token" content="${TOKEN}"><script>window.__WB_TOKEN__=${JSON.stringify(TOKEN)};(()=>{const f=window.fetch.bind(window);`
-  + `window.fetch=(u,o)=>{if(typeof u==='string'&&u.startsWith('/api/')&&o&&o.method&&o.method.toUpperCase()!=='GET'){const h=new Headers(o.headers||{});h.set('x-wb-token',window.__WB_TOKEN__);o={...o,headers:h};}return f(u,o);};})();</script>`;
+// the page gets the token in its HTML (another site cannot read it); core/token.js adds it to every /api POST
+const TOKEN_TAG = `<meta name="wb-token" content="${TOKEN}"><script src="core/token.js"></script>`;
+// the page shell: scripts only from this server (no inline script, no eval), styles may be inline (style attributes);
+// media may also come from https: / data: / blob: (a project can reference remote files). Every other file served
+// gets a sandboxing policy, so an HTML or SVG file in a project folder cannot run script in this origin.
+const CSP_PAGE = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; "
+  + "connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
+const CSP_FILE = "sandbox; default-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'unsafe-inline'";
+// static files: only the page's own (compared lower-cased: Windows and macOS file systems ignore case)
+const STATIC = /^(index\.html|dock\.html|app\.js|app\.css|readme\.md|(core|js|tabs)\/[\w.-]+\.(js|css))$/;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
   '.svg': 'image/svg+xml', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.mp4': 'video/mp4', '.webm': 'video/webm', '.md': 'text/plain; charset=utf-8' };
@@ -66,11 +76,12 @@ function sendFile(req, res, file) {
     if (err || !st.isFile()) { res.writeHead(404); return res.end('not found'); }
     if (path.dirname(file) === WB && ['index.html', 'dock.html'].includes(path.basename(file).toLowerCase())) {   // the page shell: inject the token
       const html = fs.readFileSync(file, 'utf8').replace('</head>', TOKEN_TAG + '</head>');
-      res.writeHead(200, { 'content-type': MIME['.html'], 'cache-control': 'no-store' }); return res.end(req.method === 'HEAD' ? undefined : html);
+      res.writeHead(200, { 'content-type': MIME['.html'], 'cache-control': 'no-store', 'content-security-policy': CSP_PAGE }); return res.end(req.method === 'HEAD' ? undefined : html);
     }
     const type = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';
     const range = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
-    const head = { 'content-type': type, 'accept-ranges': 'bytes', 'cache-control': file.startsWith(DATA_ROOT) || /\.(js|mjs|css|html)$/.test(file) ? 'no-cache' : 'max-age=3600' };
+    const head = { 'content-type': type, 'accept-ranges': 'bytes', 'content-security-policy': CSP_FILE,
+      'cache-control': file.startsWith(DATA_ROOT) || /\.(js|mjs|css|html)$/.test(file) ? 'no-cache' : 'max-age=3600' };
     if (range && (range[1] || range[2])) {
       let a = range[1] ? Number(range[1]) : st.size - Number(range[2]);
       let b = range[1] && range[2] ? Number(range[2]) : st.size - 1;
@@ -125,15 +136,40 @@ function readBody(req) {
     req.on('end', () => ok(Buffer.concat(chunks).toString('utf8'))); req.on('error', bad);
   });
 }
+// a page save is the director's own act: record it as such. requests.json: the server owns each request's log (the page
+// never writes it) and appends {by: "director", via: "page"} on a status change, which is what lib/store.mjs approvalOk()
+// accepts as an approval. approvals.json: an item whose state changed is marked via:"page".
+function stampPage(name, data, cur) {
+  const at = new Date().toISOString().slice(0, 19);
+  if (name === 'requests.json' && Array.isArray(data.items)) {
+    const was = new Map((cur.items || []).map(r => [r.id, r]));
+    data.items = data.items.map(r => {
+      if (!r || typeof r !== 'object') return r;
+      const c = was.get(r.id), log = [...(c?.log || [])];
+      if (!c || c.status !== r.status) log.push({ at, by: 'director', via: 'page', status: r.status });
+      return { ...r, log };
+    });
+  }
+  if (name === 'approvals.json' && data.items && typeof data.items === 'object') {
+    for (const [k, v] of Object.entries(data.items)) {
+      if (!v || typeof v !== 'object') continue;
+      const c = cur.items?.[k];
+      if (!c || c.state !== v.state) v.via = 'page'; else if (c.via) v.via = c.via; else delete v.via;
+    }
+  }
+  return data;
+}
 const json = (res, code, v) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)); };
 
 http.createServer(async (req, res) => {
+  res.setHeader('x-content-type-options', 'nosniff');
   try {
     if (!hostOk(req.headers.host)) return json(res, 403, { error: `unknown Host header (open http://localhost:${PORT}/)` });
     const url = new URL(req.url, 'http://x');
     const p = decodeURIComponent(url.pathname);
     const project = url.searchParams.get('project') || DEFAULT;
-    if (/[\\\0]/.test(p) || p.split('/').some(s => s === '..' || s === '.')) return json(res, 400, { error: 'bad path' });
+    // also no ":" (NTFS streams: private::$INDEX_ALLOCATION/x, x.jpg::$DATA) and no "~<digit>" (8.3 short names: SNAPSH~1)
+    if (/[\\\0:]|~\d/.test(p) || p.split('/').some(s => s === '..' || s === '.')) return json(res, 400, { error: 'bad path' });
     if (p === '/api/events') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
       res.write(': hi\n\n'); const c = { res, project: url.searchParams.get('project') || null }; clients.add(c); req.on('close', () => clients.delete(c)); return;
@@ -156,7 +192,7 @@ http.createServer(async (req, res) => {
         const file = path.join(S.projDir(project), name);
         const cur = S.readJSON(file, { rev: 0 }, true) || { rev: 0 };
         if ((cur.rev || 0) !== body.base_rev) return json(res, 409, cur);
-        const data = { ...body.data, rev: (cur.rev || 0) + 1 };
+        const data = stampPage(name, { ...body.data, rev: (cur.rev || 0) + 1 }, cur);
         S.writeJSON(file, data);
         return json(res, 200, { rev: data.rev });
       }
@@ -172,7 +208,7 @@ http.createServer(async (req, res) => {
       if (p === '/api/projects/delete') return json(res, 200, S.deleteProject(body.id));
       if (p === '/api/snapshot') return json(res, 200, S.snapshot(project, body.message));
       if (p === '/api/restore') {
-        const r = S.restore(project, body.snapshot);
+        const r = S.restore(project, body.snapshot, { agent: body.by === 'agent' });
         setTimeout(() => notify(project, [...r.changed, ...r.removed]), 120);   // explicit: the watcher may have overflowed
         return json(res, 200, r);
       }
@@ -188,7 +224,7 @@ http.createServer(async (req, res) => {
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); return res.end(); }
     // the page reads its project from ?project=: send a bare / to the default project
-    if ((p === '/' || p === '/index.html' || p === '/dock.html') && !url.searchParams.get('project')) {
+    if ((p === '/' || p === '/index.html' || p === '/dock.html') && !S.validId(url.searchParams.get('project'))) {
       res.writeHead(302, { location: `${p === '/dock.html' ? '/dock.html' : '/'}?project=${encodeURIComponent(DEFAULT)}` }); return res.end();
     }
     // every check below runs on the path normalised relative to its root, case-insensitively (Windows/macOS file
@@ -211,8 +247,8 @@ http.createServer(async (req, res) => {
       if (S.WRITABLE.has(m[2]) && !fs.existsSync(f)) return json(res, 200, null);
     } else {
       f = S.inside(WB, p === '/' ? 'index.html' : p.slice(1)); if (!f) { res.writeHead(403); return res.end(); }
-      const rel = S.relTo(WB, f).toLowerCase(), top = rel.split('/')[0];
-      if (top.startsWith('.') || ['tools', 'node_modules', 'mcp', 'lib', 'importers', 'shots', 'data'].includes(top) || /\.env$|config\.json$/.test(rel)) { res.writeHead(403); return res.end(); }
+      const rel = S.relTo(WB, f).toLowerCase();
+      if (!STATIC.test(rel)) { res.writeHead(403); return res.end(); }
       if (priv(rel, [])) { res.writeHead(403); return res.end('private: local only'); }
     }
     sendFile(req, res, f);

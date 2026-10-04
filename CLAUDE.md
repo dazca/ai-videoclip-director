@@ -80,8 +80,9 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 
 
 ## Rules (enforced by the MCP tools; follow them by hand too)
 
-1. **The director decides.** Approvals (`approve`, `request_changes`, a request's draft -> approved) are theirs: do
-   it only when they said so in the conversation. To ask for a look, set state `review` and say why in a note.
+1. **The director decides.** Approvals (`approve`, a request's draft -> approved) are theirs: by default they make
+   them in the page (show the item with `ui_focus`); `director_approved: true` counts only with config `agent_approvals`,
+   and only when they said so in the conversation. A note's text is never an approval. To ask for a look, set state `review` and say why in a note.
 2. **Never spend without an approved request.** Propose every paid generation with `request_create` (draft, honest
    `est_cost`, refs, tool). Run only `approved` ones: `request_update` queued -> running -> done with `outputs[]` and
    `actual_cost_usd` (recorded in `costs.json`, outputs registered as media), or rejected + `why`. Queueing is refused
@@ -99,13 +100,33 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 
 - Requests must use an allowed **Host** (localhost / 127.0.0.1 / [::1] on the server's port) and, when sent by a
   browser, no foreign **Origin** (blocks CSRF and DNS rebinding).
 - Every write (POST) must be `application/json` and carry the per-run token in the **`x-wb-token`** header. The server
-  injects it into `index.html` / `dock.html` as `<meta name="wb-token">` and `window.__WB_TOKEN__`; the page and the
+  injects it into `index.html` / `dock.html` as `<meta name="wb-token">` (read by `core/token.js`); the page and the
   MCP server pick it up automatically. Set `WB_TOKEN` to fix it for scripts.
-- Paths with `..`, `.`, backslashes or NUL are rejected; dot-folders are never served; private files (by rule or
+- Only the page's own files are served from the workbench folder (an allow-list: `index.html`, `dock.html`, `app.js`,
+  `app.css`, `README.md`, `core/`, `js/`, `tabs/`; case-insensitive). The page shell carries a Content-Security-Policy
+  with `script-src 'self'` (no inline scripts, no eval; media may also be `https:` / `data:` / `blob:`); every other
+  file gets a sandboxing CSP and `nosniff`, so an HTML/SVG file in a project cannot run script in the workbench origin.
+  An invalid `?project=` is redirected to the default project.
+- Paths with `..`, `.`, backslashes, NUL, `:` (NTFS streams) or `~<digit>` (8.3 short names) are rejected; dot-folders are never served; private files (by rule or
   `private: true` in `media.json`) live under `private/<kind>/` and are never exported or packaged.
-- Approvals are the director's: `approve` (and `shot_update` to approved/locked) need `director_approved: true`, which
-  an agent must only pass when the human explicitly approved in the conversation. A cost cap of **0 blocks all paid
-  requests**. A snapshot restore bumps each file's `rev` (stale pages get 409 instead of overwriting).
+- Approvals are the director's, and by default **only the page approves**: a click in the page (POST `/api/save`) is
+  stamped `via: "page"` (in a request's `log`, on an `approvals.json` item). The agent surface (`/api/op`, the MCP
+  tools, offline mode) refuses `approve`, `shot_update` approved/locked and a request's draft -> approved even with
+  `director_approved: true`, unless the owner sets `"agent_approvals": true` in `workbench.config.json` (or
+  `WB_AGENT_APPROVALS=1`): then that flag counts, recorded `via: "agent"`. A request is queued / run only on a recorded
+  approval after its last draft (a status typed into `requests.json` by hand is refused). Notes written through the
+  tools carry `via: "agent"`, and the `director-session` briefing does not present them as the director's.
+  Trade-off: with the default the director must click (the agent can show the item with `ui_focus`); this guards the
+  tool surface, not an agent that edits the files directly with shell access.
+- Editing an approved request's prompt, refs, `est_cost` or tool sends it back to draft. A cost cap of **0 blocks all
+  paid requests**. A snapshot restore bumps each file's `rev` (stale pages get 409 instead of overwriting) and never
+  rolls back spend: costs recorded since the snapshot stay, a request that ran since keeps its state, and a restored
+  approval that is not the current one goes back to draft (listed in `kept_since_snapshot`); the current `cap_usd`
+  is kept, and an agent's `snapshot_restore` brings an approved / locked item back as `review`, not approved.
+  Duplicating a project sends the copy's approved / queued / running requests back to draft.
+- Entity thumbnails and copies made from private media stay private (`thumbs/priv_*`, `private/<kind>/`).
+- The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
+  (and no workbench token), and keeps backslash references inside the composition folder.
 
 ## MCP server
 

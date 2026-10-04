@@ -22,7 +22,7 @@
 // is refused (exit 3) and nothing is written, because the composition would still reference it.
 import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync, copyFileSync, realpathSync, rmSync, readdirSync } from 'node:fs';
 import { join, resolve, dirname, relative, extname, posix, sep, basename } from 'node:path';
-import { serve, launch, kindOf, mimeOf, sha256, mediaInfo, sleep, argv, flag } from './lib.mjs';
+import { serve, launch, confine, kindOf, mimeOf, sha256, mediaInfo, sleep, argv, flag } from './lib.mjs';
 import { CFG, isPrivate, isMediaRootPath, readJSON } from '../../lib/store.mjs';
 import { addInteractive } from './interactive/build.mjs';
 
@@ -98,6 +98,9 @@ const wrapper = `<!doctype html>
 const staticRefs = new Map(); // composition-relative posix path -> Set(of referrers)
 const external = new Set();
 const absoluteRefs = new Set(); // composition-relative paths referenced root-absolute ("/x"): rewritten in the package
+const outside = (where) => (staticRefs.outside ||= new Set()).add(where);
+// a composition-relative path stays inside the composition AND inside OUT/composition (backslashes, drive letters, ..)
+const within = (rel) => { const c = resolve(COMP), d = resolve(OUT, CDIR); return resolve(c, rel).startsWith(c + sep) && resolve(d, rel).startsWith(d + sep); };
 function addRef(fromFileRel, ref, baseRel) {
   if (!ref) return;
   ref = ref.trim().replace(/^['"]|['"]$/g, '');
@@ -106,8 +109,9 @@ function addRef(fromFileRel, ref, baseRel) {
   const clean = ref.split('#')[0].split('?')[0];
   let p;
   try { p = decodeURIComponent(clean); } catch { p = clean; }
+  p = p.replace(/\\/g, '/'); // as the browser reads it; on Windows path.join would treat "\" as a separator
   p = p.startsWith('/') ? posix.normalize(p.slice(1)) : posix.normalize(posix.join(baseRel, p));
-  if (p.startsWith('..')) { (staticRefs.outside ||= new Set()).add(`${fromFileRel}: ${ref}`); return; }
+  if (p.startsWith('..') || !within(p)) { outside(`${fromFileRel}: ${ref}`); return; }
   if (ref.startsWith('/')) absoluteRefs.add(p);
   if (!staticRefs.has(p)) staticRefs.set(p, new Set());
   staticRefs.get(p).add(fromFileRel + (ref.startsWith('/') ? ' (root-absolute)' : ''));
@@ -140,9 +144,9 @@ function scanFile(rel, docBase) {
 // String literals in a loaded script that name an existing file (relative to the document, as the browser resolves them).
 function scanJsLiterals(rel, src, base) {
   for (const m of src.matchAll(/(["'`])((?:\.{0,2}\/)?[\w@.\-~ %()+]+(?:\/[\w@.\-~ %()+]+)*\.[A-Za-z0-9]{2,5})\1/g)) {
-    const lit = m[2]; if (/^(https?:)?\/\//.test(lit)) continue;
-    const p = lit.startsWith('/') ? lit.slice(1) : posix.normalize(posix.join(base, lit));
-    if (!p.startsWith('..') && existsSync(join(COMP, p)) && statSync(join(COMP, p)).isFile()) addRef(rel + ' (js literal)', lit, base);
+    const lit = m[2].replace(/\\/g, '/'); if (/^(https?:)?\/\//.test(lit)) continue;
+    const p = lit.startsWith('/') ? posix.normalize(lit.slice(1)) : posix.normalize(posix.join(base, lit));
+    if (!p.startsWith('..') && within(p) && existsSync(join(COMP, p)) && statSync(join(COMP, p)).isFile()) addRef(rel + ' (js literal)', lit, base);
   }
 }
 const dirOf = (rel) => posix.dirname(rel) === '.' ? '' : posix.dirname(rel);
@@ -165,16 +169,17 @@ log(`static scan: ${staticRefs.size} references (${[...staticRefs.keys()].filter
 // ---------------------------------------------------------------- 4. headless pass through the player
 const hfContent = new Map([[`/${HDIR}/hyperframes-player.global.js`, playerPatched], [`/${HDIR}/hyperframe.runtime.iife.js`, HF.runtime], ['/index.html', Buffer.from(wrapper)], ['/', Buffer.from(wrapper)]]);
 const srv = await serve([{ content: hfContent }, { prefix: `/${CDIR}/`, dir: COMP }, { prefix: '/', dir: COMP }]); // last: root-absolute refs
-const browser = await launch();
+const browser = await launch(srv.url);
 const page = await browser.newPage();
 const errors = [], netFails = [], browserReqs = [];
 page.on('pageerror', (e) => errors.push(String(e && e.message || e)));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 page.on('request', (q) => browserReqs.push({ url: q.url(), type: q.resourceType() }));
-page.on('requestfailed', (q) => { const f = q.failure() && q.failure().errorText; if (f !== 'net::ERR_ABORTED') netFails.push(`${q.url()} ${f}`); });
+page.on('requestfailed', (q) => { const f = q.failure() && q.failure().errorText; if (f !== 'net::ERR_ABORTED' && f !== 'net::ERR_BLOCKED_BY_CLIENT') netFails.push(`${q.url()} ${f}`); });
 let W = 1920, H = 1080;
 { const m = /data-width\s*=\s*["']?(\d+)/.exec(entryHtml), n = /data-height\s*=\s*["']?(\d+)/.exec(entryHtml); if (m) W = +m[1]; if (n) H = +n[1]; }
 await page.setViewport({ width: W, height: H, deviceScaleFactor: 1 });
+await confine(page, srv.url, (u) => external.add(u)); // never fetched: the composition's JS cannot reach the workbench or the network
 const t0 = Date.now();
 await page.goto(srv.url + 'index.html', { waitUntil: 'load', timeout: 300000 });
 await page.waitForFunction(() => { const p = document.querySelector('hyperframes-player'); return p && p.ready && p.duration > 0; }, { timeout: 300000, polling: 200 });
@@ -290,7 +295,7 @@ const urlToRel = (u) => {
 };
 const files = new Map(); // rel -> {sources:Set, absolute:bool, requests:n, status}
 const missing = new Map(); // rel -> {statuses, method}
-const touch = (rel, src) => { if (!files.has(rel)) files.set(rel, { sources: new Set(), requests: 0, bytesServed: 0 }); files.get(rel).sources.add(src); return files.get(rel); };
+const touch = (rel, src) => { if (!within(rel)) { outside(`${src}: ${rel}`); return { requests: 0, bytesServed: 0 }; } if (!files.has(rel)) files.set(rel, { sources: new Set(), requests: 0, bytesServed: 0 }); files.get(rel).sources.add(src); return files.get(rel); };
 for (const r of srv.log) {
   let p = r.path.replace(/^\//, '');
   if (p === '' || p === 'index.html' || p.startsWith(HDIR + '/')) continue;

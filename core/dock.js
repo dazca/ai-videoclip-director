@@ -13,7 +13,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<
 const fmt = (ms) => { const s = Math.max(0, ms) / 1000, m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(2).padStart(5, '0')}`; };
 const FILM = { kind: 'film' };
 const CORNERS = ['br', 'bl', 'tr', 'tl'];
-const STANDALONE = !!window.WB_DOCK_STANDALONE;
+const STANDALONE = !!window.WB_DOCK_STANDALONE || document.body.classList.contains('dockwin');   // dock.html (no inline script: CSP)
 let chan = null; try { chan = new BroadcastChannel('wb-dock-' + PROJECT); } catch (e) { /* old browser */ }
 
 // ------------------------------------------------------------------ source helpers (plain, serialisable objects)

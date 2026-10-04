@@ -60,7 +60,7 @@ export const store = {
   emit(what) { for (const fn of [...this.listeners]) fn(what); },
 
   async loadAll() {
-    try { const r = await fetch('/api/config', { cache: 'no-cache' }); if (r.ok) { Object.assign(config, await r.json()); if (config.private_re) PRIVATE_RE = new RegExp(config.private_re); } } catch (e) { /* static hosting */ }
+    try { const r = await fetch('/api/config', { cache: 'no-cache' }); if (r.ok) { Object.assign(config, await r.json()); if (config.private_re) PRIVATE_RE = new RegExp(config.private_re, 'i'); } } catch (e) { /* static hosting */ }
     const [song, events, energy, script, shots, costs, index] = await Promise.all(
       ['song.json', 'events.json', 'energy.json', 'script.json', 'shots.json', 'costs.json', 'entities/index.json'].map(f => getJSON(f)));
     Object.assign(this, { song, events, energy, script, shots: shots.shots, uses: shots.uses, costs });
