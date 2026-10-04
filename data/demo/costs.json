@@ -1,0 +1,29 @@
+{
+ "cap_usd": 10,
+ "source": "synthetic demo: every file was made with ffmpeg for $0",
+ "items": [
+  {
+   "id": "C1",
+   "t": 4000,
+   "usd": 0,
+   "tool": "ffmpeg mandelbrot (synthetic)",
+   "date": "2026-10-04"
+  },
+  {
+   "id": "C2",
+   "t": 8000,
+   "usd": 0,
+   "tool": "ffmpeg life (synthetic)",
+   "date": "2026-10-04"
+  },
+  {
+   "id": "C3",
+   "t": 12000,
+   "usd": 0,
+   "tool": "ffmpeg cellauto (synthetic)",
+   "date": "2026-10-04"
+  }
+ ],
+ "pre_production": [],
+ "ledger": []
+}

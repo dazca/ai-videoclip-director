@@ -1,0 +1,29 @@
+{
+  "name": "director-workbench",
+  "version": "0.3.0",
+  "description": "A vertical, time-synced, multi-column workbench for directing a music video with an AI agent (plus an MCP server so any Claude session can drive it).",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "workbench-mcp": "mcp/server.mjs"
+  },
+  "scripts": {
+    "start": "node serve.mjs",
+    "mcp": "node mcp/server.mjs",
+    "verify": "node tools/verify.mjs --project demo",
+    "test:mcp": "node mcp/test.mjs",
+    "new-project": "node importers/new_project.mjs",
+    "demo": "node tools/make_demo.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.12.0"
+  }
+}

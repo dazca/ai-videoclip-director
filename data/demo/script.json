@@ -1,0 +1,96 @@
+{
+ "stages": [
+  {
+   "name": "Test card",
+   "t0": 0,
+   "t1": 4000,
+   "text": "Only the screen."
+  },
+  {
+   "name": "The wall",
+   "t0": 4000,
+   "t1": 18000,
+   "text": "The world appears behind the test card."
+  },
+  {
+   "name": "Off",
+   "t0": 18000,
+   "t1": 20000,
+   "text": "Back to the screen."
+  }
+ ],
+ "lines": [
+  {
+   "id": "s01",
+   "t0": 1000,
+   "lyric": "Tone on, lights low",
+   "mode": "S",
+   "action": "test card fades up; the tone starts",
+   "line_id": "intro/0"
+  },
+  {
+   "id": "s02",
+   "t0": 4000,
+   "lyric": "A square of colour on the wall",
+   "mode": "W",
+   "action": "Ada faces the fractal wall",
+   "line_id": "verse/0"
+  },
+  {
+   "id": "s03",
+   "t0": 6000,
+   "lyric": "It hums the note it heard at all",
+   "mode": "W",
+   "action": "Ada faces the fractal wall",
+   "line_id": "verse/1"
+  },
+  {
+   "id": "s04",
+   "t0": 8000,
+   "lyric": "The grid keeps time, the bars line up",
+   "mode": "W",
+   "action": "the grid keeps time; Bo counts bars on the tone generator",
+   "line_id": "verse/2"
+  },
+  {
+   "id": "s05",
+   "t0": 10000,
+   "lyric": "One more beat to fill the cup",
+   "mode": "W",
+   "action": "the grid keeps time; Bo counts bars on the tone generator",
+   "line_id": "verse/3"
+  },
+  {
+   "id": "s06",
+   "t0": 12000,
+   "lyric": "Sing it in sine, sing it in square",
+   "mode": "W→S",
+   "action": "both sing; cuts on every bar",
+   "line_id": "chorus/0"
+  },
+  {
+   "id": "s07",
+   "t0": 14000,
+   "lyric": "Every frame is waiting there",
+   "mode": "W→S",
+   "action": "both sing; cuts on every bar",
+   "line_id": "chorus/1"
+  },
+  {
+   "id": "s08",
+   "t0": 16000,
+   "lyric": "Sing it in sine, sing it in square",
+   "mode": "W→S",
+   "action": "both sing; cuts on every bar",
+   "line_id": "chorus/2"
+  },
+  {
+   "id": "s09",
+   "t0": 18200,
+   "lyric": "Tone off",
+   "mode": "S",
+   "action": "tone off: back to the test card",
+   "line_id": "outro/0"
+  }
+ ]
+}

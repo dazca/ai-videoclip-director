@@ -1,0 +1,70 @@
+// Projects and snapshots (server endpoints in serve.mjs), plus the exports (JSON bundle, shot list CSV, storyboard).
+// Projects live in workbench/data/<id>/; snapshots in data/<id>/.snapshots/<timestamp>-<slug>/ (small JSON files only).
+import { store, PROJECT, api, mediaUrl, toast, prefs, isPrivatePath } from '../js/store.js';
+
+async function call(path, body) {
+  const r = await fetch(api(path), body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+const validId = (s) => /^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/.test(s || '');
+export const slugId = (s) => String(s || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
+
+export const projects = {
+  current: PROJECT,
+  list: [], snaps: [],
+  async refresh() {
+    try { [this.list, this.snaps] = await Promise.all([call('/api/projects'), call('/api/snapshots')]); } catch (e) { /* static hosting */ }
+    return this;
+  },
+  recent() { return prefs.get('recentProjects', []).filter(id => id !== PROJECT); },
+  remember() { prefs.set('recentProjects', [PROJECT, ...prefs.get('recentProjects', []).filter(x => x !== PROJECT)].slice(0, 8)); },
+  open(id) { const u = new URL(location.href); u.searchParams.set('project', id); location.href = u.toString(); },
+  async create(id) { if (!validId(id)) throw new Error('bad id'); await call('/api/projects/new', { id }); await this.refresh(); return id; },
+  async duplicate(to, { from = PROJECT, template = false } = {}) { if (!validId(to)) throw new Error('bad id'); await call('/api/projects/duplicate', { from, to, reset_state: template }); await this.refresh(); return to; },
+  async remove(id) { await call('/api/projects/delete', { id }); await this.refresh(); },
+  async snapshot(message) { const m = await call('/api/snapshot', { message }); await this.refresh(); toast(`snapshot saved: ${m.message || m.id}`); return m; },
+  async restore(id) { const r = await call('/api/restore', { snapshot: id }); await this.refresh(); toast(`restored ${id} (previous state kept as ${r.previous})`); return r; },
+  async reveal(path) { try { await call('/api/reveal', { path }); } catch (e) { toast('cannot open: ' + e.message); } },
+};
+
+// ------------------------------------------------------------------ exports
+function download(name, text, type = 'application/json') {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+const fmt = (ms) => { const s = Math.max(0, ms) / 1000, m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(3).padStart(6, '0')}`; };
+const csv = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+
+function scrub(v) {
+  if (Array.isArray(v)) return v.filter(x => !isPrivatePath(x) && !(x && typeof x === 'object' && (x.private === true || isPrivatePath(x.path)))).map(scrub);
+  if (v && typeof v === 'object') { const o = {}; for (const [k, x] of Object.entries(v)) { if (k === 'private_refs' || k === 'private_media' || isPrivatePath(x)) continue; o[k] = scrub(x); } return o; }
+  return v;
+}
+export const exporter = {
+  // everything exported goes through scrub(): private media (crops of real photos) never leave the machine
+  bundleData() {
+    const { song, events, energy, script, shots, uses, costs, notes, approvals, requests, overrides, entities, media } = store;
+    return scrub({ project: PROJECT, exported: new Date().toISOString(), song, events, energy, script, shots: { shots, uses }, costs, notes, approvals, requests, overrides, entities, media: (media || []).filter(m => !m.private) });
+  },
+  bundle() { download(`${PROJECT}-bundle.json`, JSON.stringify(this.bundleData(), null, 1)); },
+  shotList() {
+    const rows = [['id', 't0', 't1', 'start', 'end', 'section', 'kind', 'title', 'cast', 'locations', 'clips', 'state']];
+    for (const s of store.shots) rows.push([s.id, s.t0, s.t1, fmt(s.t0), fmt(s.t1), s.section, s.kind, s.title, s.cast.join(' '), s.locations.join(' '), s.clips.join(' '), store.state('shot:' + s.id)]);
+    download(`${PROJECT}-shots.csv`, rows.map(r => r.map(csv).join(',')).join('\n'), 'text/csv');
+  },
+  storyboard() {
+    const base = location.origin + location.pathname.replace(/[^/]*$/, '');
+    const abs = (p) => { const u = mediaUrl(p); return u.startsWith('/') ? location.origin + u : base + u; };
+    const html = `<!doctype html><meta charset="utf-8"><title>${esc(PROJECT)} storyboard</title><style>
+      body{font:11px/1.3 "Segoe UI",Arial,sans-serif;margin:8mm;color:#111} h1{font-size:14px;margin:0 0 6px}
+      .g{display:grid;grid-template-columns:repeat(4,1fr);gap:6px} .s{break-inside:avoid;border:1px solid #bbb;padding:3px}
+      .s img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block;background:#eee} .s b{font-size:11px} .s i{color:#666;font-style:normal}
+      @page{size:A4 landscape;margin:8mm}</style>
+      <h1>${esc(PROJECT)} · storyboard · ${store.shots.length} shots · ${new Date().toISOString().slice(0, 10)}</h1><div class="g">${store.shots.map(s => `<div class="s"><img src="${esc(abs(s.thumb))}"><b>${esc(s.id)}</b> <i>${fmt(s.t0)}–${fmt(s.t1)} · ${esc(s.kind)} · ${esc(store.state('shot:' + s.id))}</i><div>${esc(s.title)}</div></div>`).join('')}</div>`;
+    const w = window.open('', '_blank'); if (!w) { download(`${PROJECT}-storyboard.html`, html, 'text/html'); return; }
+    w.document.write(html); w.document.close();
+  },
+};

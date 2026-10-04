@@ -1,0 +1,43 @@
+{
+ "rev": 1,
+ "states": [
+  "draft",
+  "review",
+  "changes",
+  "approved",
+  "locked"
+ ],
+ "items": {
+  "shot:s1-intro": {
+   "state": "approved",
+   "by": "director",
+   "at": "2026-10-04T12:00:00"
+  },
+  "shot:s2-wall": {
+   "state": "approved",
+   "by": "director",
+   "at": "2026-10-04T12:00:00"
+  },
+  "shot:s3-grid": {
+   "state": "changes",
+   "by": "director",
+   "at": "2026-10-04T12:00:00",
+   "comment": "Bo should be on the beat, not before it"
+  },
+  "shot:s4-chorus": {
+   "state": "review",
+   "by": "agent",
+   "at": "2026-10-04T12:00:00"
+  },
+  "use:C1@4000": {
+   "state": "approved",
+   "by": "director",
+   "at": "2026-10-04T12:00:00"
+  },
+  "character:ada": {
+   "state": "approved",
+   "by": "director",
+   "at": "2026-10-04T12:00:00"
+  }
+ }
+}

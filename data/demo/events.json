@@ -1,0 +1,38 @@
+[
+ {
+  "id": "section_intro",
+  "t": 0,
+  "kind": "section",
+  "note": "Intro starts"
+ },
+ {
+  "id": "section_verse",
+  "t": 3700,
+  "kind": "section",
+  "note": "Verse starts"
+ },
+ {
+  "id": "section_chorus",
+  "t": 11700,
+  "kind": "section",
+  "note": "Chorus starts"
+ },
+ {
+  "id": "drop_chorus",
+  "t": 12000,
+  "kind": "drop",
+  "note": "chorus: octave up, hats in"
+ },
+ {
+  "id": "section_outro",
+  "t": 17900,
+  "kind": "section",
+  "note": "Outro starts"
+ },
+ {
+  "id": "stop_outro",
+  "t": 18000,
+  "kind": "stop",
+  "note": "kick stops"
+ }
+]

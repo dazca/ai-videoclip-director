@@ -1,0 +1,26 @@
+{
+ "rev": 1,
+ "items": [
+  {
+   "id": "rdemo01",
+   "kind": "new-variant",
+   "target": "use:C3@12000",
+   "prompt": "C3 again with a warm palette (orange on dark blue), same motion",
+   "refs": [
+    "media/clip/C3_0.mp4",
+    "media/still/I1.jpg"
+   ],
+   "est_cost": 0.4,
+   "status": "draft",
+   "by": "director",
+   "at": "2026-10-04T12:00:00",
+   "log": [
+    {
+     "at": "2026-10-04T12:00:00",
+     "by": "director",
+     "status": "draft"
+    }
+   ]
+  }
+ ]
+}

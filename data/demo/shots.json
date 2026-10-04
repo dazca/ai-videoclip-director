@@ -1,0 +1,172 @@
+{
+ "source": "tools/make_demo.mjs (synthetic)",
+ "shots": [
+  {
+   "id": "s1-intro",
+   "t0": 0,
+   "t1": 4000,
+   "section": "intro",
+   "kind": "screen",
+   "title": "test card fades up; the tone starts",
+   "cast": [],
+   "locations": [
+    "S"
+   ],
+   "clips": [],
+   "lines": [
+    "intro/0"
+   ],
+   "render_frame_ms": 2000,
+   "thumb": "thumbs/shot_s1-intro.jpg",
+   "render": "render/demo-v1.mp4"
+  },
+  {
+   "id": "s2-wall",
+   "t0": 4000,
+   "t1": 8000,
+   "section": "verse",
+   "kind": "world",
+   "title": "Ada faces the fractal wall",
+   "cast": [
+    "ada"
+   ],
+   "locations": [
+    "S"
+   ],
+   "clips": [
+    "C1@4000"
+   ],
+   "lines": [
+    "verse/0",
+    "verse/1"
+   ],
+   "render_frame_ms": 6000,
+   "thumb": "thumbs/shot_s2-wall.jpg",
+   "render": "render/demo-v1.mp4"
+  },
+  {
+   "id": "s3-grid",
+   "t0": 8000,
+   "t1": 12000,
+   "section": "verse",
+   "kind": "split",
+   "title": "the grid keeps time; Bo counts bars on the tone generator",
+   "cast": [
+    "bo"
+   ],
+   "locations": [
+    "S"
+   ],
+   "clips": [
+    "C2@8000"
+   ],
+   "lines": [
+    "verse/2",
+    "verse/3"
+   ],
+   "render_frame_ms": 10000,
+   "thumb": "thumbs/shot_s3-grid.jpg",
+   "render": "render/demo-v1.mp4"
+  },
+  {
+   "id": "s4-chorus",
+   "t0": 12000,
+   "t1": 18000,
+   "section": "chorus",
+   "kind": "world",
+   "title": "both sing; cuts on every bar",
+   "cast": [
+    "ada",
+    "bo"
+   ],
+   "locations": [
+    "S"
+   ],
+   "clips": [
+    "C3@12000",
+    "C1@15000"
+   ],
+   "lines": [
+    "chorus/0",
+    "chorus/1",
+    "chorus/2"
+   ],
+   "render_frame_ms": 15000,
+   "thumb": "thumbs/shot_s4-chorus.jpg",
+   "render": "render/demo-v1.mp4"
+  },
+  {
+   "id": "s5-outro",
+   "t0": 18000,
+   "t1": 20000,
+   "section": "outro",
+   "kind": "screen",
+   "title": "tone off: back to the test card",
+   "cast": [],
+   "locations": [
+    "S"
+   ],
+   "clips": [],
+   "lines": [
+    "outro/0"
+   ],
+   "render_frame_ms": 19000,
+   "thumb": "thumbs/shot_s5-outro.jpg",
+   "render": "render/demo-v1.mp4"
+  }
+ ],
+ "uses": [
+  {
+   "id": "C1@4000",
+   "clip": "C1",
+   "t0": 4000,
+   "t1": 8000,
+   "in_ms": 0,
+   "take": 0,
+   "label": "the fractal wall breathes",
+   "file": "media/clip/C1_0.mp4",
+   "start_image": "media/still/I1.jpg",
+   "location": "S",
+   "thumb": "thumbs/use_C1_0_0.jpg"
+  },
+  {
+   "id": "C2@8000",
+   "clip": "C2",
+   "t0": 8000,
+   "t1": 12000,
+   "in_ms": 500,
+   "take": 0,
+   "label": "cells keep the grid",
+   "file": "media/clip/C2_0.mp4",
+   "start_image": "media/still/I1.jpg",
+   "location": "S",
+   "thumb": "thumbs/use_C2_0_500.jpg"
+  },
+  {
+   "id": "C3@12000",
+   "clip": "C3",
+   "t0": 12000,
+   "t1": 15000,
+   "in_ms": 0,
+   "take": 0,
+   "label": "rule 110 rain",
+   "file": "media/clip/C3_0.mp4",
+   "start_image": "media/still/I1.jpg",
+   "location": "S",
+   "thumb": "thumbs/use_C3_0_0.jpg"
+  },
+  {
+   "id": "C1@15000",
+   "clip": "C1",
+   "t0": 15000,
+   "t1": 18000,
+   "in_ms": 500,
+   "take": 1,
+   "label": "the wall, green take",
+   "file": "media/clip/C1_1.mp4",
+   "start_image": "media/still/I1.jpg",
+   "location": "S",
+   "thumb": "thumbs/use_C1_1_500.jpg"
+  }
+ ]
+}

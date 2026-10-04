@@ -1,0 +1,347 @@
+{
+ "count": 13,
+ "by_kind": {
+  "render": 1,
+  "audio": 1,
+  "clip": 4,
+  "still": 7
+ },
+ "items": [
+  {
+   "id": "demo-v1",
+   "path": "render/demo-v1.mp4",
+   "kind": "render",
+   "label": "render demo-v1",
+   "entities": [],
+   "shots": [
+    "s1-intro",
+    "s2-wall",
+    "s3-grid",
+    "s4-chorus",
+    "s5-outro"
+   ],
+   "uses": [],
+   "take": null,
+   "job": null,
+   "group": "render",
+   "size": 486570,
+   "w": 320,
+   "h": 180,
+   "duration_ms": 20000,
+   "private": false,
+   "status": "used",
+   "cost_usd": null,
+   "thumb": "thumbs/m_demo-v1.jpg",
+   "strip": "thumbs/s_demo-v1.jpg",
+   "strip_n": 8,
+   "added": "2026-10-04T13:15:47"
+  },
+  {
+   "id": "demo-song",
+   "path": "audio/demo-song.mp3",
+   "kind": "audio",
+   "label": "mix (synthetic tone track)",
+   "entities": [],
+   "shots": [],
+   "uses": [],
+   "take": null,
+   "job": null,
+   "group": "audio",
+   "size": 240788,
+   "w": null,
+   "h": null,
+   "duration_ms": 20000,
+   "private": false,
+   "status": "used",
+   "cost_usd": null,
+   "thumb": "thumbs/m_demo-song.jpg",
+   "added": "2026-10-04T13:15:47"
+  },
+  {
+   "id": "C1_0",
+   "path": "media/clip/C1_0.mp4",
+   "kind": "clip",
+   "label": "C1 take 0",
+   "entities": [
+    "ada",
+    "studio"
+   ],
+   "shots": [
+    "s2-wall"
+   ],
+   "uses": [
+    "C1@4000"
+   ],
+   "take": 0,
+   "job": "C1",
+   "group": "C1",
+   "size": 22017,
+   "w": 256,
+   "h": 144,
+   "duration_ms": 3000,
+   "private": false,
+   "status": "used",
+   "cost_usd": 0,
+   "thumb": "thumbs/m_C1_0.jpg",
+   "strip": "thumbs/s_C1_0.jpg",
+   "strip_n": 8,
+   "added": "2026-10-04T13:15:47"
+  },
+  {
+   "id": "C1_1",
+   "path": "media/clip/C1_1.mp4",
+   "kind": "clip",
+   "label": "C1 take 1",
+   "entities": [
+    "ada",
+    "studio"
+   ],
+   "shots": [
+    "s4-chorus"
+   ],
+   "uses": [
+    "C1@15000"
+   ],
+   "take": 1,
+   "job": "C1",
+   "group": "C1",
+   "size": 32144,
+   "w": 256,
+   "h": 144,
+   "duration_ms": 3000,
+   "private": false,
+   "status": "used",
+   "cost_usd": 0,
+   "thumb": "thumbs/m_C1_1.jpg",
+   "strip": "thumbs/s_C1_1.jpg",
+   "strip_n": 8,
+   "added": "2026-10-04T13:15:48"
+  },
+  {
+   "id": "C2_0",
+   "path": "media/clip/C2_0.mp4",
+   "kind": "clip",
+   "label": "C2 take 0",
+   "entities": [
+    "bo",
+    "studio"
+   ],
+   "shots": [
+    "s3-grid"
+   ],
+   "uses": [
+    "C2@8000"
+   ],
+   "take": 0,
+   "job": "C2",
+   "group": "C2",
+   "size": 72313,
+   "w": 256,
+   "h": 144,
+   "duration_ms": 3000,
+   "private": false,
+   "status": "used",
+   "cost_usd": 0,
+   "thumb": "thumbs/m_C2_0.jpg",
+   "strip": "thumbs/s_C2_0.jpg",
+   "strip_n": 8,
+   "added": "2026-10-04T13:15:48"
+  },
+  {
+   "id": "C3_0",
+   "path": "media/clip/C3_0.mp4",
+   "kind": "clip",
+   "label": "C3 take 0",
+   "entities": [
+    "ada",
+    "bo",
+    "studio"
+   ],
+   "shots": [
+    "s4-chorus"
+   ],
+   "uses": [
+    "C3@12000"
+   ],
+   "take": 0,
+   "job": "C3",
+   "group": "C3",
+   "size": 30768,
+   "w": 256,
+   "h": 144,
+   "duration_ms": 3000,
+   "private": false,
+   "status": "used",
+   "cost_usd": 0,
+   "thumb": "thumbs/m_C3_0.jpg",
+   "strip": "thumbs/s_C3_0.jpg",
+   "strip_n": 8,
+   "added": "2026-10-04T13:15:48"
+  },
+  {
+   "id": "I1",
+   "path": "media/still/I1.jpg",
+   "kind": "still",
+   "label": "I1 start image",
+   "entities": [
+    "studio"
+   ],
+   "shots": [
+    "s2-wall",
+    "s3-grid",
+    "s4-chorus"
+   ],
+   "uses": [],
+   "take": 0,
+   "job": "I1",
+   "group": "I1",
+   "size": 2916,
+   "w": 480,
+   "h": 270,
+   "duration_ms": null,
+   "private": false,
+   "status": "used",
+   "cost_usd": 0,
+   "thumb": "thumbs/m_I1.jpg",
+   "added": "2026-10-04T13:15:48"
+  },
+  {
+   "id": "ada_face",
+   "path": "media/still/ada_face.jpg",
+   "kind": "still",
+   "label": "Ada face (placeholder)",
+   "entities": [
+    "ada"
+   ],
+   "shots": [],
+   "uses": [],
+   "take": null,
+   "job": null,
+   "group": "still",
+   "size": 18995,
+   "w": 240,
+   "h": 240,
+   "duration_ms": null,
+   "private": false,
+   "status": "picked",
+   "cost_usd": 0,
+   "thumb": "thumbs/m_ada_face.jpg",
+   "added": "2026-10-04T13:15:48"
+  },
+  {
+   "id": "ada_body",
+   "path": "media/still/ada_body.jpg",
+   "kind": "still",
+   "label": "Ada body (placeholder)",
+   "entities": [
+    "ada"
+   ],
+   "shots": [],
+   "uses": [],
+   "take": null,
+   "job": null,
+   "group": "still",
+   "size": 6373,
+   "w": 270,
+   "h": 480,
+   "duration_ms": null,
+   "private": false,
+   "status": "picked",
+   "cost_usd": 0,
+   "thumb": "thumbs/m_ada_body.jpg",
+   "added": "2026-10-04T13:15:48"
+  },
+  {
+   "id": "bo_face",
+   "path": "media/still/bo_face.jpg",
+   "kind": "still",
+   "label": "Bo face (placeholder)",
+   "entities": [
+    "bo"
+   ],
+   "shots": [],
+   "uses": [],
+   "take": null,
+   "job": null,
+   "group": "still",
+   "size": 33148,
+   "w": 240,
+   "h": 240,
+   "duration_ms": null,
+   "private": false,
+   "status": "picked",
+   "cost_usd": 0,
+   "thumb": "thumbs/m_bo_face.jpg",
+   "added": "2026-10-04T13:15:48"
+  },
+  {
+   "id": "bo_body",
+   "path": "media/still/bo_body.jpg",
+   "kind": "still",
+   "label": "Bo body (placeholder)",
+   "entities": [
+    "bo"
+   ],
+   "shots": [],
+   "uses": [],
+   "take": null,
+   "job": null,
+   "group": "still",
+   "size": 4429,
+   "w": 270,
+   "h": 480,
+   "duration_ms": null,
+   "private": false,
+   "status": "picked",
+   "cost_usd": 0,
+   "thumb": "thumbs/m_bo_body.jpg",
+   "added": "2026-10-04T13:15:48"
+  },
+  {
+   "id": "studio",
+   "path": "media/still/studio.jpg",
+   "kind": "still",
+   "label": "studio establishing (test pattern)",
+   "entities": [
+    "studio"
+   ],
+   "shots": [],
+   "uses": [],
+   "take": null,
+   "job": null,
+   "group": "still",
+   "size": 11065,
+   "w": 480,
+   "h": 270,
+   "duration_ms": null,
+   "private": false,
+   "status": "picked",
+   "cost_usd": 0,
+   "thumb": "thumbs/m_studio.jpg",
+   "added": "2026-10-04T13:15:48"
+  },
+  {
+   "id": "tone_generator",
+   "path": "media/still/tone_generator.jpg",
+   "kind": "still",
+   "label": "tone generator hero (colour bars)",
+   "entities": [
+    "tone-generator"
+   ],
+   "shots": [],
+   "uses": [],
+   "take": null,
+   "job": null,
+   "group": "still",
+   "size": 5698,
+   "w": 480,
+   "h": 270,
+   "duration_ms": null,
+   "private": false,
+   "status": "picked",
+   "cost_usd": 0,
+   "thumb": "thumbs/m_tone_generator.jpg",
+   "added": "2026-10-04T13:15:48"
+  }
+ ]
+}

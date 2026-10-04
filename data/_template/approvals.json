@@ -1,0 +1,11 @@
+{
+ "rev": 1,
+ "states": [
+  "draft",
+  "review",
+  "changes",
+  "approved",
+  "locked"
+ ],
+ "items": {}
+}

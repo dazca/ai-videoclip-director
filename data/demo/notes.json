@@ -1,0 +1,23 @@
+{
+ "rev": 1,
+ "notes": [
+  {
+   "id": "n01",
+   "t": 4000,
+   "line_id": "verse/0",
+   "by": "director",
+   "text": "the wall should appear exactly on the downbeat",
+   "status": "open",
+   "at": "2026-10-04T12:00:00"
+  },
+  {
+   "id": "n02",
+   "t": 12000,
+   "line_id": "chorus/0",
+   "by": "director",
+   "text": "more colour in the chorus; try a warmer take of C3",
+   "status": "open",
+   "at": "2026-10-04T12:00:00"
+  }
+ ]
+}

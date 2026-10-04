@@ -1,0 +1,26 @@
+[
+ {
+  "id": "ada",
+  "kind": "character",
+  "name": "Ada",
+  "path": "entities/characters/ada.json"
+ },
+ {
+  "id": "bo",
+  "kind": "character",
+  "name": "Bo",
+  "path": "entities/characters/bo.json"
+ },
+ {
+  "id": "studio",
+  "kind": "location",
+  "name": "S · studio",
+  "path": "entities/locations/studio.json"
+ },
+ {
+  "id": "tone-generator",
+  "kind": "prop",
+  "name": "Tone generator",
+  "path": "entities/props/tone-generator.json"
+ }
+]

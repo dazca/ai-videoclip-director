@@ -1,0 +1,21 @@
+{
+ "id": "tone-generator",
+ "kind": "prop",
+ "status": "draft",
+ "refs": [
+  "media/still/tone_generator.jpg"
+ ],
+ "description": "the box that makes the song",
+ "hero": "media/still/tone_generator.jpg",
+ "images": [
+  {
+   "path": "media/still/tone_generator.jpg",
+   "still": null,
+   "clips": []
+  }
+ ],
+ "variants": [],
+ "name": "Tone generator",
+ "thumb": "thumbs/ent_tone-generator.jpg",
+ "thumb_src": "media/still/tone_generator.jpg"
+}

@@ -1,0 +1,171 @@
+// Data store: loads the project files, saves the writable ones through the server, listens for file changes.
+// Writable (shared with the agent, each {rev, ...}): approvals.json, notes.json, requests.json, overrides.json, settings.json.
+// Every page edit goes through store.mutate(), which records an undo step (core/history.js) unless {record:false}.
+// the server redirects a bare / to ?project=<its default project>
+export const PROJECT = new URLSearchParams(location.search).get('project') || 'demo';
+export const DATA = `data/${PROJECT}/`;
+export const api = (p) => `${p}${p.includes('?') ? '&' : '?'}project=${encodeURIComponent(PROJECT)}`;
+
+// server config (GET /api/config, read at boot): the media roots and the PRIVATE path rule of this machine
+export const config = { media_roots: [], default_project: null };
+// a path under one of the configured media roots is base-relative (served at /media/<path>); anything else is
+// relative to the project's data folder
+export function mediaUrl(p) {
+  if (!p) return '';
+  if (config.media_roots.some(r => p.startsWith(r))) return '/media/' + p.split('/').map(encodeURIComponent).join('/');
+  if (/^(https?:|data:|blob:|\/)/.test(p)) return p;
+  return DATA + p;
+}
+
+async function getJSON(name, dflt) {
+  const r = await fetch(DATA + name, { cache: 'no-cache' });
+  if (!r.ok) { if (dflt !== undefined) return structuredClone(dflt); throw new Error(`${name}: ${r.status}`); }
+  const j = await r.json();
+  return j == null && dflt !== undefined ? structuredClone(dflt) : j;
+}
+
+function b64ToInt8(s) { const bin = atob(s); const a = new Int8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = (bin.charCodeAt(i) << 24) >> 24; return a; }
+
+// file -> store field, and the default content when the file does not exist yet
+export const WRITABLE = {
+  'approvals.json': ['approvals', { rev: 0, states: ['draft', 'review', 'changes', 'approved', 'locked'], items: {} }],
+  'notes.json': ['notes', { rev: 0, notes: [] }],
+  'requests.json': ['requests', { rev: 0, items: [] }],
+  'overrides.json': ['overrides', { rev: 0, sections: {} }],
+  'settings.json': ['settings', { rev: 0, keybindings: {} }],
+};
+const FULL = /^(song|events|energy|script|shots|costs|media)\.json$|^entities\//;
+// PRIVATE files (e.g. crops of real photos): shown only in the local page (lock badge), never exported (see
+// core/projects.js exporter). Always thumbs/priv_* and any path with a private/ folder, plus the server's private_media rule.
+export let PRIVATE_RE = /(^|\/)thumbs\/priv_|(^|\/)private\//;
+export const isPrivatePath = (p) => typeof p === 'string' && PRIVATE_RE.test(p);
+const nowIso = () => new Date().toISOString().slice(0, 19);
+
+export const store = {
+  project: PROJECT,
+  song: null, events: null, energy: null, script: null, shots: null, uses: null, costs: null,
+  notes: null, approvals: null, requests: null, overrides: null, settings: null, entities: [], media: [], mediaById: {}, mediaByPath: {}, peaks: {},
+  listeners: new Set(),
+  onMutate: null,                 // set by core/history.js: (entry) => void
+  on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
+  // iterate a copy: a listener may unsubscribe and subscribe again (the timeline rebuilds on "all"); iterating the live
+  // Set would visit the new subscription and rebuild forever
+  emit(what) { for (const fn of [...this.listeners]) fn(what); },
+
+  async loadAll() {
+    try { const r = await fetch('/api/config', { cache: 'no-cache' }); if (r.ok) { Object.assign(config, await r.json()); if (config.private_re) PRIVATE_RE = new RegExp(config.private_re); } } catch (e) { /* static hosting */ }
+    const [song, events, energy, script, shots, costs, index] = await Promise.all(
+      ['song.json', 'events.json', 'energy.json', 'script.json', 'shots.json', 'costs.json', 'entities/index.json'].map(f => getJSON(f)));
+    Object.assign(this, { song, events, energy, script, shots: shots.shots, uses: shots.uses, costs });
+    await Promise.all(Object.entries(WRITABLE).map(async ([f, [field, d]]) => { this[field] = await getJSON(f, d); }));
+    this.entities = await Promise.all(index.map(e => getJSON(e.path)));
+    this.entityById = Object.fromEntries(this.entities.map(e => [e.id, e]));
+    this.media = (await getJSON('media.json', { items: [] })).items || [];
+    this.mediaById = Object.fromEntries(this.media.map(m => [m.id, m]));
+    this.mediaByPath = Object.fromEntries(this.media.map(m => [m.path, m]));
+    if (song.audio?.mix) await this.loadPeaks(['mix']);
+  },
+  async loadPeaks(ids) {
+    await Promise.all(ids.filter(id => !this.peaks[id]).map(async id => {
+      const p = await getJSON(`peaks/${id}.json`, null);
+      if (p) this.peaks[id] = { binMs: p.bin_ms, n: p.n, min: b64ToInt8(p.min), max: b64ToInt8(p.max), levels: null };
+    }));
+  },
+  // a file can be caught mid-write (Windows falls back to an in-place copy when a reader holds it): retry
+  async reload(files, retry = 2) {
+    try { await this._reload(files); } catch (e) { if (retry) { await new Promise(r => setTimeout(r, 250)); return this.reload(files, retry - 1); } console.warn('reload failed', files, e); }
+  },
+  async _reload(files) {
+    if (files.includes('*')) files = [...files.filter(f => f !== '*'), ...Object.keys(WRITABLE)];   // unknown change: re-check the shared state
+    if (files.some(f => FULL.test(f))) { await this.loadAll(); this.emit('all'); return; }
+    for (const file of files) {
+      // our own saves come back here too: apply only when the file differs from what the page has (agent edit, restore)
+      if (WRITABLE[file]) { const [field, d] = WRITABLE[file]; const v = await getJSON(file, d); if (JSON.stringify(v) !== JSON.stringify(this[field])) { this[field] = v; this.emit(field); } }
+      else if (/^peaks\//.test(file)) { const id = file.slice(6, -5); delete this.peaks[id]; await this.loadPeaks([id]); this.emit('peaks'); }
+    }
+  },
+  listen() {
+    try {
+      const es = new EventSource(api('/api/events'));
+      let pending = new Set(), timer = 0;
+      es.onmessage = (ev) => {
+        const { project, file, ui } = JSON.parse(ev.data);
+        if (project !== PROJECT && project !== '*') return;
+        if (ui) { document.dispatchEvent(new CustomEvent('wb:ui', { detail: ui })); return; }   // live UI channel (an agent's ui_focus)
+        pending.add(file); clearTimeout(timer);
+        timer = setTimeout(() => { const f = [...pending]; pending = new Set(); this.reload(f); }, 150);   // a restore touches many files: one reload
+      };
+    } catch (e) { /* static hosting: no live updates */ }
+  },
+
+  // ---- approvals
+  state(key) { return this.approvals?.items[key]?.state || 'draft'; },
+  setState(key, state, comment) { return this.setStates([key], state, comment); },
+  setStates(keys, state, comment) {
+    return this.mutate('approvals.json', (d) => {
+      for (const key of keys) d.items[key] = { ...(d.items[key] || {}), state, by: 'director', at: nowIso(), ...(comment ? { comment } : {}) };
+    }, { label: `${state} ${keys.length === 1 ? keys[0] : keys.length + ' items'}` });
+  },
+  cycle(key) {
+    const order = ['draft', 'approved', 'changes'];
+    const s = this.state(key);
+    return this.setState(key, order[(order.indexOf(s) + 1) % order.length] || 'approved');
+  },
+  // ---- notes
+  addNote(t, text, line_id, extra) {
+    return this.mutate('notes.json', (d) => {
+      const n = d.notes.reduce((m, x) => Math.max(m, Number(String(x.id).replace(/\D/g, '')) || 0), 0) + 1;
+      d.notes.push({ id: `n${String(n).padStart(2, '0')}`, t: Math.round(t), line_id: line_id || null, by: 'director', text, status: 'open', at: nowIso(), ...(extra || {}) });
+      d.notes.sort((a, b) => a.t - b.t);
+    }, { label: 'add note' });
+  },
+  toggleNote(id) {
+    return this.mutate('notes.json', (d) => { const x = d.notes.find(n => n.id === id); if (x) x.status = x.status === 'open' ? 'resolved' : 'open'; }, { label: 'toggle note ' + id });
+  },
+  editNote(id, text) { return this.mutate('notes.json', (d) => { const x = d.notes.find(n => n.id === id); if (x) x.text = text; }, { label: 'edit note ' + id }); },
+  deleteNotes(ids) { return this.mutate('notes.json', (d) => { d.notes = d.notes.filter(n => !ids.includes(n.id)); }, { label: `delete ${ids.length} note(s)` }); },
+  // ---- generation requests (the page never calls paid APIs; the agent picks up approved ones)
+  addRequest(r) {
+    const id = `r${Date.now().toString(36)}`;
+    const item = { id, kind: r.kind, target: r.target || null, prompt: r.prompt || '', refs: r.refs || [], est_cost: r.est_cost ?? 0, status: 'draft', by: 'director', at: nowIso(), ...(r.extra || {}) };
+    return this.mutate('requests.json', (d) => { d.items.push(item); }, { label: `request ${r.kind}` }).then(() => item);
+  },
+  setRequest(id, patch) { return this.mutate('requests.json', (d) => { const x = d.items.find(i => i.id === id); if (x) Object.assign(x, patch, { at: nowIso() }); }, { label: `request ${id} ${patch.status || 'edit'}` }); },
+  deleteRequests(ids) { return this.mutate('requests.json', (d) => { d.items = d.items.filter(i => !ids.includes(i.id)); }, { label: `delete ${ids.length} request(s)` }); },
+  // ---- section overrides (label, colour); song.json stays the importer's
+  secLabel(s) { return this.overrides?.sections?.[s.id]?.label || s.label; },
+  setSection(id, patch) { return this.mutate('overrides.json', (d) => { d.sections ||= {}; d.sections[id] = { ...(d.sections[id] || {}), ...patch }; }, { label: `section ${id}` }); },
+  // ---- settings (keybindings); not undoable
+  setSettings(fn) { return this.mutate('settings.json', fn, { record: false }); },
+
+  // optimistic local change, then POST with base_rev; on conflict re-apply the change on the server copy once
+  async mutate(file, fn, { label = file, record = true } = {}) {
+    const field = WRITABLE[file][0];
+    const before = this[field];
+    const local = structuredClone(before); fn(local);
+    const base = before.rev || 0;
+    this[field] = local; this.emit(field);
+    if (record) this.onMutate?.({ file, field, label, before, after: local });
+    try {
+      let r = await fetch(api('/api/save/' + file), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ base_rev: base, data: local }) });
+      if (r.status === 409) {
+        const cur = await r.json(); fn(cur);
+        r = await fetch(api('/api/save/' + file), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ base_rev: cur.rev || 0, data: cur }) });
+        this[field] = cur;
+      }
+      if (r.ok) { this[field].rev = (await r.json()).rev; } else throw new Error(await r.text());
+    } catch (e) { console.warn('save failed', file, e); toast(`not saved: ${file} (${e.message || e})`); }
+    finally { this.emit(field); }
+  },
+};
+
+export function toast(msg) {
+  const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg;
+  document.body.appendChild(el); setTimeout(() => el.remove(), 3000);
+}
+
+// localStorage, wrapped (private windows / blocked storage must not break the page)
+export const prefs = {
+  get(k, d) { try { const v = localStorage.getItem('wb:' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('wb:' + k, JSON.stringify(v)); } catch (e) { /* ignore */ } },
+};

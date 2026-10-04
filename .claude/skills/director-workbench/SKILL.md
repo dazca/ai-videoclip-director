@@ -1,0 +1,58 @@
+---
+name: director-workbench
+description: Work as the assistant director on a music video in the Director Workbench (a time-synced web workbench with an MCP server named "workbench"/"director-workbench"). Use when the user talks about their music video project, the workbench, the song timeline, lyrics timing, script, shots or storyboard, characters / looks / costumes, locations, props, generated clips or stills, the generation queue, approvals, notes pinned to song time, the cost cap, or asks to start a "director session". Covers the workflow song -> script -> breakdown -> characters/looks/locations/props -> storyboard -> generation requests -> review -> render, and the rule never to spend without an approved request.
+---
+
+# Director workbench
+
+The director (the user) works in the workbench page (`http://localhost:8140/?project=<id>`); you work on the same
+project through the MCP tools (server `director-workbench`) or the JSON files in `data/<project>/`. Every write shows
+up live in their page. Read `CLAUDE.md` in the workbench folder (MCP resource `workbench://docs/claude`) for the file
+formats and how to add features.
+
+## Start of a session
+
+1. `status`: is the server up (live page) or are you on files only? Which project? How many pages are open?
+   Not up and the director wants to watch: ask them to run `npm start` in the workbench folder.
+2. `projects` (action list / open) if the project is not the right one.
+3. `song_get` (words:false for a quick read), `shots_list`, `notes_list` status=open, `approvals_get` state=changes,
+   `requests_list`, `costs_get`. Summarise in a few lines: where the video stands, what the director asked for, money.
+4. Open director notes and items in `changes` are the to-do list. Confirm the plan before large changes.
+
+## The workflow (one stage at a time, the director signs off each)
+
+1. **Song**: timing is truth. A new song: `node importers/new_project.mjs <id> --song <file> --lyrics <file>`
+   (LRC timings are used; plain lyrics are spread evenly and marked `timing: "estimated"`: fix them before cutting).
+   Sections, bars and lyric lines are the grid every later decision snaps to.
+2. **Script**: per lyric line a mode (W = world, S = screen, B = both, W→S) and an action (`script.json`). Ask
+   for review (state `review` on `script:<id>`), not approval.
+3. **Breakdown**: cut into shots on downbeats / section starts (`shots.json`); each shot gets kind, title, cast,
+   locations, and later the clip uses that fill it. Use `timeline_query` to see what a cut crosses.
+4. **Characters, looks, locations, props**: `entity_upsert` with references; looks (costumes) live in the character's
+   `looks[]`. A missing look or angle becomes a generation request, not a guess.
+5. **Storyboard**: one frame per shot (thumbs), reviewed in the page; `ui_focus` to walk the director through it.
+6. **Generation requests**: `request_create` drafts with a concrete prompt, refs, tool and an honest `est_cost`.
+   The director approves in Review > Queue (or tells you; then `request_update` with `director_approved: true`).
+7. **Run** only approved requests: `request_update` queued -> running -> (call the provider) -> done with `outputs` and
+   `actual_cost_usd`; on failure rejected + `why`. Outputs become media automatically; attach them to uses with
+   `shot_update` (take, in_ms) and to entities with `entity_upsert`.
+8. **Review**: set `review`, pin a note explaining what changed, `ui_focus` with `preview` to show it. The director
+   approves or requests changes; answer their notes with `note_resolve` + reply.
+9. **Render**: the final render is a media item of kind `render` and the song's `audio.render`; snapshot first.
+
+## Never
+
+- Never call a paid API (image, video, voice, music) without an APPROVED request whose `est_cost` fits the cap.
+  `costs_get` before proposing; the tools refuse queueing above the cap. Record the real cost when done.
+- Never approve on the director's behalf, never mark their notes resolved without doing what they asked.
+- Never touch PRIVATE files (crops of real photos, anything under a `private/` folder or flagged private) beyond
+  reading them locally for the director; never copy them into exports, the demo, the template or a shared repo.
+- Never edit timing by moving pixels: times are integer ms in the JSON; layout follows.
+
+## Handy patterns
+
+- "What happens at the drop?" -> `timeline_query` around the section start, then `ui_focus` t + select.
+- "Make a new costume for X" -> `entity_get` X, propose a look with `request_create` (kind `new-costume`, target
+  `character:X`, refs = the look's base images), wait for approval.
+- "Try another take" -> `shot_get` the shot (lists every take per clip use), `shot_update` take/in_ms, state `review`.
+- Before risky edits: `snapshot_save`; undo with `snapshot_restore`.

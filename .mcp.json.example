@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "workbench": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/absolute/path/to/workbench/mcp/server.mjs"],
+      "env": {
+        "WORKBENCH_URL": "http://localhost:8140",
+        "WORKBENCH_PROJECT": "demo"
+      }
+    }
+  }
+}

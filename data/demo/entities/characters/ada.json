@@ -1,0 +1,52 @@
+{
+ "id": "ada",
+ "kind": "character",
+ "status": "approved",
+ "refs": [
+  "media/still/ada_face.jpg",
+  "media/still/ada_body.jpg"
+ ],
+ "short": "A",
+ "color": "#ff8844",
+ "role": "the lead (a placeholder figure made of gradients)",
+ "face": "media/still/ada_face.jpg",
+ "body": "media/still/ada_body.jpg",
+ "name": "Ada",
+ "looks": [
+  {
+   "images": [
+    "media/still/ada_body.jpg",
+    "media/still/ada_face.jpg"
+   ],
+   "garments": [
+    "orange hoodie",
+    "dark jeans"
+   ],
+   "colors": [
+    "#ff8844",
+    "#223355"
+   ],
+   "status": "approved",
+   "id": "base",
+   "name": "Orange gradient (base look)",
+   "base": true,
+   "clips": [
+    "C1",
+    "C3"
+   ],
+   "used": [
+    {
+     "shot": "s2-wall",
+     "t": 4000
+    },
+    {
+     "shot": "s4-chorus",
+     "t": 12000
+    }
+   ],
+   "cost_usd": 0
+  }
+ ],
+ "thumb": "thumbs/ent_ada.jpg",
+ "thumb_src": "media/still/ada_face.jpg"
+}

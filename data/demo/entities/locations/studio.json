@@ -1,0 +1,48 @@
+{
+ "id": "studio",
+ "kind": "location",
+ "status": "approved",
+ "refs": [
+  "media/still/studio.jpg",
+  "media/still/I1.jpg"
+ ],
+ "letter": "S",
+ "description": "a room that is a test pattern",
+ "establishing": "media/still/studio.jpg",
+ "images": [
+  {
+   "path": "media/still/studio.jpg",
+   "still": null,
+   "angle": "wide",
+   "tod": "day",
+   "clips": []
+  },
+  {
+   "path": "media/still/I1.jpg",
+   "still": "I1",
+   "angle": "wall",
+   "tod": "dusk",
+   "clips": [
+    "C1",
+    "C2",
+    "C3"
+   ]
+  }
+ ],
+ "angles": [
+  "wide",
+  "wall"
+ ],
+ "times": [
+  "day",
+  "dusk"
+ ],
+ "clips": [
+  "C1",
+  "C2",
+  "C3"
+ ],
+ "name": "S · studio",
+ "thumb": "thumbs/ent_studio.jpg",
+ "thumb_src": "media/still/studio.jpg"
+}

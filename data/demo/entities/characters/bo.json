@@ -1,0 +1,49 @@
+{
+ "id": "bo",
+ "kind": "character",
+ "status": "draft",
+ "refs": [
+  "media/still/bo_face.jpg",
+  "media/still/bo_body.jpg"
+ ],
+ "short": "B",
+ "color": "#2a7f62",
+ "role": "counts the bars (placeholder)",
+ "face": "media/still/bo_face.jpg",
+ "body": "media/still/bo_body.jpg",
+ "name": "Bo",
+ "looks": [
+  {
+   "images": [
+    "media/still/bo_body.jpg"
+   ],
+   "garments": [
+    "green overalls"
+   ],
+   "colors": [
+    "#2a7f62"
+   ],
+   "status": "draft",
+   "id": "base",
+   "name": "Green gradient (base look)",
+   "base": true,
+   "clips": [
+    "C2",
+    "C3"
+   ],
+   "used": [
+    {
+     "shot": "s3-grid",
+     "t": 8000
+    },
+    {
+     "shot": "s4-chorus",
+     "t": 12000
+    }
+   ],
+   "cost_usd": 0
+  }
+ ],
+ "thumb": "thumbs/ent_bo.jpg",
+ "thumb_src": "media/still/bo_face.jpg"
+}

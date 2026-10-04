@@ -1,0 +1,9 @@
+{
+ "_note": "Copy to workbench.config.json (gitignored) to change the defaults. Every key is optional; env vars win (WB_PROJECT, WORKBENCH_DATA, WORKBENCH_MEDIA_BASE).",
+ "default_project": "demo",
+ "data_dir": "data",
+ "media_base": "..",
+ "media_roots": ["my-renders/", "generated/clips/"],
+ "private_media": "^(refs/real-photos/|faces/)",
+ "allow_remote_ops": false
+}
