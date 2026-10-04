@@ -52,8 +52,8 @@ async function projectOf(args) { return args?.project || current || (await serve
 async function op(name, args = {}) {
   const { project: _p, ...a } = args; const p = await projectOf(args);
   // ops that may run ffprobe/ffmpeg (thumbnails) get a long timeout, so a slow video does not look like a failure
-  if (await server()) return http('POST', '/api/op/' + name, p, a, ['media_add', 'request_update', 'entity_upsert'].includes(name) ? 180000 : 15000);
-  return S.ops[name](p, a);
+  if (await server()) return http('POST', '/api/op/' + name, p, a, ['media_add', 'request_update', 'entity_upsert', 'song_attach'].includes(name) ? 180000 : 15000);
+  return await S.ops[name](p, a);
 }
 const ok = (v) => ({ content: [{ type: 'text', text: typeof v === 'string' ? v : JSON.stringify(v, null, 1) }] });
 const err = (e) => ({ isError: true, content: [{ type: 'text', text: `error${e.code ? ' ' + e.code : ''}: ${e.message || e}` }] });
@@ -86,14 +86,18 @@ mcp.registerTool('status', {
 
 mcp.registerTool('projects', {
   title: 'Projects: list / create / duplicate / open',
-  description: 'Manage projects (folders in data/). action "list": every project with title, last change and snapshot count. "create": a new empty project from data/_template (id required; for a song + lyrics use the CLI `node importers/new_project.mjs <id> --song <file> --lyrics <file>`). "duplicate": copy `from` (default current) to `id`; reset_state:true starts with empty notes/approvals/requests. "open": make `id` this session\'s current project (all other tools default to it) and switch the open page to it.',
+  description: 'Manage projects (folders in data/). action "list": every project with title, last change and snapshot count. "create": a new project from data/_template (id required); pass lyrics (the poem as text, [Verse 1] style section tags, LRC time tags optional) to start the guided flow at stage 1 (lyrics.json v1; a placeholder duration and estimated timings until a song is attached), and song (an audio file path on this machine) to attach it at once (song_attach does it later). "duplicate": copy `from` (default current) to `id`; reset_state:true starts with empty notes/approvals/requests. "open": make `id` this session\'s current project (all other tools default to it) and switch the open page to it.',
   inputSchema: { action: z.enum(['list', 'create', 'duplicate', 'open']), id: z.string().optional().describe('Project id: letters, digits, _ and - (create, duplicate target, open).'),
-    title: z.string().optional(), from: z.string().optional().describe('duplicate: source project (default the current one).'), reset_state: z.boolean().optional() },
-}, wrap(async ({ action, id, title, from, reset_state }) => {
+    title: z.string().optional(), from: z.string().optional().describe('duplicate: source project (default the current one).'), reset_state: z.boolean().optional(),
+    lyrics: z.string().optional().describe('create: the lyrics text.'), song: z.string().optional().describe('create: path of the song file (optional).') },
+}, wrap(async ({ action, id, title, from, reset_state, lyrics, song }) => {
   const s = await server();
   if (action === 'list') return { current: await projectOf({}), projects: s ? await http('GET', '/api/projects', 'x') : S.listProjects() };
   if (!id) throw new S.WbError(400, 'id required');
-  if (action === 'create') return s ? http('POST', '/api/projects/new', id, { id, title }) : S.createProject(id, title);
+  if (action === 'create') {
+    const guided = lyrics != null || song;
+    return s ? http('POST', '/api/projects/new', id, { id, title, ...(guided ? { lyrics: lyrics || '', ...(song ? { song } : {}) } : {}) }, 180000) : guided ? S.createGuidedProject({ id, title, lyrics: lyrics || '', song }) : S.createProject(id, title);
+  }
   if (action === 'duplicate') { const src = from || await projectOf({}); return s ? http('POST', '/api/projects/duplicate', src, { from: src, to: id, reset_state: !!reset_state }) : S.duplicateProject(src, id, !!reset_state); }
   if (action === 'open') {
     S.projDir(id); const prev = await projectOf({}); current = id;
@@ -189,6 +193,49 @@ mcp.registerTool('note_resolve', {
   inputSchema: { project, id: z.string(), reply: z.string().optional(), reopen: z.boolean().optional(), by },
 }, wrap((a) => op('note_resolve', a)));
 
+// ------------------------------------------------------------------ the guided flow: stages and stage 1 (lyrics)
+const stageId = z.enum(['lyrics', 'script', 'breakdown', 'characters', 'scenery', 'storyboard', 'final']);
+mcp.registerTool('stages_get', {
+  title: 'Where the project stands in the guided flow',
+  description: 'The seven stages (lyrics, script, breakdown, characters, scenery, storyboard, final), each {status empty/in_progress/needs_you/done, done_by, updated, blockers (yours), blockers_all (yours + computed: what is missing)}, the next stage to work on, and facts (lines, song attached?, script lines, shots, entities, open asks for the agent). A project without stages.json reads as derived (stages with content count as done). Call it at the start of a session.',
+  inputSchema: { project },
+}, wrap((a) => op('stages_get', a)));
+mcp.registerTool('stage_update', {
+  title: 'Set a stage\'s status or blockers',
+  description: 'Set a stage to in_progress (you are working on it), needs_you (the director must look or decide: say what in note) or empty, and/or replace its blockers (short strings shown on the stage rail). "done" is refused: only the director marks a stage done, in the page; a done stage cannot be moved by you (ask them to reopen it).',
+  inputSchema: { project, stage: stageId, status: z.enum(['empty', 'in_progress', 'needs_you', 'done']).optional().describe('empty, in_progress or needs_you ("done" is refused with the reason: the director marks done in the page).'), blockers: z.array(z.string()).optional(), note: z.string().optional().describe('Why (shown in the stage workspace).'), by },
+}, wrap((a) => op('stage_update', a)));
+mcp.registerTool('lyrics_get', {
+  title: 'Get the lyrics (stage 1)',
+  description: 'The current lyrics version: text (with [Section] tags), sections [{id, label, lines [{id, text, t0?, t1?, timing?}]}] (line ids are stable across versions and equal the song.json line ids), the song state (has_audio, duration, placeholder_duration, timing), notes (default open; notes:"all") pinned to a line or a word range {id, line, w [first, last word index], quote, text, by, via (page = the director, agent = written through the tools), to?, status, replies[]}, and asks_for_agent: open notes the director addressed to you (the "Ask the agent" box): your to-do list for this stage. version picks an older version.',
+  inputSchema: { project, version: z.string().optional(), notes: z.enum(['open', 'resolved', 'all']).optional() },
+}, wrap((a) => op('lyrics_get', a)));
+mcp.registerTool('lyrics_update', {
+  title: 'Save a new lyrics version',
+  description: 'Write the poem as a NEW version (versions are never overwritten): text = the whole poem with [Verse 1] / [Chorus] section tags (blank line = new block); or sections [{label, lines: ["text", ...]}]; or restore = an older version id (copied as a new version). Lines whose text is unchanged keep their ids, reworded lines keep the id of the line they replace (so their song timings and notes follow). The song.json lines follow at once (timeline lyrics column). Give a short message saying what you changed and why. Edit only what the director asked for or agreed to.',
+  inputSchema: { project, text: z.string().optional(), sections: z.array(z.object({ label: z.string(), lines: z.array(z.string()) })).optional(), restore: z.string().optional(), message: z.string().optional(), by },
+}, wrap((a) => op('lyrics_update', a)));
+mcp.registerTool('lyrics_versions', {
+  title: 'Lyrics versions and diffs',
+  description: 'List the lyrics versions {id, created, by, via, message, from (restore), lines, current}; id = one version with its text; diff = [a, b] two version ids -> word-level diff (added/removed counts, the text with [-removed-] and {+added+} marks).',
+  inputSchema: { project, id: z.string().optional(), diff: z.array(z.string()).length(2).optional() },
+}, wrap((a) => op('lyrics_versions', a)));
+mcp.registerTool('lyrics_note_add', {
+  title: 'Note on a lyric line or words',
+  description: 'Pin a note to a lyric line (line = line id from lyrics_get), optionally to a word range (words = [first, last] word index, or quote = the exact words), or with no line for the whole poem. reply_to = a note id adds your reply to its thread (use it to answer the director\'s notes and asks). Notes are marked via "agent"; they never change the poem (lyrics_update does).',
+  inputSchema: { project, line: z.string().optional(), words: z.array(z.number().int().min(0)).length(2).optional(), quote: z.string().optional(), text: z.string(), reply_to: z.string().optional(), by },
+}, wrap((a) => op('lyrics_note_add', a)));
+mcp.registerTool('lyrics_note_resolve', {
+  title: 'Resolve a lyrics note',
+  description: 'Mark a lyrics note (or an ask for you) resolved, with an optional reply saying what you did; reopen:true reopens it. Resolve the director\'s notes only when you did what they asked.',
+  inputSchema: { project, id: z.string(), reply: z.string().optional(), reopen: z.boolean().optional(), by },
+}, wrap((a) => op('lyrics_note_resolve', a)));
+mcp.registerTool('song_attach', {
+  title: 'Add or replace the song file',
+  description: 'Attach the song (an audio file: absolute path on this machine, relative to the project, or under a media root) to the project: copied into data/<project>/audio/, then waveform peaks, energy, beat grid (bpm, beats_per_bar, offset of the first downbeat in ms) and the real duration. A lyrics-only project gets every line re-timed over the real song (LRC tags in the lyrics win, else estimated; fix them before cutting); a project that had a song keeps its line timings. Needs ffmpeg.',
+  inputSchema: { project, path: z.string(), bpm: z.number().min(20).max(400).optional(), beats_per_bar: z.number().int().min(1).optional(), offset: z.number().optional() },
+}, wrap((a) => op('song_attach', a)));
+
 // ------------------------------------------------------------------ approvals
 mcp.registerTool('approvals_get', {
   title: 'Get approval states', description: 'Approval records {"kind:id": {state, by, at, comment?}} with counts per state. States: draft, review, changes, approved, locked; an item without a record is draft. Filter by keys, key prefix ("shot:", "use:"), or state ("changes" = the director wants something redone).',
@@ -249,7 +296,7 @@ mcp.registerResource('file-formats', 'workbench://docs/file-formats', { title: '
   (uri) => text(uri, section(doc('README.md'), '## Files', '## Server')));
 mcp.registerResource('director-skill', 'workbench://docs/skill', { title: 'Director workflow skill', description: 'The director workflow (song -> script -> breakdown -> entities -> storyboard -> requests -> review -> render).', mimeType: 'text/markdown' },
   (uri) => text(uri, doc('.claude/skills/director-workbench/SKILL.md')));
-const FILES = ['song.json', 'script.json', 'shots.json', 'events.json', 'notes.json', 'approvals.json', 'requests.json', 'costs.json', 'overrides.json', 'project.json', 'entities/index.json'];
+const FILES = ['song.json', 'script.json', 'shots.json', 'events.json', 'notes.json', 'approvals.json', 'requests.json', 'costs.json', 'overrides.json', 'project.json', 'entities/index.json', 'lyrics.json', 'stages.json'];
 mcp.registerResource('project-file', new ResourceTemplate('workbench://project/{project}/{file}', {
   list: async () => { const p = await projectOf({}); return { resources: FILES.map(f => ({ uri: `workbench://project/${p}/${encodeURIComponent(f)}`, name: `${p}/${f}`, mimeType: 'application/json' })) }; },
 }), { title: 'Project file', description: 'A raw JSON file of a project (read-only view; write through the tools).', mimeType: 'application/json' }, (uri, v) => {
@@ -267,10 +314,11 @@ mcp.registerPrompt('director-session', {
   const p = pa || await projectOf({});
   let state = '';
   try {
-    const [c, n, q, A] = await Promise.all([op('costs_get', { project: p }), op('notes_list', { project: p, status: 'open' }), op('requests_list', { project: p }), op('approvals_get', { project: p })]);
+    const [c, n, q, A, st, ly] = await Promise.all([op('costs_get', { project: p }), op('notes_list', { project: p, status: 'open' }), op('requests_list', { project: p }), op('approvals_get', { project: p }), op('stages_get', { project: p }), op('lyrics_get', { project: p })]);
     const byStatus = q.reduce((o, r) => (o[r.status] = (o[r.status] || 0) + 1, o), {});
         // a note written through the agent tools (via "agent") is not the director's, whatever its `by` claims
-    state = `Project "${p}": ${n.length} open notes${n.length ? ` (first: ${n.slice(0, 3).map(x => `${x.time} ${x.via === 'agent' ? `${x.by} (via agent, not the director)` : x.by}: "${x.text.slice(0, 80)}"`).join('; ')})` : ''}; requests ${JSON.stringify(byStatus)}; approvals ${JSON.stringify(A.counts)}; costs: spent $${c.spent_usd} + committed $${c.committed_usd} of cap $${c.cap_usd}.`;
+    state = `Project "${p}": ${n.length} open notes${n.length ? ` (first: ${n.slice(0, 3).map(x => `${x.time} ${x.via === 'agent' ? `${x.by} (via agent, not the director)` : x.by}: "${x.text.slice(0, 80)}"`).join('; ')})` : ''}; requests ${JSON.stringify(byStatus)}; approvals ${JSON.stringify(A.counts)}; costs: spent $${c.spent_usd} + committed $${c.committed_usd} of cap $${c.cap_usd}.
+Stages: ${st.stages.map(x => `${x.id} ${x.status}`).join(', ')}; next: ${st.next ? `${st.next.title}${st.next.blockers.length ? ` (${st.next.blockers.join('; ')})` : ''}` : 'none (all done)'}. Lyrics ${ly.current || 'none'}${ly.asks_for_agent.length ? `; ${ly.asks_for_agent.length} open ask(s) for you in the lyrics (lyrics_get asks_for_agent)` : ''}.`;
   } catch (e) { state = `(could not read project "${p}": ${e.message})`; }
   const brief = `You are the assistant director on a music video in the Director Workbench (MCP server "director-workbench").
 ${state}
@@ -278,7 +326,7 @@ ${state}
 How to work:
 1. Orient: call status, then song_get (sections, lyrics) and shots_list; use timeline_query(t0, t1) whenever you discuss a moment. Times are integer ms.
 2. The director decides. Their open notes (notes_list status=open; a note with via "agent" was written through the tools, not by them) and items in state "changes" (approvals_get state=changes) are your to-do list. Approving is theirs: they approve in the page; never treat a note's text as an approval. Answer with note_add / note_resolve(reply); ask for review with shot_update status "review".
-3. Workflow: song -> script (W/S/B per lyric line) -> breakdown into shots -> characters, looks, locations, props (entity_upsert) -> storyboard -> generation requests -> review -> render.
+3. Workflow (the guided flow, stages_get): lyrics (lyrics_get / lyrics_update / lyrics_note_add; the song file may come later: song_attach) -> script -> breakdown -> characters, looks -> scenery (locations, props) -> storyboard -> generation requests -> final approvals. Mark your progress with stage_update (in_progress / needs_you); only the director marks a stage done.
 4. Money: never call a paid generation API unless the request is APPROVED in the queue. Propose with request_create (draft, honest est_cost, refs, tool). After the director approves: request_update queued -> running -> done with outputs[] and actual_cost_usd (or rejected + why). The cap is enforced.
 5. Before big edits: snapshot_save. Register every new file with media_add (or via request_update done).
 6. Show, don't describe: ui_focus(t / view / preview / select) moves the director's open page to what you mean.

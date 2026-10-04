@@ -1,0 +1,12 @@
+{
+ "rev": 1,
+ "stages": [
+  {"id": "lyrics", "status": "empty", "blockers": []},
+  {"id": "script", "status": "empty", "blockers": []},
+  {"id": "breakdown", "status": "empty", "blockers": []},
+  {"id": "characters", "status": "empty", "blockers": []},
+  {"id": "scenery", "status": "empty", "blockers": []},
+  {"id": "storyboard", "status": "empty", "blockers": []},
+  {"id": "final", "status": "empty", "blockers": []}
+ ]
+}

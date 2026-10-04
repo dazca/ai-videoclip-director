@@ -366,3 +366,128 @@ body.dockwin { background: #000; }
 .lookform button { height: 20px; cursor: pointer; } .lookform button.pri { background: #3a3014; border-color: var(--acc); color: var(--acc); }
 .cc .wide.fit img { object-fit: contain; }
 .page .prow .more { padding: 0 4px; align-self: center; font-size: 10.5px; }
+
+/* ---------------- guided flow: the stage rail (18 px under the top bar, hidden with it), stage workspaces, wizard */
+#rail { flex: none; height: 18px; display: flex; align-items: stretch; background: var(--bg2); border-bottom: 1px solid var(--line); font-size: 11px; line-height: 17px; user-select: none; overflow: hidden; }
+body.notop #rail, body.norail #rail { display: none; }
+#rail a { display: flex; align-items: center; gap: 4px; padding: 0 7px; color: var(--dim); white-space: nowrap; border-right: 1px solid var(--line2); }
+#rail a:hover { color: var(--fg); text-decoration: none; background: var(--bg3); }
+#rail a.on { color: var(--fg); background: var(--bg); box-shadow: inset 0 -2px 0 var(--acc); }
+#rail a i, .sgst i { flex: none; width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; border: 1px solid #5a5f67; display: inline-block; }
+.st-in_progress i { background: var(--acc); border-color: var(--acc) !important; }
+.st-needs_you i { background: #e0503a; border-color: #e0503a !important; box-shadow: 0 0 0 2px rgba(224,80,58,.25); }
+.st-done i { background: #3fae6a; border-color: #3fae6a !important; }
+#rail a.st-done { color: #a9c9b3; }
+#rail a.st-needs_you { color: #f0a090; }
+#rail .next { flex: 1; min-width: 0; padding: 0 8px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; cursor: pointer; }
+#rail .next b { color: var(--fg); font-weight: 600; }
+#rail .next:hover { color: var(--fg); }
+
+.stagews { display: flex; flex-direction: column; }
+.sgbar { flex: none; height: 20px; display: flex; align-items: center; gap: 6px; padding: 0 6px; border-bottom: 1px solid var(--line); background: var(--bg2); font-size: 11px; white-space: nowrap; overflow: hidden; }
+.sgbar button, .lybar button, .lyvh button, .wizf button, .lyempty button, .lytext button, .lydh button { height: 16px; line-height: 14px; font-size: 11px; cursor: pointer; }
+button.pri { background: #3a3220; border-color: var(--acc); color: #f3d9a6; }
+button.on { color: var(--acc); }
+.sgst { display: inline-flex; align-items: center; gap: 4px; color: var(--fg); }
+.sgbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sgnote { color: #c3b2e8; overflow: hidden; text-overflow: ellipsis; }
+.sgnav { margin-left: auto; display: flex; gap: 8px; }
+.sgbody { flex: 1; position: relative; min-height: 0; }
+.sghost { position: absolute; inset: 0; }
+.sglater { max-width: 640px; } .sglater p { margin: 4px 0; }
+
+/* lyrics workspace */
+.lyws { display: flex; }
+.lymain { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+.lybar { flex: none; height: 20px; display: flex; align-items: center; gap: 5px; padding: 0 6px; border-bottom: 1px solid var(--line); font-size: 11px; white-space: nowrap; overflow: hidden; }
+.lybar .sp, .lytabs .sp, .lynh .sp, .lydh .sp, .wizh .sp, .wizf .sp { flex: 1; }
+.lybar .unsaved { color: var(--acc); }
+.lybar .lymsg { width: 180px; height: 16px; font-size: 11px; }
+.lysong { flex: none; padding: 1px 6px; font-size: 11px; color: var(--dim); border-bottom: 1px solid var(--line2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lysong b { color: var(--fg); font-weight: 600; } .lysong.nosong b { color: var(--acc); }
+.lypoem { flex: 1; overflow: auto; padding: 2px 0 40px; outline: none; }
+.lysec { margin-bottom: 6px; max-width: 780px; }
+.lyhead { display: flex; align-items: center; gap: 6px; height: 18px; padding-left: 58px; color: #9db7d6; font-size: 11px; }
+.lytag { cursor: text; }
+.lyl { display: flex; align-items: center; gap: 0; min-height: 18px; line-height: 18px; padding-right: 4px; font-size: 13px; outline: none; border-left: 2px solid transparent; }
+.lyl:hover { background: var(--bg2); }
+.lyl:focus { background: #1b2230; border-left-color: #4f79c0; }
+.lyl.hl { background: #2a2416; }
+.lyl.chg { border-left-color: var(--acc); }
+.lyl.flash { animation: lyflash 1.2s; }
+@keyframes lyflash { from { background: #4a3a14; } to { background: transparent; } }
+.lyn { flex: none; width: 22px; text-align: right; color: #4c5159; font-size: 10px; padding-right: 4px; font-variant-numeric: tabular-nums; }
+.lyt { flex: none; width: 34px; color: var(--dim); font-size: 10px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.lyt:hover { color: var(--acc); }
+.lytx { flex: 1; min-width: 0; color: var(--fg); user-select: text; cursor: text; white-space: pre-wrap; }
+.lytx .w.nw { background: rgba(245,165,36,.16); box-shadow: inset 0 -1px 0 var(--acc); }
+.lynb { flex: none; font-size: 9px; line-height: 12px; min-width: 12px; text-align: center; background: var(--acc); color: #111; border-radius: 6px; padding: 0 3px; margin-left: 4px; }
+.lytools { flex: none; display: none; gap: 0; margin-left: 4px; }
+.lyl:hover .lytools, .lyl:focus .lytools, .lyhead:hover .lytools { display: inline-flex; }
+.lytools b { font-weight: normal; color: var(--dim); padding: 0 3px; cursor: pointer; font-size: 11px; }
+.lytools b:hover { color: var(--acc); background: var(--bg3); }
+.lyin { flex: 1; height: 18px; font-size: 13px; background: #121820; border-color: #4f79c0; }
+.lysin { flex: 0 1 240px; font-size: 11px; }
+.lyfab { position: absolute; z-index: 20; height: 18px; font-size: 11px; padding: 0 6px; background: var(--acc); color: #111; border: 0; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.5); }
+.lyempty, .lytext { padding: 8px 12px; max-width: 760px; }
+.lyempty h4 { margin: 0 0 4px; font-size: 12px; }
+.lyempty textarea, .lytext textarea { width: 100%; font: 13px/18px Consolas, "Segoe UI", monospace; padding: 4px; resize: vertical; }
+.lytext textarea { min-height: calc(100vh - 160px); }
+.lydiff { display: flex; flex-direction: column; height: 100%; }
+.lydh { flex: none; display: flex; align-items: center; gap: 6px; padding: 2px 8px; border-bottom: 1px solid var(--line2); font-size: 11px; }
+.lydc { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); min-height: 0; }
+.lydl, .lydr { background: var(--bg); padding: 4px 10px; font-size: 13px; line-height: 19px; overflow: auto; }
+.lydiff .del { background: rgba(192,80,77,.28); color: #f0b4b0; text-decoration: line-through; }
+.lydiff .add { background: rgba(63,174,106,.25); color: #b8f0c8; }
+.lydh .dst.a { color: #7fd69c; } .lydh .dst.d { color: #f0a090; }
+.lyside { flex: none; width: 330px; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--bg); min-height: 0; position: relative; }
+.lytabs { flex: none; height: 20px; display: flex; align-items: stretch; border-bottom: 1px solid var(--line); background: var(--bg2); font-size: 11px; }
+.lytabs a { padding: 0 8px; line-height: 19px; color: var(--dim); border-right: 1px solid var(--line2); }
+.lytabs a i { font-style: normal; margin-left: 4px; font-size: 10px; opacity: .8; }
+.lytabs a.on { color: var(--fg); background: var(--bg); box-shadow: inset 0 -2px 0 var(--acc); }
+.lytabs a:hover { text-decoration: none; color: var(--fg); }
+.lytabs select { height: 16px; margin: 1px 3px; font-size: 11px; }
+.lylist { flex: 1; overflow: auto; min-height: 0; }
+.lyno { padding: 8px; font-size: 11px; }
+.lynote { padding: 3px 6px 4px; border-bottom: 1px solid var(--line2); font-size: 12px; }
+.lynote.resolved { opacity: .55; }
+.lynote.ask { box-shadow: inset 2px 0 0 #8a63c0; }
+.lynh { display: flex; align-items: center; gap: 4px; font-size: 10.5px; white-space: nowrap; overflow: hidden; }
+.lynh a { overflow: hidden; text-overflow: ellipsis; color: #9db7d6; }
+.lynh b { font-weight: normal; cursor: pointer; color: var(--dim); padding: 0 3px; }
+.lynh b:hover { color: #3fae6a; }
+.who { font-size: 10px; line-height: 12px; padding: 0 3px; flex: none; }
+.who.dr { background: #4a3a14; color: #f3d9a6; } .who.ag { background: #3a2d55; color: #d6c6f5; }
+.to { font-size: 10px; color: #c3b2e8; flex: none; }
+.lynt { margin: 1px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.lynr { margin: 2px 0 0 10px; font-size: 11.5px; overflow-wrap: anywhere; }
+.lyrep { width: calc(100% - 10px); margin: 2px 0 0 10px; height: 16px; font-size: 11px; display: none; }
+.lynote:hover .lyrep, .lyrep:focus { display: block; }
+.lyask { flex: none; border-top: 1px solid var(--line); padding: 3px; display: flex; gap: 3px; align-items: stretch; background: var(--bg2); }
+.lyask textarea { flex: 1; resize: none; font-size: 11.5px; line-height: 14px; }
+.lyask button { font-size: 11px; cursor: pointer; background: #3a2d55; border-color: #6b55a0; }
+.lyvh { display: flex; align-items: center; gap: 4px; padding: 2px 6px; border-bottom: 1px solid var(--line2); font-size: 10.5px; }
+.lyvh .dim { flex: 1; }
+.lyv { display: flex; align-items: center; gap: 4px; padding: 0 6px; min-height: 30px; border-bottom: 1px solid var(--line2); cursor: pointer; font-size: 12px; }
+.lyv:hover { background: var(--bg2); }
+.lyv.cur .lyvid { color: var(--acc); }
+.lyvid { flex: none; width: 34px; font-weight: 600; }
+.lyvm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 14px; }
+.lyvm i { display: block; font-style: normal; font-size: 10px; color: var(--dim); }
+.lyv b { font-weight: normal; font-size: 10px; padding: 0 3px; border: 1px solid var(--line); color: var(--dim); cursor: pointer; }
+.lyv b.on { background: #2b3440; color: var(--fg); border-color: #4f79c0; }
+.lyv b:hover { color: var(--fg); }
+
+/* new-project wizard */
+.wizbg { position: fixed; inset: 0; z-index: 70; background: rgba(0,0,0,.55); display: flex; align-items: flex-start; justify-content: center; padding-top: 8vh; }
+.wiz { width: min(620px, calc(100vw - 32px)); background: var(--bg2); border: 1px solid var(--line); box-shadow: 0 12px 40px rgba(0,0,0,.6); display: flex; flex-direction: column; max-height: 84vh; }
+.wizh { display: flex; align-items: center; gap: 8px; height: 22px; padding: 0 8px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.wizh span { color: var(--dim); font-size: 11px; } .wizh span.on { color: var(--acc); } .wizh span.done { color: #a9c9b3; }
+.wizh a { color: var(--dim); font-size: 14px; } .wizh a:hover { color: var(--fg); text-decoration: none; }
+.wizb { padding: 8px; overflow: auto; }
+.wizb label { display: block; margin: 0 0 8px; font-size: 11px; color: var(--fg); }
+.wizb input { display: block; width: 100%; height: 20px; margin-top: 2px; font-size: 12px; }
+.wizb textarea { display: block; width: 100%; margin-top: 2px; font: 13px/18px Consolas, "Segoe UI", monospace; padding: 4px; resize: vertical; }
+.wizb p { margin: 4px 0; font-size: 11px; }
+.wizf { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-top: 1px solid var(--line); }
+.wizerr { color: #f0a090; font-size: 11px; }

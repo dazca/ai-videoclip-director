@@ -67,7 +67,8 @@ const C = [];
 const add = (group, list) => { for (const x of list) C.push({ group, ...x }); };
 
 add('File', [
-  { id: 'file.new', title: 'New project…', run: async () => { const n = await ui.prompt({ title: 'New empty project: id (letters, digits, - _)' }); if (!n) return; const id = slugId(n); try { await projects.create(id); projects.open(id); } catch (e) { toast('not created: ' + e.message); } } },
+  { id: 'file.new', title: 'New project…', run: () => WB().wizard.open() },
+  { id: 'file.newEmpty', title: 'New empty project…', run: async () => { const n = await ui.prompt({ title: 'New empty project: id (letters, digits, - _)' }); if (!n) return; const id = slugId(n); try { await projects.create(id); projects.open(id); } catch (e) { toast('not created: ' + e.message); } } },
   { id: 'file.newFromTemplate', title: 'New from template…', run: async () => {
     await projects.refresh();
     const from = await ui.pick({ title: 'Template: copy which project (notes, approvals and requests start empty)?', items: projects.list.map(p => ({ label: p.id, detail: p.title, value: p.id })) }); if (!from) return;
@@ -234,7 +235,7 @@ commands.register(C);
 // ------------------------------------------------------------------ menu bar
 const projectItems = () => projects.list.length ? projects.list.map(p => ({ label: p.id, detail: p.id === PROJECT ? '(open)' : p.modified.slice(0, 10), checked: () => p.id === PROJECT, run: () => projects.open(p.id) })) : [{ label: '(no list: server offline?)', disabled: true }];
 menus.contribute('menubar:File', [
-  'file.new', 'file.newFromTemplate', { label: 'Open', submenu: projectItems }, { label: 'Recent projects', submenu: () => { const r = projects.recent(); return r.length ? r.map(id => ({ label: id, run: () => projects.open(id) })) : [{ label: '(none yet)', disabled: true }]; } },
+  'file.new', 'file.newEmpty', 'file.newFromTemplate', { label: 'Open', submenu: projectItems }, { label: 'Recent projects', submenu: () => { const r = projects.recent(); return r.length ? r.map(id => ({ label: id, run: () => projects.open(id) })) : [{ label: '(none yet)', disabled: true }]; } },
   '-', 'file.snapshot', { label: 'Revert to snapshot', submenu: () => projects.snaps.length ? projects.snaps.slice(0, 30).map(s => ({ label: s.message || s.id, detail: s.at.replace('T', ' ').slice(0, 16) + (s.auto ? ' auto' : ''), run: () => projects.restore(s.id) })).concat(projects.snaps.length > 30 ? ['-', 'file.revert'] : []) : [{ label: '(no snapshots yet: Ctrl+S)', disabled: true }] },
   '-', 'file.saveAs', 'file.duplicate',
   '-', { label: 'Import', submenu: ['song', 'stems', 'lyrics', 'images'].map(w => ({ cmd: 'file.import', args: { what: w }, label: `${w}…` })) },
@@ -309,6 +310,10 @@ export function contextArgs(target, clientX, clientY) {
     if (!selEl && !cast) names.push('empty');
     return { names, args };
   }
+  // the stage rail (core/rail.js) and a stage workspace (tabs/stage.js)
+  const st = target.closest('#rail [data-stage]');
+  if (st?.dataset.stage) { names.push('stage'); args.stageId = st.dataset.stage; return { names, args }; }
+  if (target.closest('.stagews')) { names.push('stage'); args.stageId = WB().stages?.current(); }
   names.push('global');
   return { names, args };
 }

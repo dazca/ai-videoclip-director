@@ -15,15 +15,27 @@ formats and how to add features.
 1. `status`: is the server up (live page) or are you on files only? Which project? How many pages are open?
    Not up and the director wants to watch: ask them to run `npm start` in the workbench folder.
 2. `projects` (action list / open) if the project is not the right one.
-3. `song_get` (words:false for a quick read), `shots_list`, `notes_list` status=open, `approvals_get` state=changes,
+3. `stages_get`: where the project stands in the guided flow (seven stages, the next one, what blocks it). Then
+   `song_get` (words:false for a quick read), `shots_list`, `notes_list` status=open, `approvals_get` state=changes,
    `requests_list`, `costs_get`. Summarise in a few lines: where the video stands, what the director asked for, money.
 4. Open director notes and items in `changes` are the to-do list. Confirm the plan before large changes.
 
 ## The workflow (one stage at a time, the director signs off each)
 
-1. **Song**: timing is truth. A new song: `node importers/new_project.mjs <id> --song <file> --lyrics <file>`
-   (LRC timings are used; plain lyrics are spread evenly and marked `timing: "estimated"`: fix them before cutting).
-   Sections, bars and lyric lines are the grid every later decision snaps to.
+The page shows it as the **stage rail**: 1 Lyrics, 2 Script, 3 Breakdown, 4 Characters, 5 Scenery, 6 Storyboard,
+7 Final. Report progress with `stage_update` (in_progress while you work, needs_you + a note when the director must
+decide, blockers); only the director marks a stage done, in the page. Show them the stage with `ui_focus` view
+`stage` (the rail opens the right one).
+
+1. **Lyrics** (stage 1): a project can start from lyrics alone (`projects` create with `lyrics`, or the page's
+   wizard); the song comes later (`song_attach`, timings re-estimated over the real song). `lyrics_get` gives the
+   poem with line ids, timings, open notes and `asks_for_agent` (the director's "Ask the agent" box: your to-do
+   list). Work by notes first (`lyrics_note_add` on a line or a word range, `reply_to` to answer in a thread,
+   `lyrics_note_resolve` with a reply when done); change the poem only as asked, with `lyrics_update` (a NEW version
+   with a message; nothing is overwritten; `lyrics_versions` lists and diffs, `restore` copies an old one back).
+   A new song with timed lyrics: `node importers/new_project.mjs <id> --song <file> --lyrics <file>` (LRC timings are
+   used; plain lyrics are spread evenly and marked `timing: "estimated"`: fix them before cutting). Sections, bars and
+   lyric lines are the grid every later decision snaps to.
 2. **Script**: per lyric line a mode (W = world, S = screen, B = both, W→S) and an action (`script.json`). Ask
    for review (state `review` on `script:<id>`), not approval.
 3. **Breakdown**: cut into shots on downbeats / section starts (`shots.json`); each shot gets kind, title, cast,
@@ -49,6 +61,8 @@ formats and how to add features.
 - Never touch PRIVATE files (crops of real photos, anything under a `private/` folder or flagged private) beyond
   reading them locally for the director; never copy them into exports, the demo, the template or a shared repo.
 - Never edit timing by moving pixels: times are integer ms in the JSON; layout follows.
+- Never mark a stage done or edit `stages.json` / `lyrics.json` by hand to look like the director's (`via: "page"`):
+  use the tools, which stamp your writes `via: "agent"`.
 
 ## Handy patterns
 

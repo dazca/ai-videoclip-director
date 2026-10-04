@@ -4,7 +4,8 @@
 // Copies data/demo to a temp folder, starts serve.mjs on it, opens the page in headless Chromium (when puppeteer-core +
 // a Chromium are available; otherwise an SSE client stands in for the page), spawns mcp/server.mjs over stdio with the
 // official SDK client and exercises: tools/list, song_get, timeline_query, note_add + note_resolve, request_create +
-// request_update (the approval and cap rules, done -> cost + media), snapshot_save + snapshot_restore, ui_focus,
+// request_update (the approval and cap rules, done -> cost + media), snapshot_save + snapshot_restore, ui_focus, the guided
+// flow (stages_get / stage_update, lyrics_* on a derived and on a new lyrics-only project, song_attach),
 // resources, the director-session prompt, the guard rules (edit voids approval, director-only approvals, media kind,
 // CSRF / Host / token checks, path traversal and the PRIVATE rule) and the offline (files only) mode. The temp folder
 // is removed at the end, whatever happens; data/demo must be byte-identical afterwards.
@@ -103,7 +104,8 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   // 1. tools
   const tools = (await mcp.listTools()).tools.map(t => t.name);
   const EXPECT = ['status', 'projects', 'snapshot_save', 'snapshot_list', 'snapshot_restore', 'song_get', 'timeline_query', 'shots_list', 'shot_get', 'shot_update', 'entities_list', 'entity_get', 'entity_upsert',
-    'media_list', 'media_add', 'notes_list', 'note_add', 'note_resolve', 'approvals_get', 'approve', 'request_changes', 'requests_list', 'request_create', 'request_update', 'costs_get', 'ui_focus'];
+    'media_list', 'media_add', 'notes_list', 'note_add', 'note_resolve', 'approvals_get', 'approve', 'request_changes', 'requests_list', 'request_create', 'request_update', 'costs_get', 'ui_focus',
+    'stages_get', 'stage_update', 'lyrics_get', 'lyrics_update', 'lyrics_versions', 'lyrics_note_add', 'lyrics_note_resolve', 'song_attach'];
   check('tools/list has every tool', EXPECT.every(t => tools.includes(t)), { count: tools.length, missing: EXPECT.filter(t => !tools.includes(t)) });
   const schemaOk = (await mcp.listTools()).tools.every(t => t.description?.length > 40 && t.inputSchema?.type === 'object');
   check('every tool has a description and a JSON schema', schemaOk);
@@ -247,13 +249,66 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   check('the server listens on 127.0.0.1 only (not reachable on the LAN address)', typeof lan === 'string', { lanIp, lan });
 }
 
+// 11b. the guided flow: stages + stage 1 (lyrics) tools, on the demo (derived) and on a new lyrics-only project
+{
+  const st = await call(mcp, 'stages_get');
+  check('stages_get on a project without stages.json: derived (content = done), next stage named', st.derived === true && st.stages?.length === 7 && st.stages[0].status === 'done' && st.stages[0].done_by === 'derived' && st.next?.id === 'final' && st.facts?.lines === 9,
+    { derived: st.derived, statuses: st.stages?.map(s => s.status), next: st.next });
+  const lg = await call(mcp, 'lyrics_get');
+  check('lyrics_get on a project without lyrics.json: v1 derived from song.json, song line ids, timings', lg.derived === true && lg.current === 'v1' && lg.sections?.length === 4 && lg.sections[1].lines[0].id === 'verse/0' && lg.sections[1].lines[0].t0 === S.read(PROJECT, 'song.json').lines.find(l => l.id === 'verse/0').t0 && !fs.existsSync(path.join(D, 'lyrics.json')),
+    { derived: lg.derived, sections: lg.sections?.map(s => s.id), first: lg.sections?.[1]?.lines?.[0] });
+  const songBefore = fs.readFileSync(path.join(D, 'song.json'), 'utf8');
+  const ln = await call(mcp, 'lyrics_note_add', { line: 'verse/1', quote: 'the note', text: 'mcp test: "the tone"?' });
+  const pageSees = await pageHas((id, s) => s ? s.files.includes('lyrics.json') : window.WB.store.lyrics?.notes?.some(n => n.id === id), ln.id);
+  check('lyrics_note_add on a word range (quote -> [first, last]); writes lyrics.json, not song.json; the page sees it live', ln.id === 'ln01' && JSON.stringify(ln.w) === '[2,3]' && ln.via === 'agent' && fs.readFileSync(path.join(D, 'song.json'), 'utf8') === songBefore && pageSees,
+    { id: ln.id, w: ln.w, via: ln.via, pageSees });
+  // a lyrics-only project through the projects tool, then edits, diff, restore, stage rules, the song attached later
+  const NP = 'mcp-lyrics';
+  const cr = await call(mcp, 'projects', { action: 'create', id: NP, title: 'MCP Lyrics', lyrics: '[Verse 1]\nfirst line here\nsecond line there\n\n[Chorus]\nla la la' });
+  const g1 = await call(mcp, 'lyrics_get', { project: NP });
+  const st1 = await call(mcp, 'stages_get', { project: NP });
+  check('projects create with lyrics: v1, placeholder duration, estimated timings, lyrics stage in progress', cr.lines === 3 && g1.current === 'v1' && g1.song?.has_audio === false && g1.song?.placeholder_duration === true && g1.sections?.[0]?.lines?.[0]?.timing === 'estimated'
+    && st1.stages?.[0]?.status === 'in_progress' && st1.next?.blockers?.some(b => /no song/.test(b)), { cr, song: g1.song, lyrics: st1.stages?.[0] });
+  const u2 = await call(mcp, 'lyrics_update', { project: NP, text: g1.text.replace('second line there', 'second line, rewritten') + '\nla la lo', message: 'mcp test: rewrite' });
+  const same = await call(mcp, 'lyrics_update', { project: NP, text: (await call(mcp, 'lyrics_get', { project: NP })).text });
+  const g2 = await call(mcp, 'lyrics_get', { project: NP });
+  const ids2 = g2.sections.flatMap(s => s.lines.map(l => l.id));
+  check('lyrics_update makes a new version, keeps ids (reworded line too), the song follows; an unchanged text makes none', u2.version === 'v2' && u2.song?.changed === true && same.unchanged === true && JSON.stringify(ids2) === '["L1","L2","L3","L4"]' && S.read(NP, 'song.json').lines.length === 4,
+    { u2, same, ids2 });
+  const dv = await call(mcp, 'lyrics_versions', { project: NP, diff: ['v1', 'v2'] });
+  const rs = await call(mcp, 'lyrics_update', { project: NP, restore: 'v1' });
+  const vl = await call(mcp, 'lyrics_versions', { project: NP });
+  check('lyrics_versions: word diff, list; restore = a new version copied from the old one', dv.added === 5 && dv.removed === 2 && /\[-there-\]/.test(dv.diff) && /\{\+rewritten\+\}/.test(dv.diff) && /\{\+lo\+\}/.test(dv.diff) && rs.version === 'v3' && vl.versions?.length === 3 && vl.versions[2].from === 'v1' && vl.current === 'v3',
+    { diff: dv.diff, added: dv.added, removed: dv.removed, restore: rs.version, versions: vl.versions?.map(v => v.id) });
+  const n1 = await call(mcp, 'lyrics_note_add', { project: NP, line: 'L1', words: [0, 1], text: 'mcp: stronger opening?' });
+  const r1 = await call(mcp, 'lyrics_note_add', { project: NP, reply_to: n1.id, text: 'mcp: a reply in the thread' });
+  const bad = await call(mcp, 'lyrics_note_add', { project: NP, line: 'L1', words: [3, 9], text: 'x' });
+  const rv = await call(mcp, 'lyrics_note_resolve', { project: NP, id: n1.id, reply: 'mcp: done' });
+  check('lyrics notes: word range, thread reply, bad range refused, resolve with a reply', n1.quote === 'first line' && r1.reply?.id === `${n1.id}.1` && /400/.test(bad.error || '') && rv.status === 'resolved' && rv.replies?.length === 2,
+    { quote: n1.quote, reply: r1.reply?.id, bad: bad.error, resolved: rv.status });
+  const sd = await call(mcp, 'stage_update', { project: NP, stage: 'lyrics', status: 'done' });
+  const sn = await call(mcp, 'stage_update', { project: NP, stage: 'lyrics', status: 'needs_you', blockers: ['mcp: check the chorus'], note: 'please read v3' });
+  check('stage_update: done refused (only the page), needs_you + blockers + note accepted', /403/.test(sd.error || '') && sn.stage?.status === 'needs_you' && sn.stage.blockers[0] === 'mcp: check the chorus' && sn.stage.via === 'agent' && sn.next?.id === 'lyrics',
+    { done: sd.error, stage: sn.stage });
+  const song = path.join(ORIG, 'audio', 'demo-song.mp3');
+  const at = await call(mcp, 'song_attach', { project: NP, path: song });
+  const s2 = S.read(NP, 'song.json');
+  const badSong = await call(mcp, 'song_attach', { project: NP, path: path.join(TMP, 'kind-src.txt') });
+  check('song_attach: the song added later (duration, peaks), lines re-timed inside it; a non-audio file refused', at.duration_ms === 20000 && at.replaced === false && s2.audio.mix === 'audio/demo-song.mp3' && fs.existsSync(path.join(DATA, NP, 'peaks', 'mix.json')) && s2.lines.every(l => l.t1 <= 20000) && !s2.placeholder_duration && /400/.test(badSong.error || ''),
+    { at, lines: s2.lines.map(l => [l.id, l.t0, l.t1]), bad: badSong.error });
+  const pr = await mcp.getPrompt({ name: 'director-session', arguments: { project: NP } });
+  check('director-session briefs the stages and the lyrics', /Stages: lyrics needs_you/.test(pr.messages[0].content.text) && /lyrics_get/.test(pr.messages[0].content.text), pr.messages[0].content.text.split('\n')[1]);
+}
+
 // 12. offline: the server is unreachable -> the same tools work on the files; ui_focus explains
 {
   const off = await connect({ WORKBENCH_URL: 'http://localhost:9' });
   const st = await call(off, 'status');
   const tq = await call(off, 'timeline_query', { t0: 4000, t1: 8000 });
   const ui = await call(off, 'ui_focus', { t: 1000 });
-  check('offline mode: files directly, ui_focus refuses politely', st.mode === 'files' && tq.shots?.[0]?.id === 's2-wall' && /not running/.test(ui.error || ''), { mode: st.mode, shots: tq.shots?.map(s => s.id), ui: ui.error });
+  const sg = await call(off, 'stages_get'), lu = await call(off, 'lyrics_update', { project: 'mcp-lyrics', text: '[Verse 1]\noffline line', message: 'offline' });
+  check('offline mode: files directly (stages, lyrics too), ui_focus refuses politely', st.mode === 'files' && tq.shots?.[0]?.id === 's2-wall' && /not running/.test(ui.error || '') && sg.stages?.length === 7 && lu.version === 'v4',
+    { mode: st.mode, shots: tq.shots?.map(s => s.id), ui: ui.error, stages: sg.stages?.length, lyrics: lu.version || lu.error });
   await off.close();
 }
 

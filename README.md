@@ -28,12 +28,19 @@ Copies the song into the project, computes the waveform peaks and energy curve, 
 marked `timing: "estimated"`; `[Verse 1]` headers or blank lines start sections). Shots, entities, script and notes
 start empty: fill them with your agent (below). `data/_template/` is the empty project that File > New copies.
 
+**Lyrics first, song later**: `node importers/new_project.mjs my-song --lyrics lyrics.txt --title "My Song"` (or File >
+New project in the page: a wizard, name -> lyrics -> song optional) makes a lyrics-only project: a placeholder length
+(~4 s a line), estimated line timings, the lyrics stage in progress. Add the song when you have it (Lyrics stage >
+Add song…, or the MCP tool `song_attach`): peaks, energy, grid and the real duration are computed and the lines are
+re-timed over the song (LRC tags win, else estimated as above).
+
 **Settings of this machine** (optional, gitignored): copy `workbench.config.example.json` to `workbench.config.json`:
 `default_project`, `data_dir`, `media_base` + `media_roots` (folders outside the project served read-only at
 `/media/<path>`, e.g. a renders folder), `private_media` (regex of PRIVATE paths: local only, never exported).
 
 **Tests**: `npm run test:mcp` (MCP end to end on the demo) · `npm run verify` (headless UI suite on the demo:
-screenshots + alignment + perf + writes + commands -> `shots/`; `node tools/verify.mjs --project <id>` for another).
+screenshots + alignment + perf + writes + commands + the guided flow -> `shots/`; `node tools/verify.mjs --project <id>`
+for another) · `npm run test:security`. All of them work on scratch copies of the data, never on `data/`.
 
 **Example importer**: `importers/azemar_import.py` + `importers/azemar_extract_edl.mjs` built the owner's own production
 (word-aligned lyrics, an EDL extracted from the render page, entities with looks, a 230-file media index). They only run
@@ -59,7 +66,8 @@ the workbench?"*. With the server running every tool goes through its HTTP API (
 Tools: `status`, `projects` (list/create/duplicate/open), `snapshot_save` / `snapshot_list` / `snapshot_restore`, `song_get`,
 `timeline_query`, `shots_list` / `shot_get` / `shot_update`, `entities_list` / `entity_get` / `entity_upsert`, `media_list` /
 `media_add`, `notes_list` / `note_add` / `note_resolve`, `approvals_get` / `approve` / `request_changes`, `requests_list` /
-`request_create` / `request_update`, `costs_get`, `ui_focus`. Resources: the README, `CLAUDE.md`, the file formats, the
+`request_create` / `request_update`, `costs_get`, `ui_focus`; the guided flow: `stages_get` / `stage_update`,
+`lyrics_get` / `lyrics_update` / `lyrics_versions` / `lyrics_note_add` / `lyrics_note_resolve`, `song_attach`. Resources: the README, `CLAUDE.md`, the file formats, the
 skill, and each project's JSON files. Prompt: `director-session`. Rules the tools enforce: an agent cannot approve on
 its own, a request runs only after the director approved it, queueing is refused above the cost cap, and `done` needs
 the output files and the actual cost (recorded in `costs.json`, outputs indexed as media). The agent guide is
@@ -67,6 +75,28 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
 
 ## Using it
 
+- **The guided flow** (`docs/SPEC_v3_GUIDED.md`): a project is made in seven stages, **1 Lyrics · 2 Script ·
+  3 Breakdown · 4 Characters · 5 Scenery · 6 Storyboard · 7 Final**. The **stage rail** (one 18 px row under the top
+  bar, hidden with it, or alone with View > Stage rail) shows each with a status dot (hollow = empty, amber = in
+  progress, red = needs you, green = done) and, at the right, `next: <stage> · <what blocks it>`. Click a stage (or
+  Alt+Shift+1..7, palette "Go to stage: Lyrics", right-click on the rail) to open its workspace; its bar has the status
+  buttons: **only the director marks a stage done** (here or on the rail; agents can set in progress / needs you and
+  blockers). Later stages can be opened early. A project made before the flow counts stages with content as done.
+- **New project** (File > New project, and automatically on an empty project): a wizard, **name -> lyrics (paste) ->
+  song (optional path on this machine) -> Create**; opens the new project on the lyrics stage. File > New empty
+  project keeps the old one-line prompt.
+- **Lyrics stage** (stage 1): the poem as lines under their `[Section]` tags, each with its time (`~` = estimated;
+  click = show it in the timeline). Double-click / Enter / F2 edits a line (Enter keeps, Tab next line, Shift+Enter a
+  new line below, Esc cancels, an empty line is removed); hover tools move (↑↓, Alt+↑↓), add, edit, note, delete lines
+  and sections; **Edit as text** for pasting or bulk edits (`[Section]` tags; unchanged and reworded lines keep their
+  ids, so timings and notes follow). Edits are a draft (kept in this browser) until **Save version** (Ctrl+Enter, with
+  an optional message): every save is a new version, and the song's lines (the timeline lyrics column) follow at once,
+  keeping the timings of the lines that still exist. **Notes**: select words in a line -> `+ note` (or Alt+N; with no
+  selection, on the focused line); threads with replies, resolve ✓ / reopen ↺; who wrote it is shown (director, or
+  agent for notes written through the tools). **Ask the agent** (bottom right) writes a note addressed to the agent
+  (MCP `lyrics_get` lists it under `asks_for_agent`): nothing is generated, nothing is paid. **Versions**: the list,
+  A/B -> side-by-side word diff (or click a row: it vs the one before; `diff` in the bar compares your unsaved edits),
+  **Restore** = a new version copied from the old one. **Add song…** attaches the song file.
 - **Top bar** (18 px; `` ` `` hides / shows it; **Esc never hides it**: Esc only closes menus, dialogs, the palette and
   the cheat sheet): menu bar (File Edit View Timeline Generate Window Help; F10 opens it from the keyboard), the
   **page tabs**, project name, transport, `⌘` = command palette, `⌃` = hide the bar, `⚙` = Settings (far right).
@@ -111,7 +141,7 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   (add, edit, resolve, delete), section label/colour (`overrides.json`), generation requests (`requests.json`).
   `song.json`, `shots.json` etc. stay the importer's: timing / take / in-point changes become **requests** for the
   agent. The page never calls a paid API.
-- **Projects** (File menu): new (empty), new from template (copy without notes/approvals/requests), open, recent,
+- **Projects** (File menu): new (the wizard), new empty, new from template (copy without notes/approvals/requests), open, recent,
   save snapshot (Ctrl+S, with a message), revert to snapshot (the current state is snapshotted first, "auto"),
   save as / duplicate, import (as requests), export (JSON bundle, shot list CSV, printable storyboard), delete.
   Open a project with `?project=<id>`.
@@ -163,6 +193,8 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `overrides.json` | `{rev, sections:{<id>:{label?, color?}}}`: the director's section renames / colours over `song.json` |
 | `settings.json` | `{rev, keybindings:{<command id>:[keys]}}` (not snapshotted) |
 | `project.json` | `{title, created, from?}` |
+| `stages.json` | `{rev, stages[{id: lyrics/script/breakdown/characters/scenery/storyboard/final, status: empty/in_progress/needs_you/done, done_by?, via?, updated?, updated_by?, blockers[], note?}]}`: the guided flow (shared with the page; only the page sets `done`, stamped `done_by: "director", via: "page"`); missing = derived (stages with content count as done) |
+| `lyrics.json` | `{rev, current: "v3", seq, versions[{id, n, created, by, via, message, from?, sections[{id, label, lines[{id, text, t?}]}]}], notes[{id, line, w: [first, last word] \| null, quote, text, by, via, to?: "agent", kind?, status, at, version, replies[{id, text, by, via, at}]}]}`: stage 1. Versions are immutable (a save appends one and moves `current`; the server keeps its copy of every saved version); line ids are stable across versions and are the `song.json` line ids (a missing file reads as v1 derived from `song.json`). The server re-syncs `song.json` lines on every new current version |
 | `.snapshots/<yyyymmdd-hhmmss>-<slug>/` | copies of the small JSON files (no peaks, thumbs, `_src`, settings) + `.meta.json {id, at, message, auto, files}` |
 
 ## How an agent edits them
@@ -195,7 +227,7 @@ Every `/api` call takes `?project=<id>` (default: `$WB_PROJECT`, the config's `d
 only) · `POST /api/ui {t?, range?, view?, select?, preview?, message?, play?, open_project?}` (live UI channel: pushed to the
 open pages over SSE; returns `{pages, delivered}` once they ack via `POST /api/ui/ack`) ·
 `POST /api/save/<file>` `{base_rev, data}` (409 + current file when stale) · `GET /api/events` (SSE `{project, file}`) ·
-`GET /api/projects` · `POST /api/projects/new {id}` · `POST /api/projects/duplicate {from, to, reset_state?}` ·
+`GET /api/projects` · `POST /api/projects/new {id, title?, lyrics?, song?, bpm?}` (with `lyrics` / `song`: the wizard's guided project) · `POST /api/projects/duplicate {from, to, reset_state?}` ·
 `POST /api/projects/delete {id}` (the default project is refused) · `GET /api/snapshots` · `POST /api/snapshot {message}` ·
 `POST /api/restore {snapshot}` (auto-snapshots first, copies the snapshot's JSON back, removes files it did not have; costs and requests that ran since are kept) ·
 `POST /api/reveal {path}` (Explorer at a media file). Writes are temp file + rename with retries (Windows locks);

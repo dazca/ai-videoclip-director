@@ -23,7 +23,9 @@
 //                                        the open pages of ?project; returns {delivered, pages} once they ack (local only)
 // POST /api/ui/ack                       {id}  (the page, after it applied a UI command)
 // GET  /api/projects                     [{id, title, modified, snapshots}]
-// POST /api/projects/new                 {id, title?}                 empty project (a copy of data/_template/)
+// POST /api/projects/new                 {id, title?, lyrics?, song?}  a copy of data/_template/; with lyrics (text) and/or
+//                                        song (an audio file path on this machine): the new-project wizard (lyrics.json v1,
+//                                        song timings estimated until a song is attached)
 // POST /api/projects/duplicate           {from, to, reset_state?}     copy data/<from>/ (no snapshots); reset_state = template
 // POST /api/projects/delete              {id}                         refuses the default project, _template and demo
 // GET  /api/snapshots                    [{id, at, message, auto, files}] newest first
@@ -38,6 +40,7 @@ import { pipeline } from 'node:stream';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import * as S from './lib/store.mjs';
+import { checkLyrics } from './js/flow.js';
 
 const { CFG, DATA_ROOT, WB_DIR: WB } = S;
 const ARGS = process.argv.slice(2);
@@ -138,7 +141,10 @@ function readBody(req) {
 }
 // a page save is the director's own act: record it as such. requests.json: the server owns each request's log (the page
 // never writes it) and appends {by: "director", via: "page"} on a status change, which is what lib/store.mjs approvalOk()
-// accepts as an approval. approvals.json: an item whose state changed is marked via:"page".
+// accepts as an approval. approvals.json: an item whose state changed is marked via:"page". stages.json: a stage whose
+// status changed is marked via:"page" (done: done_by "director"; only the page marks a stage done). lyrics.json: a
+// version once saved never changes (the server keeps its copy); new versions, notes and replies are stamped
+// by "director", via "page"; existing notes and replies keep their author.
 function stampPage(name, data, cur) {
   const at = new Date().toISOString().slice(0, 19);
   if (name === 'requests.json' && Array.isArray(data.items)) {
@@ -156,6 +162,26 @@ function stampPage(name, data, cur) {
       const c = cur.items?.[k];
       if (!c || c.state !== v.state) v.via = 'page'; else if (c.via) v.via = c.via; else delete v.via;
     }
+  }
+  if (name === 'stages.json') {
+    if (!Array.isArray(data.stages)) throw new S.WbError(400, 'stages.json: {stages: [...]} expected');
+    const was = new Map((cur.stages || []).map(x => [x?.id, x]));
+    data.stages = data.stages.filter(x => x && typeof x === 'object').map(x => {
+      const c = was.get(x.id), out = { ...x };
+      if (!c || c.status !== x.status) { out.updated = at; out.via = 'page'; out.updated_by = 'director'; if (x.status === 'done') out.done_by = 'director'; else delete out.done_by; }
+      else { for (const k of ['done_by', 'via', 'updated_by']) { if (c[k] !== undefined) out[k] = c[k]; else delete out[k]; } }
+      return out;
+    });
+  }
+  if (name === 'lyrics.json') {
+    try { checkLyrics(data); } catch (e) { throw new S.WbError(400, e.message); }
+    const cv = new Map((cur.versions || []).map(v => [v.id, v])), cn = new Map((cur.notes || []).map(n => [n.id, n]));
+    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, created: at, ...(v.via === 'import' && !cur.versions ? {} : { by: 'director', via: 'page' }) });
+    data.notes = (data.notes || []).filter(n => n && typeof n === 'object').map(n => {
+      const c = cn.get(n.id), cr = new Map((c?.replies || []).map(r => [r.id, r]));
+      const replies = (Array.isArray(n.replies) ? n.replies : []).filter(r => r && typeof r === 'object').map(r => cr.get(r.id) ? { ...r, by: cr.get(r.id).by, via: cr.get(r.id).via, at: cr.get(r.id).at } : { ...r, by: 'director', via: 'page', at });
+      return c ? { ...n, by: c.by, via: c.via, at: c.at, replies } : { ...n, by: 'director', via: 'page', at, replies };
+    });
   }
   return data;
 }
@@ -194,6 +220,7 @@ http.createServer(async (req, res) => {
         if ((cur.rev || 0) !== body.base_rev) return json(res, 409, cur);
         const data = stampPage(name, { ...body.data, rev: (cur.rev || 0) + 1 }, cur);
         S.writeJSON(file, data);
+        S.afterPageSave(project, name, data, cur);   // lyrics.json: the song's lines follow the current version
         return json(res, 200, { rev: data.rev });
       }
       if (p === '/api/ui/ack') { const a = acks.get(body.id); if (a) { a.n++; if (a.n >= a.pages) a.done(); } return json(res, 200, { ok: true }); }
@@ -201,9 +228,9 @@ http.createServer(async (req, res) => {
       if (p.startsWith('/api/op/')) {
         const name = p.slice('/api/op/'.length);
         if (!Object.hasOwn(S.ops, name)) return json(res, 404, { error: 'no such op: ' + name });
-        return json(res, 200, S.ops[name](project, body));
+        return json(res, 200, await S.ops[name](project, body));
       }
-      if (p === '/api/projects/new') return json(res, 200, S.createProject(body.id, body.title));
+      if (p === '/api/projects/new') return json(res, 200, body.lyrics != null || body.song ? await S.createGuidedProject(body) : S.createProject(body.id, body.title));
       if (p === '/api/projects/duplicate') return json(res, 200, S.duplicateProject(body.from || project, body.to, !!body.reset_state));
       if (p === '/api/projects/delete') return json(res, 200, S.deleteProject(body.id));
       if (p === '/api/snapshot') return json(res, 200, S.snapshot(project, body.message));

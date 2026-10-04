@@ -1,0 +1,1724 @@
+{
+ "version": 1,
+ "generated": "2026-10-04",
+ "note": "Every item is CC0 1.0 or Public Domain Mark 1.0. See LICENSES.md. Paths are relative to this folder.",
+ "kinds": [
+  "body",
+  "pose",
+  "face-angles",
+  "expressions",
+  "garment",
+  "location",
+  "prop"
+ ],
+ "items": [
+  {
+   "id": "body-mannequin_neutral",
+   "kind": "body",
+   "title": "Neutral mannequin turnaround",
+   "tags": [
+    "mannequin",
+    "neutral",
+    "average",
+    "turnaround",
+    "a-pose",
+    "front",
+    "three-quarter",
+    "side",
+    "back",
+    "3d-render",
+    "clay"
+   ],
+   "file": "body/mannequin_neutral_turnaround.jpg",
+   "width": 1024,
+   "height": 585,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Mannequin, Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "body-mannequin_heavy",
+   "kind": "body",
+   "title": "Heavy-build mannequin turnaround",
+   "tags": [
+    "mannequin",
+    "heavy",
+    "plus-size",
+    "turnaround",
+    "a-pose",
+    "front",
+    "three-quarter",
+    "side",
+    "back",
+    "3d-render",
+    "clay"
+   ],
+   "file": "body/mannequin_heavy_turnaround.jpg",
+   "width": 1024,
+   "height": 499,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Mannequin, Universal Animation Library (proportions edited)\" by Quaternius (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "body-mannequin_slim",
+   "kind": "body",
+   "title": "Slim mannequin turnaround",
+   "tags": [
+    "mannequin",
+    "slim",
+    "turnaround",
+    "a-pose",
+    "front",
+    "three-quarter",
+    "side",
+    "back",
+    "3d-render",
+    "clay"
+   ],
+   "file": "body/mannequin_slim_turnaround.jpg",
+   "width": 1024,
+   "height": 588,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Mannequin, Universal Animation Library (proportions edited)\" by Quaternius (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "body-mannequin_child",
+   "kind": "body",
+   "title": "Child-proportion mannequin turnaround",
+   "tags": [
+    "mannequin",
+    "child",
+    "teen",
+    "short",
+    "turnaround",
+    "a-pose",
+    "front",
+    "three-quarter",
+    "side",
+    "back",
+    "3d-render",
+    "clay"
+   ],
+   "file": "body/mannequin_child_turnaround.jpg",
+   "width": 1024,
+   "height": 616,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Mannequin, Universal Animation Library (proportions edited)\" by Quaternius (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "body-athletic_male",
+   "kind": "body",
+   "title": "Athletic male body turnaround",
+   "tags": [
+    "male",
+    "athletic",
+    "muscular",
+    "turnaround",
+    "a-pose",
+    "front",
+    "three-quarter",
+    "side",
+    "back",
+    "3d-render",
+    "clay"
+   ],
+   "file": "body/athletic_male_turnaround.jpg",
+   "width": 1024,
+   "height": 547,
+   "source": "https://quaternius.itch.io/universal-base-characters",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Superhero_Male_FullBody, Universal Base Characters\" by Quaternius (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "body-athletic_female",
+   "kind": "body",
+   "title": "Athletic female body turnaround",
+   "tags": [
+    "female",
+    "athletic",
+    "turnaround",
+    "a-pose",
+    "front",
+    "three-quarter",
+    "side",
+    "back",
+    "3d-render",
+    "clay"
+   ],
+   "file": "body/athletic_female_turnaround.jpg",
+   "width": 1024,
+   "height": 596,
+   "source": "https://quaternius.itch.io/universal-base-characters",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Superhero_Female_FullBody, Universal Base Characters\" by Quaternius (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "body-mannequin_neutral-line",
+   "kind": "body",
+   "title": "Neutral mannequin turnaround (line art / croquis)",
+   "tags": [
+    "mannequin",
+    "neutral",
+    "average",
+    "turnaround",
+    "a-pose",
+    "line-art",
+    "croquis"
+   ],
+   "file": "body/mannequin_neutral_turnaround_line.jpg",
+   "width": 1024,
+   "height": 585,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Mannequin, Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "body-athletic_male-line",
+   "kind": "body",
+   "title": "Athletic male body turnaround (line art / croquis)",
+   "tags": [
+    "male",
+    "athletic",
+    "muscular",
+    "turnaround",
+    "a-pose",
+    "line-art",
+    "croquis"
+   ],
+   "file": "body/athletic_male_turnaround_line.jpg",
+   "width": 1024,
+   "height": 547,
+   "source": "https://quaternius.itch.io/universal-base-characters",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Superhero_Male_FullBody, Universal Base Characters\" by Quaternius (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "body-athletic_female-line",
+   "kind": "body",
+   "title": "Athletic female body turnaround (line art / croquis)",
+   "tags": [
+    "female",
+    "athletic",
+    "turnaround",
+    "a-pose",
+    "line-art",
+    "croquis"
+   ],
+   "file": "body/athletic_female_turnaround_line.jpg",
+   "width": 1024,
+   "height": 596,
+   "source": "https://quaternius.itch.io/universal-base-characters",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Superhero_Female_FullBody, Universal Base Characters\" by Quaternius (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "pose-idle_talking",
+   "kind": "pose",
+   "title": "Standing, talking with hands",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "idle"
+   ],
+   "file": "pose/idle_talking.jpg",
+   "width": 463,
+   "height": 1017,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/idle_talking.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "pose-walk",
+   "kind": "pose",
+   "title": "Walking",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "walk"
+   ],
+   "file": "pose/walk.jpg",
+   "width": 346,
+   "height": 1018,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/walk.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "pose-walk_formal",
+   "kind": "pose",
+   "title": "Walking, upright",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "walk"
+   ],
+   "file": "pose/walk_formal.jpg",
+   "width": 374,
+   "height": 1022,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/walk_formal.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "pose-jog",
+   "kind": "pose",
+   "title": "Jogging",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "jog"
+   ],
+   "file": "pose/jog.jpg",
+   "width": 824,
+   "height": 993,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/jog.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "pose-sprint",
+   "kind": "pose",
+   "title": "Sprinting",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "sprint"
+   ],
+   "file": "pose/sprint.jpg",
+   "width": 824,
+   "height": 1018,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/sprint.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "pose-dance_a",
+   "kind": "pose",
+   "title": "Dance A",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "dance"
+   ],
+   "file": "pose/dance_a.jpg",
+   "width": 423,
+   "height": 1016,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/dance_a.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "pose-dance_b",
+   "kind": "pose",
+   "title": "Dance B",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "dance"
+   ],
+   "file": "pose/dance_b.jpg",
+   "width": 448,
+   "height": 1014,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/dance_b.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "pose-dance_c",
+   "kind": "pose",
+   "title": "Dance C",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "dance"
+   ],
+   "file": "pose/dance_c.jpg",
+   "width": 451,
+   "height": 1017,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/dance_c.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "pose-sit_idle",
+   "kind": "pose",
+   "title": "Sitting, relaxed (seat not shown)",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "sit"
+   ],
+   "file": "pose/sit_idle.jpg",
+   "width": 623,
+   "height": 1011,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/sit_idle.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "pose-sit_talking",
+   "kind": "pose",
+   "title": "Sitting, gesturing (seat not shown)",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "sit"
+   ],
+   "file": "pose/sit_talking.jpg",
+   "width": 602,
+   "height": 1008,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/sit_talking.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "pose-crouch",
+   "kind": "pose",
+   "title": "Crouching",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "crouch"
+   ],
+   "file": "pose/crouch.jpg",
+   "width": 825,
+   "height": 1024,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/crouch.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "pose-kneel",
+   "kind": "pose",
+   "title": "Kneeling on one knee",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "kneel"
+   ],
+   "file": "pose/kneel.jpg",
+   "width": 973,
+   "height": 977,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/kneel.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "pose-jump",
+   "kind": "pose",
+   "title": "Jumping, mid-air",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "jump"
+   ],
+   "file": "pose/jump.jpg",
+   "width": 940,
+   "height": 1024,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/jump.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "pose-push",
+   "kind": "pose",
+   "title": "Pushing something heavy",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "push"
+   ],
+   "file": "pose/push.jpg",
+   "width": 994,
+   "height": 959,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/push.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "pose-pick_up",
+   "kind": "pose",
+   "title": "Bending to pick something up",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "pick"
+   ],
+   "file": "pose/pick_up.jpg",
+   "width": 497,
+   "height": 1019,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/pick_up.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "pose-reach_interact",
+   "kind": "pose",
+   "title": "Reaching out to interact",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "reach"
+   ],
+   "file": "pose/reach_interact.jpg",
+   "width": 552,
+   "height": 1004,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/reach_interact.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "pose-drive_seated",
+   "kind": "pose",
+   "title": "Seated driving pose (seat not shown)",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "drive"
+   ],
+   "file": "pose/drive_seated.jpg",
+   "width": 636,
+   "height": 997,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/drive_seated.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "pose-hold_light_up",
+   "kind": "pose",
+   "title": "Holding a light up",
+   "tags": [
+    "mannequin",
+    "clay",
+    "3d-render",
+    "full-body",
+    "hold"
+   ],
+   "file": "pose/hold_light_up.jpg",
+   "width": 538,
+   "height": 1013,
+   "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model and animation); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Universal Animation Library\" by Quaternius (CC0 1.0). No attribution required.",
+   "control": {
+    "openpose": "pose/hold_light_up.openpose.png",
+    "note": "COCO-18 OpenPose skeleton projected from the rig; face points approximate"
+   }
+  },
+  {
+   "id": "prop-camera_01",
+   "kind": "prop",
+   "title": "Camera 01",
+   "tags": [
+    "3d-render",
+    "product-shot",
+    "white-background",
+    "props",
+    "electronics"
+   ],
+   "file": "prop/camera_01.jpg",
+   "width": 714,
+   "height": 714,
+   "source": "https://polyhaven.com/a/Camera_01",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Rajil Jose Macatangay (Poly Haven); render: Director Workbench",
+   "attribution": "Rendered from \"Camera 01\" by Rajil Jose Macatangay, Poly Haven (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "prop-lantern_01",
+   "kind": "prop",
+   "title": "Lantern 01",
+   "tags": [
+    "3d-render",
+    "product-shot",
+    "white-background",
+    "props",
+    "lighting"
+   ],
+   "file": "prop/lantern_01.jpg",
+   "width": 898,
+   "height": 898,
+   "source": "https://polyhaven.com/a/Lantern_01",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Rajil Jose Macatangay (Poly Haven); render: Director Workbench",
+   "attribution": "Rendered from \"Lantern 01\" by Rajil Jose Macatangay, Poly Haven (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "prop-television_01",
+   "kind": "prop",
+   "title": "Television 01",
+   "tags": [
+    "3d-render",
+    "product-shot",
+    "white-background",
+    "props",
+    "electronics"
+   ],
+   "file": "prop/television_01.jpg",
+   "width": 841,
+   "height": 841,
+   "source": "https://polyhaven.com/a/Television_01",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Gabriel Radić (Poly Haven); render: Director Workbench",
+   "attribution": "Rendered from \"Television 01\" by Gabriel Radić, Poly Haven (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "prop-ukulele_01",
+   "kind": "prop",
+   "title": "Ukulele 01",
+   "tags": [
+    "3d-render",
+    "product-shot",
+    "white-background",
+    "props",
+    "instrument"
+   ],
+   "file": "prop/ukulele_01.jpg",
+   "width": 856,
+   "height": 856,
+   "source": "https://polyhaven.com/a/Ukulele_01",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Joseph Burgan (Poly Haven); render: Director Workbench",
+   "attribution": "Rendered from \"Ukulele 01\" by Joseph Burgan, Poly Haven (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "prop-boombox",
+   "kind": "prop",
+   "title": "Boombox",
+   "tags": [
+    "3d-render",
+    "product-shot",
+    "white-background",
+    "appliances",
+    "electronics"
+   ],
+   "file": "prop/boombox.jpg",
+   "width": 860,
+   "height": 860,
+   "source": "https://polyhaven.com/a/boombox",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Thomas Paul Mouilleron (Poly Haven); render: Director Workbench",
+   "attribution": "Rendered from \"Boombox\" by Thomas Paul Mouilleron, Poly Haven (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "prop-cassette_player",
+   "kind": "prop",
+   "title": "Cassette Player",
+   "tags": [
+    "3d-render",
+    "product-shot",
+    "white-background",
+    "props",
+    "electronics"
+   ],
+   "file": "prop/cassette_player.jpg",
+   "width": 887,
+   "height": 887,
+   "source": "https://polyhaven.com/a/cassette_player",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Oday Abuzaeed (Poly Haven); render: Director Workbench",
+   "attribution": "Rendered from \"Cassette Player\" by Oday Abuzaeed, Poly Haven (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "prop-classic_laptop",
+   "kind": "prop",
+   "title": "Classic Laptop",
+   "tags": [
+    "3d-render",
+    "product-shot",
+    "white-background",
+    "office",
+    "electronics"
+   ],
+   "file": "prop/classic_laptop.jpg",
+   "width": 867,
+   "height": 867,
+   "source": "https://polyhaven.com/a/classic_laptop",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Arrangemonk (Poly Haven); render: Director Workbench",
+   "attribution": "Rendered from \"Classic Laptop\" by Arrangemonk, Poly Haven (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "prop-desk_lamp_arm_01",
+   "kind": "prop",
+   "title": "Desk Lamp Arm 01",
+   "tags": [
+    "3d-render",
+    "product-shot",
+    "white-background",
+    "lighting",
+    "rigged"
+   ],
+   "file": "prop/desk_lamp_arm_01.jpg",
+   "width": 868,
+   "height": 868,
+   "source": "https://polyhaven.com/a/desk_lamp_arm_01",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Yann Kervran, Kuutti Siitonen (Poly Haven); render: Director Workbench",
+   "attribution": "Rendered from \"Desk Lamp Arm 01\" by Yann Kervran, Kuutti Siitonen, Poly Haven (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "prop-modern_arm_chair_01",
+   "kind": "prop",
+   "title": "Modern Arm Chair 01",
+   "tags": [
+    "3d-render",
+    "product-shot",
+    "white-background",
+    "furniture",
+    "seating",
+    "office"
+   ],
+   "file": "prop/modern_arm_chair_01.jpg",
+   "width": 941,
+   "height": 941,
+   "source": "https://polyhaven.com/a/modern_arm_chair_01",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Vibrant Nordic (Poly Haven); render: Director Workbench",
+   "attribution": "Rendered from \"Modern Arm Chair 01\" by Vibrant Nordic, Poly Haven (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "prop-potted_plant_02",
+   "kind": "prop",
+   "title": "Potted Plant 02",
+   "tags": [
+    "3d-render",
+    "product-shot",
+    "white-background",
+    "decorative",
+    "plants",
+    "potted plants",
+    "nature"
+   ],
+   "file": "prop/potted_plant_02.jpg",
+   "width": 860,
+   "height": 860,
+   "source": "https://polyhaven.com/a/potted_plant_02",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Rico Cilliers (Poly Haven); render: Director Workbench",
+   "attribution": "Rendered from \"Potted Plant 02\" by Rico Cilliers, Poly Haven (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "prop-street_lamp_01",
+   "kind": "prop",
+   "title": "Street Lamp 01",
+   "tags": [
+    "3d-render",
+    "product-shot",
+    "white-background",
+    "lighting",
+    "industrial"
+   ],
+   "file": "prop/street_lamp_01.jpg",
+   "width": 854,
+   "height": 854,
+   "source": "https://polyhaven.com/a/street_lamp_01",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Josh Dean (Poly Haven); render: Director Workbench",
+   "attribution": "Rendered from \"Street Lamp 01\" by Josh Dean, Poly Haven (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "prop-vintage_video_camera",
+   "kind": "prop",
+   "title": "Vintage Video Camera",
+   "tags": [
+    "3d-render",
+    "product-shot",
+    "white-background",
+    "electronics",
+    "appliances"
+   ],
+   "file": "prop/vintage_video_camera.jpg",
+   "width": 931,
+   "height": 931,
+   "source": "https://polyhaven.com/a/vintage_video_camera",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "James Ray Cock, Jenelle van Heerden (Poly Haven); render: Director Workbench",
+   "attribution": "Rendered from \"Vintage Video Camera\" by James Ray Cock, Jenelle van Heerden, Poly Haven (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "prop-wine_bottles_01",
+   "kind": "prop",
+   "title": "Wine Bottles 01",
+   "tags": [
+    "3d-render",
+    "product-shot",
+    "white-background",
+    "props",
+    "containers",
+    "dishes"
+   ],
+   "file": "prop/wine_bottles_01.jpg",
+   "width": 837,
+   "height": 837,
+   "source": "https://polyhaven.com/a/wine_bottles_01",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Rico Cilliers, Jurita Burger (Poly Haven); render: Director Workbench",
+   "attribution": "Rendered from \"Wine Bottles 01\" by Rico Cilliers, Jurita Burger, Poly Haven (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "location-abandoned_parking",
+   "kind": "location",
+   "title": "Abandoned Parking",
+   "tags": [
+    "photo",
+    "plate",
+    "16:9",
+    "outdoor",
+    "skies",
+    "urban",
+    "midday",
+    "partly cloudy"
+   ],
+   "file": "location/abandoned_parking.jpg",
+   "width": 1024,
+   "height": 576,
+   "source": "https://polyhaven.com/a/abandoned_parking",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Sergej Majboroda (Poly Haven)",
+   "attribution": "Perspective view extracted from the HDRI \"Abandoned Parking\" by Sergej Majboroda, Poly Haven (CC0 1.0). No attribution required.",
+   "hdri": "https://polyhaven.com/a/abandoned_parking"
+  },
+  {
+   "id": "location-autoshop_01",
+   "kind": "location",
+   "title": "Autoshop 01",
+   "tags": [
+    "photo",
+    "plate",
+    "16:9",
+    "indoor",
+    "urban",
+    "low contrast",
+    "artificial light"
+   ],
+   "file": "location/autoshop_01.jpg",
+   "width": 1024,
+   "height": 576,
+   "source": "https://polyhaven.com/a/autoshop_01",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Oliksiy Yakovlyev (Poly Haven)",
+   "attribution": "Perspective view extracted from the HDRI \"Autoshop 01\" by Oliksiy Yakovlyev, Poly Haven (CC0 1.0). No attribution required.",
+   "hdri": "https://polyhaven.com/a/autoshop_01"
+  },
+  {
+   "id": "location-cobblestone_street_night",
+   "kind": "location",
+   "title": "Cobblestone Street Night",
+   "tags": [
+    "photo",
+    "plate",
+    "16:9",
+    "outdoor",
+    "night",
+    "urban",
+    "artificial light",
+    "high contrast"
+   ],
+   "file": "location/cobblestone_street_night.jpg",
+   "width": 1024,
+   "height": 576,
+   "source": "https://polyhaven.com/a/cobblestone_street_night",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Greg Zaal, Jenelle van Heerden (Poly Haven)",
+   "attribution": "Perspective view extracted from the HDRI \"Cobblestone Street Night\" by Greg Zaal, Jenelle van Heerden, Poly Haven (CC0 1.0). No attribution required.",
+   "hdri": "https://polyhaven.com/a/cobblestone_street_night"
+  },
+  {
+   "id": "location-empty_warehouse_01",
+   "kind": "location",
+   "title": "Empty Warehouse 01",
+   "tags": [
+    "photo",
+    "plate",
+    "16:9",
+    "indoor",
+    "urban",
+    "morning-afternoon",
+    "medium contrast",
+    "artificial light"
+   ],
+   "file": "location/empty_warehouse_01.jpg",
+   "width": 1024,
+   "height": 576,
+   "source": "https://polyhaven.com/a/empty_warehouse_01",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Sergej Majboroda (Poly Haven)",
+   "attribution": "Perspective view extracted from the HDRI \"Empty Warehouse 01\" by Sergej Majboroda, Poly Haven (CC0 1.0). No attribution required.",
+   "hdri": "https://polyhaven.com/a/empty_warehouse_01"
+  },
+  {
+   "id": "location-lakeside",
+   "kind": "location",
+   "title": "Lakeside",
+   "tags": [
+    "photo",
+    "plate",
+    "16:9",
+    "outdoor",
+    "nature",
+    "morning-afternoon",
+    "clear",
+    "high contrast"
+   ],
+   "file": "location/lakeside.jpg",
+   "width": 1024,
+   "height": 576,
+   "source": "https://polyhaven.com/a/lakeside",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Greg Zaal (Poly Haven)",
+   "attribution": "Perspective view extracted from the HDRI \"Lakeside\" by Greg Zaal, Poly Haven (CC0 1.0). No attribution required.",
+   "hdri": "https://polyhaven.com/a/lakeside"
+  },
+  {
+   "id": "location-metro_noord",
+   "kind": "location",
+   "title": "Metro: Noord",
+   "tags": [
+    "photo",
+    "plate",
+    "16:9",
+    "indoor",
+    "urban",
+    "artificial light",
+    "night",
+    "medium contrast"
+   ],
+   "file": "location/metro_noord.jpg",
+   "width": 1024,
+   "height": 576,
+   "source": "https://polyhaven.com/a/metro_noord",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Greg Zaal (Poly Haven)",
+   "attribution": "Perspective view extracted from the HDRI \"Metro: Noord\" by Greg Zaal, Poly Haven (CC0 1.0). No attribution required.",
+   "hdri": "https://polyhaven.com/a/metro_noord"
+  },
+  {
+   "id": "location-misty_pines",
+   "kind": "location",
+   "title": "Misty Pines",
+   "tags": [
+    "photo",
+    "plate",
+    "16:9",
+    "outdoor",
+    "nature",
+    "overcast",
+    "morning-afternoon",
+    "low contrast"
+   ],
+   "file": "location/misty_pines.jpg",
+   "width": 1024,
+   "height": 576,
+   "source": "https://polyhaven.com/a/misty_pines",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Greg Zaal (Poly Haven)",
+   "attribution": "Perspective view extracted from the HDRI \"Misty Pines\" by Greg Zaal, Poly Haven (CC0 1.0). No attribution required.",
+   "hdri": "https://polyhaven.com/a/misty_pines"
+  },
+  {
+   "id": "location-neon_photostudio",
+   "kind": "location",
+   "title": "Neon Photostudio",
+   "tags": [
+    "photo",
+    "plate",
+    "16:9",
+    "urban",
+    "indoor",
+    "medium contrast",
+    "artificial light",
+    "natural light"
+   ],
+   "file": "location/neon_photostudio.jpg",
+   "width": 1024,
+   "height": 576,
+   "source": "https://polyhaven.com/a/neon_photostudio",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Sergej Majboroda (Poly Haven)",
+   "attribution": "Perspective view extracted from the HDRI \"Neon Photostudio\" by Sergej Majboroda, Poly Haven (CC0 1.0). No attribution required.",
+   "hdri": "https://polyhaven.com/a/neon_photostudio"
+  },
+  {
+   "id": "location-rainforest_trail",
+   "kind": "location",
+   "title": "Rainforest Trail",
+   "tags": [
+    "photo",
+    "plate",
+    "16:9",
+    "natural light",
+    "outdoor",
+    "nature",
+    "low contrast",
+    "midday"
+   ],
+   "file": "location/rainforest_trail.jpg",
+   "width": 1024,
+   "height": 576,
+   "source": "https://polyhaven.com/a/rainforest_trail",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Dimitrios Savva, Jarod Guest (Poly Haven)",
+   "attribution": "Perspective view extracted from the HDRI \"Rainforest Trail\" by Dimitrios Savva, Jarod Guest, Poly Haven (CC0 1.0). No attribution required.",
+   "hdri": "https://polyhaven.com/a/rainforest_trail"
+  },
+  {
+   "id": "location-rooftop_night",
+   "kind": "location",
+   "title": "Rooftop Night",
+   "tags": [
+    "photo",
+    "plate",
+    "16:9",
+    "outdoor",
+    "skies",
+    "urban",
+    "sunrise-sunset",
+    "partly cloudy"
+   ],
+   "file": "location/rooftop_night.jpg",
+   "width": 1024,
+   "height": 576,
+   "source": "https://polyhaven.com/a/rooftop_night",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Greg Zaal (Poly Haven)",
+   "attribution": "Perspective view extracted from the HDRI \"Rooftop Night\" by Greg Zaal, Poly Haven (CC0 1.0). No attribution required.",
+   "hdri": "https://polyhaven.com/a/rooftop_night"
+  },
+  {
+   "id": "location-urban_street_04",
+   "kind": "location",
+   "title": "Urban Street 04",
+   "tags": [
+    "photo",
+    "plate",
+    "16:9",
+    "outdoor",
+    "urban",
+    "morning-afternoon",
+    "high contrast",
+    "natural light"
+   ],
+   "file": "location/urban_street_04.jpg",
+   "width": 1024,
+   "height": 576,
+   "source": "https://polyhaven.com/a/urban_street_04",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Andreas Mischok (Poly Haven)",
+   "attribution": "Perspective view extracted from the HDRI \"Urban Street 04\" by Andreas Mischok, Poly Haven (CC0 1.0). No attribution required.",
+   "hdri": "https://polyhaven.com/a/urban_street_04"
+  },
+  {
+   "id": "location-wide_street_01",
+   "kind": "location",
+   "title": "Wide Street 01",
+   "tags": [
+    "photo",
+    "plate",
+    "16:9",
+    "outdoor",
+    "urban",
+    "midday",
+    "clear",
+    "high contrast"
+   ],
+   "file": "location/wide_street_01.jpg",
+   "width": 1024,
+   "height": 576,
+   "source": "https://polyhaven.com/a/wide_street_01",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Sergej Majboroda (Poly Haven)",
+   "attribution": "Perspective view extracted from the HDRI \"Wide Street 01\" by Sergej Majboroda, Poly Haven (CC0 1.0). No attribution required.",
+   "hdri": "https://polyhaven.com/a/wide_street_01"
+  },
+  {
+   "id": "face-angles-athletic_male",
+   "kind": "face-angles",
+   "title": "Athletic male head, 5 yaw angles",
+   "tags": [
+    "head",
+    "yaw-0-45-90-135-180",
+    "3d-render",
+    "bald",
+    "synthetic"
+   ],
+   "file": "face-angles/athletic_male_head.jpg",
+   "width": 1024,
+   "height": 181,
+   "source": "https://quaternius.itch.io/universal-base-characters",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Superhero_Male_FullBody, Universal Base Characters\" by Quaternius (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "face-angles-athletic_female",
+   "kind": "face-angles",
+   "title": "Athletic female head, 5 yaw angles",
+   "tags": [
+    "head",
+    "yaw-0-45-90-135-180",
+    "3d-render",
+    "bald",
+    "synthetic"
+   ],
+   "file": "face-angles/athletic_female_head.jpg",
+   "width": 1024,
+   "height": 195,
+   "source": "https://quaternius.itch.io/universal-base-characters",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Quaternius (model); render: Director Workbench",
+   "attribution": "Rendered by the Director Workbench project from \"Superhero_Female_FullBody, Universal Base Characters\" by Quaternius (CC0 1.0). No attribution required."
+  },
+  {
+   "id": "garment-tshirt",
+   "kind": "garment",
+   "title": "T-shirt (technical flat, front)",
+   "tags": [
+    "technical-flat",
+    "line-art",
+    "front",
+    "tshirt"
+   ],
+   "file": "garment/tshirt.jpg",
+   "width": 1024,
+   "height": 1024,
+   "source": "catalog/garment/tshirt.svg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Director Workbench contributors",
+   "attribution": "Original drawing made for the Director Workbench, dedicated to the public domain (CC0 1.0).",
+   "vector": "garment/tshirt.svg"
+  },
+  {
+   "id": "garment-button_shirt",
+   "kind": "garment",
+   "title": "Button-up shirt, long sleeve (technical flat, front)",
+   "tags": [
+    "technical-flat",
+    "line-art",
+    "front",
+    "button_shirt"
+   ],
+   "file": "garment/button_shirt.jpg",
+   "width": 1024,
+   "height": 1024,
+   "source": "catalog/garment/button_shirt.svg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Director Workbench contributors",
+   "attribution": "Original drawing made for the Director Workbench, dedicated to the public domain (CC0 1.0).",
+   "vector": "garment/button_shirt.svg"
+  },
+  {
+   "id": "garment-hoodie",
+   "kind": "garment",
+   "title": "Hoodie with kangaroo pocket (technical flat, front)",
+   "tags": [
+    "technical-flat",
+    "line-art",
+    "front",
+    "hoodie"
+   ],
+   "file": "garment/hoodie.jpg",
+   "width": 1024,
+   "height": 1024,
+   "source": "catalog/garment/hoodie.svg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Director Workbench contributors",
+   "attribution": "Original drawing made for the Director Workbench, dedicated to the public domain (CC0 1.0).",
+   "vector": "garment/hoodie.svg"
+  },
+  {
+   "id": "garment-jacket",
+   "kind": "garment",
+   "title": "Single-breasted jacket / blazer (technical flat, front)",
+   "tags": [
+    "technical-flat",
+    "line-art",
+    "front",
+    "jacket"
+   ],
+   "file": "garment/jacket.jpg",
+   "width": 1024,
+   "height": 1024,
+   "source": "catalog/garment/jacket.svg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Director Workbench contributors",
+   "attribution": "Original drawing made for the Director Workbench, dedicated to the public domain (CC0 1.0).",
+   "vector": "garment/jacket.svg"
+  },
+  {
+   "id": "garment-dress",
+   "kind": "garment",
+   "title": "Sleeveless fit-and-flare dress (technical flat, front)",
+   "tags": [
+    "technical-flat",
+    "line-art",
+    "front",
+    "dress"
+   ],
+   "file": "garment/dress.jpg",
+   "width": 1024,
+   "height": 1024,
+   "source": "catalog/garment/dress.svg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Director Workbench contributors",
+   "attribution": "Original drawing made for the Director Workbench, dedicated to the public domain (CC0 1.0).",
+   "vector": "garment/dress.svg"
+  },
+  {
+   "id": "garment-skirt",
+   "kind": "garment",
+   "title": "A-line skirt (technical flat, front)",
+   "tags": [
+    "technical-flat",
+    "line-art",
+    "front",
+    "skirt"
+   ],
+   "file": "garment/skirt.jpg",
+   "width": 1024,
+   "height": 1024,
+   "source": "catalog/garment/skirt.svg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Director Workbench contributors",
+   "attribution": "Original drawing made for the Director Workbench, dedicated to the public domain (CC0 1.0).",
+   "vector": "garment/skirt.svg"
+  },
+  {
+   "id": "garment-trousers",
+   "kind": "garment",
+   "title": "Straight trousers (technical flat, front)",
+   "tags": [
+    "technical-flat",
+    "line-art",
+    "front",
+    "trousers"
+   ],
+   "file": "garment/trousers.jpg",
+   "width": 1024,
+   "height": 1024,
+   "source": "catalog/garment/trousers.svg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Director Workbench contributors",
+   "attribution": "Original drawing made for the Director Workbench, dedicated to the public domain (CC0 1.0).",
+   "vector": "garment/trousers.svg"
+  },
+  {
+   "id": "garment-shorts",
+   "kind": "garment",
+   "title": "Shorts (technical flat, front)",
+   "tags": [
+    "technical-flat",
+    "line-art",
+    "front",
+    "shorts"
+   ],
+   "file": "garment/shorts.jpg",
+   "width": 1024,
+   "height": 1024,
+   "source": "catalog/garment/shorts.svg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Director Workbench contributors",
+   "attribution": "Original drawing made for the Director Workbench, dedicated to the public domain (CC0 1.0).",
+   "vector": "garment/shorts.svg"
+  },
+  {
+   "id": "body-durer_slim_female_side_front",
+   "kind": "body",
+   "title": "Dürer: slim female figure, side and front (1528)",
+   "tags": [
+    "historical",
+    "woodcut",
+    "line-art",
+    "unclothed-schematic",
+    "slim",
+    "front",
+    "side"
+   ],
+   "file": "body/durer_slim_female_side_front.jpg",
+   "width": 739,
+   "height": 1024,
+   "source": "https://commons.wikimedia.org/wiki/File:IIllustration_from_D%C3%BCrers_Vier_Bucher_von_Menslicher_Proportion,_Nuremberg,_1528_MET_DP816817.jpg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Albrecht Dürer (image: The Metropolitan Museum of Art Open Access, via Wikimedia Commons)",
+   "attribution": "\"Dürer: slim female figure, side and front (1528)\", Albrecht Dürer. Image: The Metropolitan Museum of Art Open Access (CC0 1.0), via Wikimedia Commons. No attribution required."
+  },
+  {
+   "id": "body-durer_heavy_female_measured",
+   "kind": "body",
+   "title": "Dürer: heavy female figure with proportion lines (1528)",
+   "tags": [
+    "historical",
+    "woodcut",
+    "line-art",
+    "unclothed-schematic",
+    "heavy",
+    "proportions"
+   ],
+   "file": "body/durer_heavy_female_measured.jpg",
+   "width": 725,
+   "height": 1024,
+   "source": "https://commons.wikimedia.org/wiki/File:IIllustration_from_D%C3%BCrers_Vier_Bucher_von_Menslicher_Proportion,_Nuremberg,_1528_MET_DP816818.jpg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Albrecht Dürer (image: The Metropolitan Museum of Art Open Access, via Wikimedia Commons)",
+   "attribution": "\"Dürer: heavy female figure with proportion lines (1528)\", Albrecht Dürer. Image: The Metropolitan Museum of Art Open Access (CC0 1.0), via Wikimedia Commons. No attribution required."
+  },
+  {
+   "id": "body-durer_heavy_female_side_front",
+   "kind": "body",
+   "title": "Dürer: heavy female figure, side and front (1528)",
+   "tags": [
+    "historical",
+    "woodcut",
+    "line-art",
+    "unclothed-schematic",
+    "heavy",
+    "front",
+    "side"
+   ],
+   "file": "body/durer_heavy_female_side_front.jpg",
+   "width": 723,
+   "height": 1024,
+   "source": "https://commons.wikimedia.org/wiki/File:Illustration_from_D%C3%BCrers_Vier_Bucher_von_Menslicher_Proportion,_Nuremberg,_1528_MET_DP816815.jpg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Albrecht Dürer (image: The Metropolitan Museum of Art Open Access, via Wikimedia Commons)",
+   "attribution": "\"Dürer: heavy female figure, side and front (1528)\", Albrecht Dürer. Image: The Metropolitan Museum of Art Open Access (CC0 1.0), via Wikimedia Commons. No attribution required."
+  },
+  {
+   "id": "body-durer_female_back",
+   "kind": "body",
+   "title": "Dürer: female figure, back view (1528)",
+   "tags": [
+    "historical",
+    "woodcut",
+    "line-art",
+    "unclothed-schematic",
+    "back"
+   ],
+   "file": "body/durer_female_back.jpg",
+   "width": 731,
+   "height": 1024,
+   "source": "https://commons.wikimedia.org/wiki/File:Illustration_from_D%C3%BCrers_Vier_Bucher_von_Menslicher_Proportion,_Nuremberg,_1528_MET_DP816816.jpg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Albrecht Dürer (image: The Metropolitan Museum of Art Open Access, via Wikimedia Commons)",
+   "attribution": "\"Dürer: female figure, back view (1528)\", Albrecht Dürer. Image: The Metropolitan Museum of Art Open Access (CC0 1.0), via Wikimedia Commons. No attribution required."
+  },
+  {
+   "id": "face-angles-durer_head_profiles",
+   "kind": "face-angles",
+   "title": "Dürer: head construction, front and profile (1528)",
+   "tags": [
+    "line-art",
+    "woodcut",
+    "head",
+    "front",
+    "profile",
+    "proportions",
+    "historical"
+   ],
+   "file": "face-angles/durer_head_profiles.jpg",
+   "width": 704,
+   "height": 1024,
+   "source": "https://commons.wikimedia.org/wiki/File:Illustration_and_Text_from_D%C3%BCrers_Vier_Bucher_von_Menslicher_Proportion,_Nuremberg,_1528_MET_DP816819.jpg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Albrecht Dürer (image: The Metropolitan Museum of Art Open Access, via Wikimedia Commons)",
+   "attribution": "\"Dürer: head construction, front and profile (1528)\", Albrecht Dürer. Image: The Metropolitan Museum of Art Open Access (CC0 1.0), via Wikimedia Commons. No attribution required."
+  },
+  {
+   "id": "expressions-lebrun_desire",
+   "kind": "expressions",
+   "title": "Le Brun: Desire",
+   "tags": [
+    "engraving",
+    "desire",
+    "longing"
+   ],
+   "file": "expressions/lebrun_desire.jpg",
+   "width": 741,
+   "height": 1024,
+   "source": "https://commons.wikimedia.org/wiki/File:Desire_(from_Heads_Representing_the_Various_Passions_of_the_Soul;_as_they_are_Expressed_in_the_Human_Countenance-_Drawn_by_that_Great_Master_Monsieur_Le_Brun)_MET_DP854025.jpg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Charles Le Brun / Robert Sayer (image: The Metropolitan Museum of Art Open Access, via Wikimedia Commons)",
+   "attribution": "\"Le Brun: Desire\", Charles Le Brun / Robert Sayer. Image: The Metropolitan Museum of Art Open Access (CC0 1.0), via Wikimedia Commons. No attribution required."
+  },
+  {
+   "id": "expressions-lebrun_hatred",
+   "kind": "expressions",
+   "title": "Le Brun: Hatred or jealousy",
+   "tags": [
+    "engraving",
+    "anger",
+    "hatred"
+   ],
+   "file": "expressions/lebrun_hatred.jpg",
+   "width": 729,
+   "height": 1024,
+   "source": "https://commons.wikimedia.org/wiki/File:Hatred_or_Jealousy_(from_Heads_Representing_the_Various_Passions_of_the_Soul;_as_they_are_Expressed_in_the_Human_Countenance-_Drawn_by_that_Great_Master_Monsieur_Le_Brun)_MET_DP854028.jpg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Charles Le Brun / Robert Sayer (image: The Metropolitan Museum of Art Open Access, via Wikimedia Commons)",
+   "attribution": "\"Le Brun: Hatred or jealousy\", Charles Le Brun / Robert Sayer. Image: The Metropolitan Museum of Art Open Access (CC0 1.0), via Wikimedia Commons. No attribution required."
+  },
+  {
+   "id": "expressions-lebrun_laughter",
+   "kind": "expressions",
+   "title": "Le Brun: Laughter",
+   "tags": [
+    "engraving",
+    "joy",
+    "laughter"
+   ],
+   "file": "expressions/lebrun_laughter.jpg",
+   "width": 733,
+   "height": 1024,
+   "source": "https://commons.wikimedia.org/wiki/File:Laughter_(from_Heads_Representing_the_Various_Passions_of_the_Soul;_as_they_are_Expressed_in_the_Human_Countenance-_Drawn_by_that_Great_Master_Monsieur_Le_Brun)_MET_DP854026.jpg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Charles Le Brun / Robert Sayer (image: The Metropolitan Museum of Art Open Access, via Wikimedia Commons)",
+   "attribution": "\"Le Brun: Laughter\", Charles Le Brun / Robert Sayer. Image: The Metropolitan Museum of Art Open Access (CC0 1.0), via Wikimedia Commons. No attribution required."
+  },
+  {
+   "id": "expressions-lebrun_sadness",
+   "kind": "expressions",
+   "title": "Le Brun: Sadness",
+   "tags": [
+    "engraving",
+    "sad",
+    "grief"
+   ],
+   "file": "expressions/lebrun_sadness.jpg",
+   "width": 725,
+   "height": 1024,
+   "source": "https://commons.wikimedia.org/wiki/File:Sadness_(from_Heads_Representing_the_Various_Passions_of_the_Soul;_as_they_are_Expressed_in_the_Human_Countenance-_Drawn_by_that_Great_Master_Monsieur_Le_Brun)_MET_DP854030.jpg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Charles Le Brun / Robert Sayer (image: The Metropolitan Museum of Art Open Access, via Wikimedia Commons)",
+   "attribution": "\"Le Brun: Sadness\", Charles Le Brun / Robert Sayer. Image: The Metropolitan Museum of Art Open Access (CC0 1.0), via Wikimedia Commons. No attribution required."
+  },
+  {
+   "id": "expressions-lebrun_pain",
+   "kind": "expressions",
+   "title": "Le Brun: Simple bodily pain",
+   "tags": [
+    "engraving",
+    "pain"
+   ],
+   "file": "expressions/lebrun_pain.jpg",
+   "width": 733,
+   "height": 1024,
+   "source": "https://commons.wikimedia.org/wiki/File:Simple_Bodily_Pain_(from_Heads_Representing_the_Various_Passions_of_the_Soul;_as_they_are_Expressed_in_the_Human_Countenance-_Drawn_by_that_Great_Master_Monsieur_Le_Brun)_MET_DP854029.jpg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Robert Sayer / Charles Le Brun (image: The Metropolitan Museum of Art Open Access, via Wikimedia Commons)",
+   "attribution": "\"Le Brun: Simple bodily pain\", Robert Sayer / Charles Le Brun. Image: The Metropolitan Museum of Art Open Access (CC0 1.0), via Wikimedia Commons. No attribution required."
+  },
+  {
+   "id": "expressions-lebrun_fright",
+   "kind": "expressions",
+   "title": "Le Brun: Terror or fright",
+   "tags": [
+    "engraving",
+    "fear",
+    "terror",
+    "scream"
+   ],
+   "file": "expressions/lebrun_fright.jpg",
+   "width": 724,
+   "height": 1024,
+   "source": "https://commons.wikimedia.org/wiki/File:Terrour_or_Fright_(from_Heads_Representing_the_Various_Passions_of_the_Soul;_as_they_are_Expressed_in_the_Human_Countenance-_Drawn_by_that_Great_Master_Monsieur_Le_Brun)_MET_DP854027.jpg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Charles Le Brun / Robert Sayer (image: The Metropolitan Museum of Art Open Access, via Wikimedia Commons)",
+   "attribution": "\"Le Brun: Terror or fright\", Charles Le Brun / Robert Sayer. Image: The Metropolitan Museum of Art Open Access (CC0 1.0), via Wikimedia Commons. No attribution required."
+  },
+  {
+   "id": "expressions-lebrun_expressions_sheet",
+   "kind": "expressions",
+   "title": "Le Brun: The Expressions (sheet of heads)",
+   "tags": [
+    "engraving",
+    "sheet",
+    "many-expressions"
+   ],
+   "file": "expressions/lebrun_expressions_sheet.jpg",
+   "width": 1024,
+   "height": 765,
+   "source": "https://commons.wikimedia.org/wiki/File:The_Expressions_MET_272508.jpg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Henri Testelin / Charles Le Brun (image: The Metropolitan Museum of Art Open Access, via Wikimedia Commons)",
+   "attribution": "\"Le Brun: The Expressions (sheet of heads)\", Henri Testelin / Charles Le Brun. Image: The Metropolitan Museum of Art Open Access (CC0 1.0), via Wikimedia Commons. No attribution required."
+  },
+  {
+   "id": "pose-hands_studies_a",
+   "kind": "pose",
+   "title": "Studies of hands (A)",
+   "tags": [
+    "hands",
+    "drawing",
+    "historical"
+   ],
+   "file": "pose/hands_studies_a.jpg",
+   "width": 1024,
+   "height": 702,
+   "source": "https://commons.wikimedia.org/wiki/File:Studies_of_Hands_MET_DP805345.jpg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Louis-Léopold Boilly (image: The Metropolitan Museum of Art Open Access, via Wikimedia Commons)",
+   "attribution": "\"Studies of hands (A)\", Louis-Léopold Boilly. Image: The Metropolitan Museum of Art Open Access (CC0 1.0), via Wikimedia Commons. No attribution required."
+  },
+  {
+   "id": "pose-hands_studies_b",
+   "kind": "pose",
+   "title": "Studies of hands (B)",
+   "tags": [
+    "hands",
+    "drawing",
+    "historical"
+   ],
+   "file": "pose/hands_studies_b.jpg",
+   "width": 1024,
+   "height": 717,
+   "source": "https://commons.wikimedia.org/wiki/File:Studies_of_Hands_MET_DP807248.jpg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Alphonse Legros (image: The Metropolitan Museum of Art Open Access, via Wikimedia Commons)",
+   "attribution": "\"Studies of hands (B)\", Alphonse Legros. Image: The Metropolitan Museum of Art Open Access (CC0 1.0), via Wikimedia Commons. No attribution required."
+  },
+  {
+   "id": "pose-hands_studies_c",
+   "kind": "pose",
+   "title": "Studies of hands (C)",
+   "tags": [
+    "hands",
+    "drawing",
+    "historical"
+   ],
+   "file": "pose/hands_studies_c.jpg",
+   "width": 1024,
+   "height": 771,
+   "source": "https://commons.wikimedia.org/wiki/File:Studies_of_Hands_MET_DP807715.jpg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Andrea del Sarto (image: The Metropolitan Museum of Art Open Access, via Wikimedia Commons)",
+   "attribution": "\"Studies of hands (C)\", Andrea del Sarto. Image: The Metropolitan Museum of Art Open Access (CC0 1.0), via Wikimedia Commons. No attribution required."
+  },
+  {
+   "id": "pose-hands_forearms_crossed",
+   "kind": "pose",
+   "title": "Study of the forearms and hands of a woman",
+   "tags": [
+    "hands",
+    "drawing",
+    "historical"
+   ],
+   "file": "pose/hands_forearms_crossed.jpg",
+   "width": 705,
+   "height": 1024,
+   "source": "https://commons.wikimedia.org/wiki/File:Study_of_the_Forearms_and_Hands_of_a_Woman_MET_DP320154.jpg",
+   "licence": "CC0-1.0",
+   "licence_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+   "author": "Sir Peter Lely (Pieter van der Faes) (image: The Metropolitan Museum of Art Open Access, via Wikimedia Commons)",
+   "attribution": "\"Study of the forearms and hands of a woman\", Sir Peter Lely (Pieter van der Faes). Image: The Metropolitan Museum of Art Open Access (CC0 1.0), via Wikimedia Commons. No attribution required."
+  }
+ ]
+}

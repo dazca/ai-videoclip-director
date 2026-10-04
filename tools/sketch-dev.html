@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:">
+<title>Sketch dev</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../app.css">
+<style>
+  #devbar { flex: none; display: flex; gap: 4px; align-items: center; height: 22px; padding: 0 4px; background: var(--bg2); border-bottom: 1px solid var(--line); font-size: 11px; }
+  #devbar select, #devbar button { height: 17px; cursor: pointer; }
+  #devbar .log { margin-left: auto; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 50%; }
+  #inline { flex: 1; min-height: 0; position: relative; }
+</style>
+</head>
+<body>
+<div id="devbar">
+  <b>sketch dev</b>
+  <label>underlay <select id="ul"><option value="">none</option></select></label>
+  <button type="button" id="float">open floating</button>
+  <button type="button" id="new">new sketch</button>
+  <span class="log" id="log"></span>
+</div>
+<div id="inline"></div>
+<script type="module" src="sketch-dev.js"></script>
+</body>
+</html>

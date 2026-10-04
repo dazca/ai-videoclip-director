@@ -14,6 +14,8 @@ import { dock, sourceFromKey } from './core/dock.js';
 import { projects, exporter } from './core/projects.js';
 import { sectionAt, shotAt, lineIndexAt } from './core/defaults.js';
 import './core/partb.js';
+import { mountRail } from './core/rail.js';
+import { wizard } from './core/wizard.js';
 
 const ctx = { store, timeline: null, goto: null };
 window.WB = Object.assign(window.WB || {}, { store, ctx, commands, keymap, menus, palette, ui, cheatsheet, history, selection, dock, projects, exporter, context,
@@ -115,6 +117,7 @@ async function show(id) {
   for (const [k, r] of Object.entries(pages)) r.el.style.display = k === p.id ? '' : 'none';
   renderSubnav(p);
   renderTop();
+  document.dispatchEvent(new CustomEvent('wb:page', { detail: p.id }));
   const v = await mountView(viewOfPage(p), rec.body);
   if (active !== p.id || !v?.mod) return;
   v.mod.show?.(ctx);
@@ -211,6 +214,7 @@ addEventListener('keydown', (e) => {
     document.body.replaceChildren(pre); return;
   }
   keymap.rebuild();
+  mountRail();
   const tData = performance.now() - t0;
   if (document.fonts) await document.fonts.ready;
   setTopbar(prefs.get('topbar', true));
@@ -224,5 +228,10 @@ addEventListener('keydown', (e) => {
   document.title = `${PROJECT} · Director Workbench`;
   window.WB.boot = { dataMs: tData, firstRenderMs: performance.now() - t0, timelineBuildMs: ctx.timeline.perf.firstRender };
   document.body.dataset.ready = '1';
+  // an empty project (no lyrics, no lines): the new-project wizard, on its lyrics step, to fill this one
+  if (!store.song.lines.length && !store.lyrics?.versions?.length) {
+    let seen = false; try { seen = !!sessionStorage.getItem('wb:wizSeen:' + PROJECT); sessionStorage.setItem('wb:wizSeen:' + PROJECT, '1'); } catch (e) { /* storage blocked */ }
+    if (!seen) wizard.open({ fill: !PROJECT.startsWith('_') });
+  }
 })();
 export { toast };

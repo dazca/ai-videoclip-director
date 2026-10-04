@@ -177,6 +177,29 @@ try {
   const v1 = (await op('media_add', { path: 'Media/still/I1.jpg' })).body, v2 = (await op('media_add', { path: './media/still/I1.jpg' })).body;
   check('F10 media_add of a flagged file by a variant path adds no public copy', [v1, v2].every(v => v.added === false || v.media?.private === true), { v1: [v1.added, v1.media?.path], v2: [v2.added, v2.media?.path] });
 
+  // ---------------------------------------------------------------- guided flow: only the page marks a stage done; saved lyrics versions and authors cannot be rewritten
+  const sDone = await op('stage_update', { stage: 'final', status: 'done' });
+  const sNeeds = await op('stage_update', { stage: 'final', status: 'needs_you', blockers: ['sec'] });
+  const lnA = (await op('lyrics_note_add', { line: 'verse/1', text: 'sec: an agent note' })).body;   // writes lyrics.json (v1 derived from the song)
+  const pl = await pageSave('lyrics.json', (d) => { d.versions[0].sections[0].lines[0].text = 'FORGED'; const a = d.notes.find(x => x.id === lnA.id); a.by = 'director'; a.via = 'page';
+    d.notes.push({ id: 'ln99', line: null, text: 'sec: page note claiming to be the agent', by: 'agent', via: 'agent', status: 'open', replies: [] }); });
+  const LY = readP('lyrics.json');
+  const badShape = await post(`/api/save/lyrics.json?project=${P}`, { base_rev: LY.rev, data: { versions: 'x' } });
+  const ps = await pageSave('stages.json', (d) => { d.stages.find(x => x.id === 'final').status = 'done'; });
+  const stg = readP('stages.json').stages.find(x => x.id === 'final');
+  check('flow: an agent cannot mark a stage done; a page save cannot rewrite a saved lyrics version or a note author, is stamped director/page, marks done; a malformed lyrics.json is refused',
+    sDone.status === 403 && sNeeds.status === 200 && pl.status === 200 && LY.versions[0].sections[0].lines[0].text !== 'FORGED' && LY.notes.find(x => x.id === lnA.id)?.via === 'agent'
+    && LY.notes.find(x => x.id === 'ln99')?.via === 'page' && LY.notes.find(x => x.id === 'ln99')?.by === 'director' && badShape.status === 400 && ps.status === 200 && stg.status === 'done' && stg.done_by === 'director' && stg.via === 'page',
+    { agentDone: sDone.status, v1: LY.versions[0].sections[0].lines[0].text, agentNote: LY.notes.find(x => x.id === lnA.id)?.via, pageNote: LY.notes.find(x => x.id === 'ln99'), badShape: badShape.status, stage: stg });
+  const snapS = (await post(`/api/snapshot?project=${P}`, { message: 'sec: final done' })).body;
+  await pageSave('stages.json', (d) => { d.stages.find(x => x.id === 'final').status = 'in_progress'; });   // the director reopened it
+  const agentMove = await op('stage_update', { stage: 'lyrics', status: 'empty' });   // lyrics counts as done (the demo has lyrics)
+  await post(`/api/restore?project=${P}`, { snapshot: snapS.id, by: 'agent' });
+  const stR = readP('stages.json').stages.find(x => x.id === 'final');
+  const sp1 = await op('song_attach', { path: 'roots/private/face.png' }), sp2 = await op('song_attach', { path: path.join(MB, 'outside/secret.txt') }), sp3 = await op('song_attach', { path: 'private/song.wav' });
+  check('flow: an agent restore brings no done stage back; the agent cannot move a done stage; song_attach refuses non-audio and PRIVATE paths', stR.status === 'needs_you' && agentMove.status === 409 && [sp1, sp2, sp3].every(x => x.status === 400),
+    { restored: stR.status, agentMove: agentMove.status, attach: [sp1.status, sp2.status, sp3.status] });
+
   // ---------------------------------------------------------------- F09: the EDL extractor's server (source check: it needs the owner's render page)
   const edl = fs.readFileSync(path.join(WB, 'importers/azemar_extract_edl.mjs'), 'utf8');
   check('F09 EDL extractor server: 127.0.0.1, decode in try/catch, confined to ROOT', /listen\(\d+, '127\.0\.0\.1'/.test(edl) && /try \{ p = inside\(ROOT,/.test(edl) && /if \(!p\) \{ r\.writeHead\(403\)/.test(edl));
@@ -199,6 +222,15 @@ try {
     await pg.evaluate(() => window.WB.app.show('approvals')); await wait(800);
     await pg.evaluate(() => window.WB.app.show('notes')); await wait(800);
     check('F02 stored payloads in approvals / notes render as text', await pg.evaluate(() => window.__y === undefined));
+    await op('lyrics_update', { text: '[<img src=x onerror="window.__z=1">]\nline <img src=x onerror="window.__z=2"> here\n<b>bold</b>', message: '<img src=x onerror="window.__z=3">' });
+    await op('lyrics_note_add', { line: null, text: '<img src=x onerror="window.__z=4">', by: '<img src=x onerror="window.__z=5">' });
+    await pageSave('stages.json', (d) => { d.stages[1].note = '<img src=x onerror="window.__z=6">'; d.stages[1].blockers = ['<img src=x onerror="window.__z=7">']; });
+    await pg.goto(`${A.base}/?project=${P}`, { waitUntil: 'domcontentloaded' });
+    await pg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 });
+    await pg.evaluate(() => window.WB.stages.open('lyrics')); await wait(800);
+    await pg.evaluate(() => document.querySelector('.lytabs [data-side=versions]')?.click()); await wait(300);
+    await pg.evaluate(() => window.WB.stages.open('script')); await wait(500);
+    check('F02 stored payloads in lyrics (lines, section tags, notes, version messages) and stages (notes, blockers) render as text', await pg.evaluate(() => window.__z === undefined && !document.querySelector('.lyws img, .sgbar img, #rail img')));
     const tokenOk = await pg.evaluate(async () => (await fetch('/api/op/costs_get?project=demo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status);
     const dock = await browser.newPage(); dock.on('console', m => { if (/Content Security Policy|Refused to/i.test(m.text())) violations.push('dock: ' + m.text()); });
     await dock.goto(`${A.base}/dock.html?project=${P}`, { waitUntil: 'domcontentloaded' }); await wait(1500);

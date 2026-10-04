@@ -1,8 +1,10 @@
 // Data store: loads the project files, saves the writable ones through the server, listens for file changes.
-// Writable (shared with the agent, each {rev, ...}): approvals.json, notes.json, requests.json, overrides.json, settings.json.
+// Writable (shared with the agent, each {rev, ...}): approvals.json, notes.json, requests.json, overrides.json, settings.json,
+// lyrics.json, stages.json (the guided flow: js/flow.js; a missing file reads as derived from the other files).
 // Every page edit goes through store.mutate(), which records an undo step (core/history.js) unless {record:false}.
 // the server redirects a bare / to ?project=<its default project>
 // same id rule as the server (lib/store.mjs validId); anything else falls back to the demo
+import { normLyrics, normStages, projectFacts } from './flow.js';
 const QP = new URLSearchParams(location.search).get('project');
 export const PROJECT = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/.test(QP || '') ? QP : 'demo';
 export const DATA = `data/${PROJECT}/`;
@@ -40,6 +42,13 @@ export const WRITABLE = {
   'requests.json': ['requests', { rev: 0, items: [] }],
   'overrides.json': ['overrides', { rev: 0, sections: {} }],
   'settings.json': ['settings', { rev: 0, keybindings: {} }],
+  'lyrics.json': ['lyrics', null],
+  'stages.json': ['stages', null],
+};
+// derived defaults of the guided-flow files (need the song / entities, so they run after those are loaded)
+const NORM = {
+  'lyrics.json': (s, v) => normLyrics(v, s.song, Object.fromEntries(Object.entries(s.overrides?.sections || {}).filter(([, x]) => x?.label).map(([k, x]) => [k, x.label]))),
+  'stages.json': (s, v) => normStages(v, projectFacts({ song: s.song, script: s.script, shots: s.shots, entities: s.entities, lyrics: s.lyrics })),
 };
 const FULL = /^(song|events|energy|script|shots|costs|media)\.json$|^entities\//;
 // PRIVATE files (e.g. crops of real photos): shown only in the local page (lock badge), never exported (see
@@ -69,6 +78,7 @@ export const store = {
       if (this._saving[f]) this._missed.add(f); else this[field] = v;   // a save is in flight: re-read it after
     }));
     this.entities = await Promise.all(index.map(e => getJSON(e.path)));
+    for (const f of ['lyrics.json', 'stages.json']) this[WRITABLE[f][0]] = NORM[f](this, this[WRITABLE[f][0]]);
     this.entityById = Object.fromEntries(this.entities.map(e => [e.id, e]));
     this.media = (await getJSON('media.json', { items: [] })).items || [];
     this.mediaById = Object.fromEntries(this.media.map(m => [m.id, m]));
@@ -91,7 +101,7 @@ export const store = {
     for (const file of files) {
       // our own saves come back here too: apply only when the file differs from what the page has (agent edit, restore)
       // while a page save of that file is in flight the fetched copy may predate it: re-read once the save settles
-      if (WRITABLE[file]) { const [field, d] = WRITABLE[file]; const v = await getJSON(file, d); if (this._saving[file]) { this._missed.add(file); continue; } if (JSON.stringify(v) !== JSON.stringify(this[field])) { this[field] = v; this.emit(field); } }
+      if (WRITABLE[file]) { const [field, d] = WRITABLE[file]; let v = await getJSON(file, d); if (NORM[file]) v = NORM[file](this, v); if (this._saving[file]) { this._missed.add(file); continue; } if (JSON.stringify(v) !== JSON.stringify(this[field])) { this[field] = v; this.emit(field); } }
       else if (/^peaks\//.test(file)) { const id = file.slice(6, -5); delete this.peaks[id]; await this.loadPeaks([id]); this.emit('peaks'); }
     }
   },
@@ -156,7 +166,7 @@ export const store = {
   async mutate(file, fn, { label = file, record = true } = {}) {
     const field = WRITABLE[file][0];
     const before = this[field];
-    const local = structuredClone(before); fn(local);
+    const local = structuredClone(before); fn(local); if (local && typeof local === 'object') delete local.derived;
     const base = before.rev || 0;
     this[field] = local; this.emit(field);
     if (record) this.onMutate?.({ file, field, label, before, after: local });
@@ -165,7 +175,7 @@ export const store = {
     try {
       let r = await postJSON('/api/save/' + file, { base_rev: base, data: local });
       if (r.status === 409) {
-        const server = await r.json(), cur = structuredClone(server); fn(cur);
+        const server = NORM[file] ? NORM[file](this, await r.json()) : await r.json(), cur = structuredClone(server); fn(cur); delete cur.derived;
         r = await postJSON('/api/save/' + file, { base_rev: cur.rev || 0, data: cur });
         this[field] = r.ok ? cur : server;      // a failed retry shows the server copy, not the unsaved change
         saved = cur;

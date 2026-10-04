@@ -1,7 +1,8 @@
 // Headless verification: screenshots in several layouts, the alignment test, resize perf and memory, (v2) the
 // command system: palette, rebinding persistence, Ctrl+wheel zoom anchoring, context menus, undo/redo, snapshots, and
 // (v2 Part B) the preview dock, media index, privacy of exports, characters and "+ New look", and (v3) the page
-// structure (Timeline / Assets / Review + Settings gear) and the restore chevrons for a hidden top bar / column header.
+// structure (Timeline / Assets / Review + Settings gear) and the restore chevrons for a hidden top bar / column header,
+// and (v4) the guided flow: the stage rail, the new-project wizard (lyrics only, then the song added), the lyrics stage.
 //   node tools/verify.mjs [--project <id>] [outDir]     (default project: the server's default; npm run verify = demo)
 // Copies data/<project> (and data/_template) into a scratch data folder under the OS temp dir and starts serve.mjs
 // on free ports with WORKBENCH_DATA = that folder, so nothing under data/ is written and several runs (or a running
@@ -598,6 +599,171 @@ if (OWNER) try {
   check('test project deleted', del.status === 200 && !fs.existsSync(TD), del.status);
   pb.pass = Object.values(pb.checks).every(c => c.pass);
 } catch (e) { report.partB = { ...report.partB, checks: { ...report.partB?.checks, aborted: blockFailed('part B', e) }, pass: false }; }
+// ---------------------------------------------------------------- v4: the guided flow (docs/SPEC_v3_GUIDED.md, phase 1)
+// The stage rail, the new-project wizard (a lyrics-only project created in the scratch data folder, then the demo song
+// added to it), the lyrics stage (inline editing, a note on a word range, an agent note live, versions, a word diff,
+// restore) and the stage status rules (the page marks done, the agent surface cannot). Screenshots v4_*.png.
+const v4 = report.v4 = { checks: {} };
+try {
+  const check = (name, ok, detail) => { v4.checks[name] = { pass: !!ok, ...(detail !== undefined ? { detail } : {}) }; console.log(`v4 ${name}: ${ok ? 'PASS' : 'FAIL'}${detail !== undefined ? ' ' + JSON.stringify(detail) : ''}`); };
+  const NEW = 'wizard-verify', ND = path.join(DATA, NEW);
+  if (fs.existsSync(ND)) await post('/api/projects/delete', { id: NEW });
+  const pg = await browser.newPage();
+  await pg.setViewport({ width: 1500, height: 850, deviceScaleFactor: 1 });
+  pg.on('pageerror', e => console.error('pageerror', e.message));
+  pg.on('console', m => { if (m.type() === 'error') console.error('console', m.text()); });
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  const frames = (n = 2) => pg.evaluate((k) => new Promise(r => { const f = () => (k-- > 0 ? requestAnimationFrame(f) : r()); f(); }), n);
+  const ready = async () => { await pg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 }); await frames(); };
+  const combo = async (mods, key) => { for (const m of mods) await pg.keyboard.down(m); await pg.keyboard.press(key); for (const m of mods.slice().reverse()) await pg.keyboard.up(m); };
+  const until = async (fn, arg, ms = 6000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pg.evaluate(fn, arg)) return true; await wait(100); } return false; };
+  const readJ = (p, f) => { try { return JSON.parse(fs.readFileSync(path.join(DATA, p, f), 'utf8')); } catch (e) { return null; } };
+  await pg.goto(`${BASE}/?project=${encodeURIComponent(P)}`, { waitUntil: 'domcontentloaded' });
+  await pg.evaluate(() => { try { localStorage.clear(); sessionStorage.clear(); } catch (e) {} });
+  await pg.reload({ waitUntil: 'domcontentloaded' }); await ready();
+
+  // 1. the rail: 7 stages in one 18 px row right under the top bar, a status dot each, the next-stage hint; hidden with the bar
+  const rail = await pg.evaluate(() => { const r = document.getElementById('rail'), b = r.getBoundingClientRect(), t = document.getElementById('top').getBoundingClientRect();
+    return { stages: [...r.querySelectorAll('a[data-stage]')].map(a => a.textContent.trim()), dots: r.querySelectorAll('a[data-stage] i').length, h: Math.round(b.height), underTop: Math.round(b.top) === Math.round(t.bottom), next: r.querySelector('.next')?.textContent || '' }; });
+  await pg.screenshot({ path: path.join(OUT, 'v4_rail.png') });
+  await pg.screenshot({ path: path.join(OUT, 'v4_rail_strip.png'), clip: { x: 0, y: 0, width: 1500, height: 40 } });
+  await pg.mouse.move(700, 450); await pg.keyboard.press('Backquote'); await frames(2);
+  const hidden = await pg.evaluate(() => getComputedStyle(document.getElementById('rail')).display === 'none');
+  await pg.keyboard.press('Backquote'); await frames(2);
+  const back = await pg.evaluate(() => getComputedStyle(document.getElementById('rail')).display !== 'none');
+  check('rail: 7 stages with dots, 18 px under the top bar, next hint, hidden with the bar', rail.stages.length === 7 && rail.stages[0] === '1 Lyrics' && rail.stages[6] === '7 Final' && rail.dots === 7 && rail.h === 18 && rail.underTop && /next|all stages/.test(rail.next) && hidden && back, { ...rail, hiddenWithBar: hidden, back });
+  // keys, palette, context menu
+  await combo(['Alt', 'Shift'], 'Digit1'); await frames(2);
+  const k1 = await pg.evaluate(() => ({ page: window.WB.app.active(), stage: window.WB.stages.current(), on: document.querySelector('#rail a.on')?.dataset.stage }));
+  await combo(['Control'], 'KeyK'); await pg.keyboard.type('go to stage: script'); await wait(80);
+  const palFirst = await pg.evaluate(() => document.querySelector('.pal .pr.hl .lb')?.textContent);
+  await pg.keyboard.press('Enter'); await frames(2);
+  const k2 = await pg.evaluate(() => window.WB.stages.current());
+  const rc = await pg.evaluate(() => { const r = document.querySelector('#rail a[data-stage=lyrics]').getBoundingClientRect(); return { x: r.left + 10, y: r.top + 8 }; });
+  await pg.mouse.click(rc.x, rc.y, { button: 'right' }); await wait(80);
+  const rmenu = await pg.evaluate(() => [...document.querySelectorAll('.pop .pi .lb')].map(x => x.childNodes[0]?.textContent.trim()));
+  await pg.keyboard.press('Escape');
+  check('rail commands: Alt+Shift+1, palette "Go to stage: Script", right-click menu', k1.page === 'stage' && k1.stage === 'lyrics' && k1.on === 'lyrics' && palFirst === 'Go to stage: Script' && k2 === 'script' && rmenu.includes('Open Lyrics') && rmenu.includes('Go to stage'),
+    { altShift1: k1, palFirst, afterPalette: k2, menu: rmenu });
+
+  // 2. the wizard (File > New project): name -> lyrics -> song (skipped) -> create, in the scratch data folder
+  await pg.evaluate(() => window.WB.commands.run('file.new')); await wait(100);
+  await pg.type('.wiz [name=title]', 'Wizard Verify'); await wait(50);
+  await pg.screenshot({ path: path.join(OUT, 'v4_wizard_1_name.png') });
+  const autoId = await pg.evaluate(() => document.querySelector('.wiz [name=id]').value);
+  await pg.click('.wiz [data-w=next]'); await wait(80);
+  const POEM = '[Verse 1]\nThe night bus hums along the coast\nI count the lights I loved the most\n\n[Chorus]\nRide, ride, the window glows\nRide, ride, nobody knows';
+  await pg.type('.wiz [name=lyrics]', POEM); await wait(50);
+  await pg.screenshot({ path: path.join(OUT, 'v4_wizard_2_lyrics.png') });
+  const count = await pg.evaluate(() => document.querySelector('.wizcount').textContent);
+  await pg.click('.wiz [data-w=next]'); await wait(80);
+  await pg.screenshot({ path: path.join(OUT, 'v4_wizard_3_song.png') });
+  await Promise.all([pg.waitForNavigation({ waitUntil: 'domcontentloaded' }), pg.click('.wiz [data-w=create]')]); await ready(); await wait(300);
+  const wiz = { autoId, count, url: new URL(pg.url()).searchParams.get('project'), page: await pg.evaluate(() => window.WB.app.active() + '/' + window.WB.stages.current()) };
+  const L1 = readJ(NEW, 'lyrics.json'), S1 = readJ(NEW, 'song.json'), ST1 = readJ(NEW, 'stages.json');
+  check('wizard: a lyrics-only project (lyrics.json v1, estimated timings, placeholder length, lyrics stage in progress), opened on the lyrics stage',
+    autoId === NEW && /4 lines in 2 sections/.test(count) && wiz.url === NEW && wiz.page === 'stage/lyrics' && L1?.versions?.length === 1 && L1.current === 'v1' && L1.versions[0].via === 'page'
+    && S1?.audio?.mix === null && S1.placeholder_duration === true && S1.lines.length === 4 && S1.lines.every(l => l.timing === 'estimated' && l.id.startsWith('L')) && S1.sections.map(s => s.label).join() === 'Verse 1,Chorus'
+    && ST1?.stages?.find(s => s.id === 'lyrics')?.status === 'in_progress',
+    { ...wiz, versions: L1?.versions?.length, mix: S1?.audio?.mix, duration: S1?.duration_ms, lines: S1?.lines?.map(l => [l.id, l.t0, l.timing]), lyricsStage: ST1?.stages?.[0] });
+  await pg.screenshot({ path: path.join(OUT, 'v4_lyrics_new_project.png') });
+
+  // 3. add the song later (Lyrics > Add song…): the lines get timed over the real song
+  const SONG = path.join(WB, 'data', 'demo', 'audio', 'demo-song.mp3');
+  if (fs.existsSync(SONG)) {
+    await pg.evaluate(() => document.querySelector('.lysong [data-a=song]').click()); await wait(100);
+    await pg.keyboard.type(SONG); await pg.keyboard.press('Enter');
+    const timed = await until(() => !!window.WB.store.song.audio?.mix && window.WB.store.song.duration_ms === 20000, null, 30000);
+    const S2 = readJ(NEW, 'song.json');
+    check('add the song later: audio + peaks, real duration, lines re-timed inside the song', timed && S2.audio.mix === 'audio/demo-song.mp3' && fs.existsSync(path.join(ND, 'peaks', 'mix.json')) && !S2.placeholder_duration
+      && S2.lines.length === 4 && S2.lines.every(l => l.t0 >= 0 && l.t1 <= 20000 && l.t0 < l.t1) && S2.lines.map(l => l.id).join() === S1.lines.map(l => l.id).join(),
+      { timed, mix: S2.audio?.mix, duration: S2.duration_ms, lines: S2.lines.map(l => [l.id, l.t0, l.t1]) });
+  } else check('add the song later: skipped (no data/demo/audio/demo-song.mp3)', true);
+
+  // 4. inline editing: reword a line (double-click), add a line below (Shift+Enter), save a version (Ctrl+Enter)
+  await pg.evaluate(() => window.WB.stages.open('lyrics')); await wait(150);
+  await pg.evaluate(() => document.querySelector('.lyl[data-line="L2"] .lytx').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))); await wait(60);
+  await combo(['Control'], 'KeyA'); await pg.keyboard.type('I count the lights I lost the most');
+  await combo(['Shift'], 'Enter'); await wait(60); await pg.keyboard.type('and every stop is somewhere close'); await pg.keyboard.press('Enter'); await wait(100);
+  const unsaved = await pg.evaluate(() => ({ bar: !!document.querySelector('.lybar .unsaved'), changed: document.querySelectorAll('.lyl.chg').length }));
+  await pg.screenshot({ path: path.join(OUT, 'v4_lyrics_unsaved.png') });
+  await pg.type('.lybar .lymsg', 'verify: lost, and a new line');
+  await combo(['Control'], 'Enter');
+  await until(() => window.WB.store.lyrics.current === 'v2' && window.WB.store.song.lines.length === 5, null, 6000);
+  const L2 = readJ(NEW, 'lyrics.json'), S3 = readJ(NEW, 'song.json');
+  const l2 = S3.lines.find(l => l.id === 'L2'), lNew = S3.lines.find(l => l.text === 'and every stop is somewhere close');
+  check('inline edit + new line + save -> version v2; song.json lines follow (reworded keeps its id and timing, new one estimated)', unsaved.bar && unsaved.changed === 2 && L2.current === 'v2' && L2.versions[1].message === 'verify: lost, and a new line'
+    && L2.versions[1].via === 'page' && l2?.text === 'I count the lights I lost the most' && lNew?.timing === 'estimated' && lNew.t0 > l2.t0 && S3.lines.length === 5,
+    { unsaved, current: L2.current, message: L2.versions[1]?.message, L2: l2 && [l2.t0, l2.t1, l2.text], newLine: lNew && [lNew.id, lNew.t0, lNew.timing] });
+
+  // 5. a note on a word range (select words -> "+ note"), stamped director / page; an agent note arrives live; reply; resolve
+  await pg.evaluate(() => { const ws = document.querySelectorAll('.lyl[data-line="L1"] .w'); const r = document.createRange(); r.setStart(ws[1].firstChild, 0); r.setEnd(ws[2].firstChild, ws[2].textContent.length); getSelection().removeAllRanges(); getSelection().addRange(r); document.querySelector('.lyws').dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); });
+  await wait(60);
+  const fab = await pg.evaluate(() => getComputedStyle(document.querySelector('.lyfab')).display !== 'none');
+  await pg.click('.lyfab'); await wait(80); await pg.keyboard.type('verify: "night bus" is the title; keep it'); await pg.keyboard.press('Enter');
+  await until(() => window.WB.store.lyrics.notes.length === 1);
+  const H = await writeHeaders(BASE, NEW);
+  const agentNote = await post(`/api/op/lyrics_note_add?project=${NEW}`, { line: 'L4', quote: 'nobody knows', text: 'verify agent: rhyme with "glows" is weak?' }, BASE, H);
+  const live = await until(() => !!document.querySelector('.lynote .who.ag'));
+  await pg.evaluate(() => { const i = document.querySelector('.lynote[data-note="ln01"] .lyrep'); i.style.display = 'block'; i.focus(); });
+  await pg.keyboard.type('verify reply'); await pg.keyboard.press('Enter');
+  await until(() => window.WB.store.lyrics.notes.find(n => n.id === 'ln01')?.replies?.length === 1);
+  await pg.evaluate(() => { const ta = document.querySelector('.lyask textarea'); ta.value = 'verify: can you suggest a bridge?'; document.querySelector('.lyask [data-a=ask]').click(); });
+  await until(() => window.WB.store.lyrics.notes.some(n => n.to === 'agent'));
+  await pg.evaluate(() => window.WB.app.show('timeline')); await pg.evaluate(() => window.WB.stages.open('lyrics')); await wait(250);
+  await pg.screenshot({ path: path.join(OUT, 'v4_lyrics_notes.png') });
+  const L3 = readJ(NEW, 'lyrics.json'), n1 = L3.notes.find(n => n.id === 'ln01'), ask = L3.notes.find(n => n.to === 'agent');
+  const marked = await pg.evaluate(() => [...document.querySelectorAll('.lyl[data-line="L1"] .w.nw')].map(w => w.textContent));
+  const asks = (await post(`/api/op/lyrics_get?project=${NEW}`, {}, BASE, H)).body?.asks_for_agent || [];
+  check('note on a word range (director, via page), agent note live, reply, ask the agent', fab && n1?.line === 'L1' && JSON.stringify(n1.w) === '[1,2]' && n1.quote === 'night bus' && n1.by === 'director' && n1.via === 'page'
+    && n1.replies?.[0]?.via === 'page' && agentNote.status === 200 && agentNote.body.via === 'agent' && live && JSON.stringify(marked) === '["night","bus"]' && ask?.via === 'page' && asks.some(a => a.text === 'verify: can you suggest a bridge?'),
+    { fab, note: n1 && { w: n1.w, quote: n1.quote, by: n1.by, via: n1.via, replies: n1.replies?.length }, agent: agentNote.body?.via, live, marked, asks: asks.length });
+  await pg.evaluate(() => document.querySelector('.lynote[data-note="ln02"] [data-a=resolve]').click());
+  await until(() => window.WB.store.lyrics.notes.find(n => n.id === 'ln02')?.status === 'resolved');
+
+  // 6. versions: the list, a side-by-side word diff of v1 -> v2, restore v1 as v3
+  await pg.evaluate(() => document.querySelector('.lytabs [data-side=versions]').click()); await wait(60);
+  await pg.evaluate(() => { document.querySelector('.lyv[data-v=v1] [data-ab=a]').click(); document.querySelector('.lyv[data-v=v2] [data-ab=b]').click(); document.querySelector('.lyvh [data-a=ab]').click(); }); await wait(150);
+  const diff = await pg.evaluate(() => ({ del: [...document.querySelectorAll('.lydl .del')].map(x => x.textContent), add: [...document.querySelectorAll('.lydr .add')].map(x => x.textContent), cols: document.querySelectorAll('.lydc > div').length, head: document.querySelector('.lydh')?.textContent }));
+  await pg.screenshot({ path: path.join(OUT, 'v4_lyrics_diff.png') });
+  await pg.evaluate(() => document.querySelector('.lydh [data-a=restore][data-v=v1]').click());
+  await until(() => window.WB.store.lyrics.current === 'v3' && window.WB.store.lyrics.rev > 0 && window.WB.store.song.lines.length === 4);
+  const L4 = readJ(NEW, 'lyrics.json'), S4 = readJ(NEW, 'song.json');
+  check('versions: side-by-side word diff v1 -> v2, restore v1 as a new version v3 (song lines follow)', diff.cols === 2 && diff.del.join(' ') === 'loved' && diff.add.join(' ') === 'lost and every stop is somewhere close'
+    && L4.current === 'v3' && L4.versions.length === 3 && L4.versions[2].from === 'v1' && JSON.stringify(L4.versions[2].sections) === JSON.stringify(L4.versions[0].sections) && S4.lines.length === 4 && S4.lines.find(l => l.id === 'L2').text === 'I count the lights I loved the most',
+    { diff, current: L4.current, from: L4.versions[2]?.from, lines: S4.lines.length });
+
+  // 7. stage status: the page marks done (stamped director / page); the agent surface cannot, nor move a done stage
+  await pg.evaluate(() => document.querySelector('.sgbar [data-st=done]').click());
+  await until(() => window.WB.stages.view().stages[0].status === 'done');
+  const ST2 = readJ(NEW, 'stages.json'), lyr = ST2.stages.find(s => s.id === 'lyrics');
+  const agentDone = await post(`/api/op/stage_update?project=${NEW}`, { stage: 'script', status: 'done' }, BASE, H);
+  const agentMove = await post(`/api/op/stage_update?project=${NEW}`, { stage: 'lyrics', status: 'in_progress' }, BASE, H);
+  const agentOk = await post(`/api/op/stage_update?project=${NEW}`, { stage: 'script', status: 'needs_you', blockers: ['verify: intake answers missing'] }, BASE, H);
+  const railAfter = await until(() => document.querySelector('#rail a[data-stage=script]')?.classList.contains('st-needs_you') && document.querySelector('#rail a[data-stage=lyrics]')?.classList.contains('st-done'));
+  await pg.screenshot({ path: path.join(OUT, 'v4_rail_after.png'), clip: { x: 0, y: 0, width: 1500, height: 60 } });
+  check('stage status: the page marks done (director, via page); the agent cannot mark done or move a done stage; needs_you + blockers show on the rail',
+    lyr.status === 'done' && lyr.done_by === 'director' && lyr.via === 'page' && agentDone.status === 403 && agentMove.status === 409 && agentOk.status === 200 && railAfter,
+    { lyrics: lyr, agentDone: agentDone.status, agentMove: agentMove.status, agentOk: agentOk.status, railAfter });
+  // 8. an empty project opens the wizard on its lyrics step ("Start" fills the open project, no new folder)
+  const EMPTY = 'empty-verify';
+  await post('/api/projects/new', { id: EMPTY });
+  await pg.goto(`${BASE}/?project=${EMPTY}`, { waitUntil: 'domcontentloaded' }); await ready(); await wait(200);
+  const ew = await pg.evaluate(() => ({ open: !!document.querySelector('.wiz'), step: document.querySelector('.wizh span.on')?.textContent, title: document.querySelector('.wizh b')?.textContent }));
+  await pg.type('.wiz [name=lyrics]', '[Intro]\nonly one line for now');
+  await pg.click('.wiz [data-w=next]'); await wait(60); await pg.click('.wiz [data-w=create]');
+  await until(() => !document.querySelector('.wiz') && window.WB.app.active() === 'stage' && window.WB.store.song.lines.length === 1);
+  const EL = readJ(EMPTY, 'lyrics.json'), ES = readJ(EMPTY, 'song.json');
+  await pg.reload({ waitUntil: 'domcontentloaded' }); await ready();
+  const again = await pg.evaluate(() => !!document.querySelector('.wiz'));
+  check('an empty project opens the wizard on the lyrics step; Start fills this project (v1, estimated line); not shown again', ew.open && /Lyrics/.test(ew.step || '') && /Start/.test(ew.title || '') && EL?.current === 'v1' && ES?.lines?.length === 1 && ES.lines[0].timing === 'estimated' && !again,
+    { wizard: ew, lyrics: EL?.current, lines: ES?.lines?.length, shownAgain: again });
+  await pg.close();
+  await post('/api/projects/delete', { id: EMPTY });
+  const del = await post('/api/projects/delete', { id: NEW });
+  check('wizard project deleted', del.status === 200 && !fs.existsSync(ND), del.status);
+  v4.pass = Object.values(v4.checks).every(c => c.pass);
+} catch (e) { v4.checks.aborted = blockFailed('v4', e); v4.pass = false; }
 // write path: approve/needs-changes + a note, on another scratch copy (_verify, its own server), then a stale-rev POST must get 409
 try {
   const TMP = path.join(DATA, '_verify');
@@ -624,8 +790,8 @@ report.project = P;
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 1));
 const w = report.writes || {};
 const writesOk = w.noteSaved && w.noteShownInColumn && w.staleStatus === 409 && w.newState !== undefined && w.newState !== w.stateBefore && w.approvalsRev > w.approvalsRevBefore;
-console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
-process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
+console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
+process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
 await browser.close();
 for (const c of procs) c.kill();
 await new Promise(r => setTimeout(r, 300));   // let the servers release the scratch folder; cleanup() removes it on exit

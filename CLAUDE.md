@@ -14,6 +14,8 @@ npm start                        # node serve.mjs -> http://localhost:8140/  (po
 npm run test:mcp                 # MCP end-to-end test on the demo project
 npm run verify                   # headless UI suite on the demo project (screenshots -> shots/, gitignored)
 node importers/new_project.mjs my-song --song song.mp3 --lyrics lyrics.lrc --title "My Song" --bpm 96
+node importers/new_project.mjs my-poem --lyrics lyrics.txt --title "My Poem"   # lyrics only; song later (song_attach)
+npm run test:security            # security regressions (scratch copies)
 node tools/make_demo.mjs         # rebuild data/demo (synthetic, needs ffmpeg)
 ```
 
@@ -29,9 +31,10 @@ outside the project folder, extra PRIVATE path rule. Env vars win: `WB_PROJECT`,
 | `lib/store.mjs` | Node data layer shared by the server and the MCP server: config, projects, snapshots, and every agent op (`ops.*`) |
 | `mcp/server.mjs`, `mcp/test.mjs` | MCP server (stdio) and its end-to-end test |
 | `index.html`, `app.js`, `app.css` | the page shell |
-| `core/` | command registry + keymap, menus, palette, undo history, selection, projects/exports, preview dock, default commands |
-| `js/` | store (data + live reload), timeline (the warp), columns, player, verify hooks |
-| `tabs/` | one module per view; `tabs/registry.js` lists pages and sub-views |
+| `core/` | command registry + keymap, menus, palette, undo history, selection, projects/exports, preview dock, default commands, `rail.js` (stage rail + stage commands), `wizard.js` (new-project wizard) |
+| `js/` | store (data + live reload), timeline (the warp), columns, player, verify hooks, `flow.js` (the guided flow: stages + lyrics model, shared with `lib/store.mjs`) |
+| `tabs/` | one module per view; `tabs/registry.js` lists pages and sub-views; `stage.js` (stage workspaces), `lyrics.js` (stage 1) |
+| `docs/SPEC_v3_GUIDED.md` | the guided creation flow (seven stages); phase 1 = stage rail, wizard, lyrics stage |
 | `importers/` | `new_project.mjs` (song + lyrics -> project), `azemar_*` (the owner's production, kept as a worked example) |
 | `tools/` | `verify.mjs` (UI suite), `make_demo.mjs`, `chrome.mjs` |
 | `exporters/hyperframes-html/` | HTML package of a HyperFrames composition: `export.mjs`, `verify.mjs`, `serve.mjs` (see Export) |
@@ -54,6 +57,14 @@ relative to the media base; any other path is relative to the project folder. Fu
 - Shared with the page, each `{rev, ...}`: `notes.json`, `approvals.json` (`"kind:id" -> {state}`; states draft,
   review, changes, approved, locked), `requests.json` (the generation queue), `overrides.json`, `settings.json`.
 - `costs.json`: `cap_usd`, `items[{id, t, usd, tool, date, request?}]`.
+- `stages.json` (shared, `{rev}`): the guided flow, `stages[{id, status: empty|in_progress|needs_you|done, done_by,
+  via, updated, blockers[], note?}]` for lyrics, script, breakdown, characters, scenery, storyboard, final. Missing =
+  derived from the files (content = done). Only the page sets `done`.
+- `lyrics.json` (shared, `{rev}`): stage 1. `current`, `versions[{id "v3", created, by, via, message, from?,
+  sections[{id, label, lines[{id, text}]}]}]` (immutable; a save appends), `notes[{id "ln01", line, w [first, last
+  word], quote, text, by, via, to?: "agent", status, replies[]}]`. Line ids are stable across versions and equal the
+  `song.json` line ids; the server re-syncs `song.json` lines whenever `current` changes (timings kept for lines that
+  still exist, new ones estimated). Missing = v1 derived from `song.json`. Shapes and logic: `js/flow.js`.
 - `.snapshots/<stamp>-<slug>/`: durable snapshots of the small JSON files.
 
 Editing by hand: read the file, change it, **bump `rev`** on the shared files, write it whole via temp file + rename.
@@ -90,8 +101,12 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 
 3. **Private files stay local.** Paths matching the PRIVATE rule (`thumbs/priv_*`, any `private/` folder, plus the
    configured `private_media` regex) and media flagged `private` are served to localhost only and never exported.
    Never copy them into the demo, the template or anything shared.
-4. **Snapshot before big edits** (`snapshot_save`); a restore snapshots the current state first, so it is undoable.
-5. Register every new file (`media_add`, or automatically on `request_update` done) so it shows up in the page.
+4. **Stages are the director's to close.** Mark your progress with `stage_update` (in_progress, needs_you + a note,
+   blockers); `done` is refused, and a done stage cannot be moved by an agent. Lyrics: propose in notes
+   (`lyrics_note_add`) or save a new version (`lyrics_update`, never destructive: every version stays); answer the
+   director's asks (`lyrics_get` `asks_for_agent`) with a reply and resolve them when done.
+5. **Snapshot before big edits** (`snapshot_save`); a restore snapshots the current state first, so it is undoable.
+6. Register every new file (`media_add`, or automatically on `request_update` done) so it shows up in the page.
 
 ## Security model (local server)
 
@@ -124,6 +139,12 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 
   approval that is not the current one goes back to draft (listed in `kept_since_snapshot`); the current `cap_usd`
   is kept, and an agent's `snapshot_restore` brings an approved / locked item back as `review`, not approved.
   Duplicating a project sends the copy's approved / queued / running requests back to draft.
+- Guided flow: `stage_update` refuses `done` and refuses moving a done stage; a page save of `stages.json` is stamped
+  (`done_by: "director", via: "page"`); an agent's snapshot restore brings a done stage that is not done now back as
+  `needs_you`. A page save of `lyrics.json` cannot rewrite a saved version (the server keeps its copy) nor the author of
+  an existing note; new versions / notes / replies from the page are stamped `by: "director", via: "page"`; the
+  tools stamp `via: "agent"`; a malformed `lyrics.json` is refused (400). `song_attach` takes audio files only and
+  refuses PRIVATE paths.
 - Entity thumbnails and copies made from private media stay private (`thumbs/priv_*`, `private/<kind>/`).
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.
@@ -141,7 +162,11 @@ initial project. Tools:
 | tool | use |
 |---|---|
 | `status` | server up?, current project, pages open, costs. Call first. |
-| `projects` | list / create / duplicate / open (sets the session's current project, switches the page) |
+| `projects` | list / create (with `lyrics` / `song`: a guided project) / duplicate / open (sets the session's current project, switches the page) |
+| `stages_get`, `stage_update` | the guided flow: seven stages, statuses, blockers, next stage; set in_progress / needs_you (never done) |
+| `lyrics_get`, `lyrics_update`, `lyrics_versions` | stage 1: the poem (line ids, timings, notes, asks for the agent); a new version (text / sections / restore); list + word diff |
+| `lyrics_note_add`, `lyrics_note_resolve` | notes on a line or a word range, thread replies, resolve |
+| `song_attach` | add / replace the song file: peaks, energy, grid, duration; lines re-timed |
 | `snapshot_save`, `snapshot_list`, `snapshot_restore` | durable checkpoints |
 | `song_get` | sections, lyric lines with word timings, events, grid |
 | `timeline_query` | everything between t0 and t1 across all columns |

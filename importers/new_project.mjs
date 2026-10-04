@@ -1,7 +1,10 @@
 // Create a workbench project from a song file + lyrics text (empty shots, entities, script, notes, requests).
 //   node importers/new_project.mjs <id> --song <audio file> [--lyrics <file.txt|file.lrc>] [--title "Title"]
 //        [--bpm 120] [--beats-per-bar 4] [--offset <ms of the first downbeat>] [--cap <USD>] [--render <video>] [--force]
+//   node importers/new_project.mjs <id> --lyrics <file> [--title "Title"]      (no song yet: lyrics only; a placeholder
+//        duration and estimated timings until a song is added with the song_attach op / MCP tool or the page)
 // Needs ffmpeg on PATH (decodes the song for the waveform peaks and the energy curve).
+// attachSong(project, file) adds or replaces the song of an existing project (the wizard, the song_attach op).
 //
 // Lyrics:
 //   .lrc / lines starting with [mm:ss.xx]  -> timed lines (words spread evenly inside each line); several tags on one
@@ -17,6 +20,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import * as S from '../lib/store.mjs';
+import * as F from '../js/flow.js';
 
 const SR = 22050;
 // decode to mono float32 at SR with ffmpeg
@@ -158,6 +162,7 @@ export function newProject(id, { song, lyrics = '', title, bpm = 120, beatsPerBa
       audio: { mix, render: rnd, stems: [] }, timing: L.timing, sections: L.sections, lines: L.lines });
     S.writeJSON(path.join(td, 'events.json'), L.sections.map(s => ({ id: 'section_' + s.id, t: s.t0, kind: 'section', note: `${s.label} starts` })));
     const C = S.readJSON(path.join(td, 'costs.json'), {}); S.writeJSON(path.join(td, 'costs.json'), { ...C, cap_usd: cap });
+    S.writeJSON(path.join(td, 'stages.json'), { rev: 1, stages: F.STAGES.map(x => ({ id: x.id, status: x.id === 'lyrics' && L.lines.length ? 'in_progress' : 'empty', blockers: [] })) });
     // swap: move the old project aside, move the new one in, then delete the old one
     const old = fs.existsSync(d) ? `${d}.old-${Date.now().toString(36)}` : null;
     if (old) fs.renameSync(d, old);
@@ -165,6 +170,33 @@ export function newProject(id, { song, lyrics = '', title, bpm = 120, beatsPerBa
     if (old) fs.rmSync(old, { recursive: true, force: true });
   } catch (e) { fs.rmSync(td, { recursive: true, force: true }); throw e; }
   return { id, duration_ms: durMs, sections: L.sections.length, lines: L.lines.length, timing: L.timing };
+}
+
+// add or replace the song of an existing project (a lyrics-only one from the wizard, or a new mix): the file is copied
+// into audio/ (unless it is already in the project or under a media root), then peaks, energy, beat grid and duration
+// are rebuilt and the lyric lines get timings: a project that had no song gets every line re-estimated over the real
+// duration (LRC tags in the lyrics win), a project that had one keeps the timings it has.
+export function attachSong(project, src, { bpm, beatsPerBar, offset } = {}) {
+  if (!src || typeof src !== 'string') throw new S.WbError(400, 'path of the song file required');
+  if (!/\.(wav|mp3|m4a|flac|ogg|aac)$/i.test(src)) throw new S.WbError(400, 'the song must be an audio file (wav, mp3, m4a, flac, ogg, aac)');
+  if (S.isPrivate(src)) throw new S.WbError(400, 'a PRIVATE path cannot be the song (it would be served and exported)');
+  const pd = S.projDir(project);
+  const abs = path.isAbsolute(src) ? path.resolve(src) : S.resolveMedia(project, src.replace(/\\/g, '/'));
+  if (!abs || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) throw new S.WbError(404, 'no such file: ' + src);
+  const song = S.read(project, 'song.json'), had = !!song.audio?.mix;
+  const x = decode(abs), durMs = Math.round(x.length / SR * 1000);
+  const inProj = path.relative(pd, abs), inRoot = path.relative(S.CFG.mediaBase, abs).split(path.sep).join('/');
+  const mix = !inProj.startsWith('..') && !path.isAbsolute(inProj) ? inProj.split(path.sep).join('/') : S.isMediaRootPath(inRoot) && !inRoot.startsWith('..') ? inRoot : copyInto(project, abs, 'audio');
+  fs.mkdirSync(path.join(pd, 'peaks'), { recursive: true });
+  S.writeJSON(path.join(pd, 'peaks', 'mix.json'), peaks(x, 'mix', mix));
+  S.writeJSON(path.join(pd, 'energy.json'), energy(x));
+  const g = grid(durMs, Number(bpm || song.bpm || 120), Number(beatsPerBar || song.beats_per_bar || 4), Number(offset || 0));
+  const next = { ...song, duration_ms: durMs, ...g, audio: { ...(song.audio || {}), mix, stems: song.audio?.stems || [] } };
+  delete next.placeholder_duration;
+  if (had) next.lines = (next.lines || []).map(l => ({ ...l, t0: Math.min(l.t0, durMs - 2), t1: Math.min(Math.max(l.t1, l.t0 + 1), durMs) }));
+  S.write(project, 'song.json', next);
+  const sync = S.syncLyrics(project, { reestimate: !had });
+  return { project, mix, duration_ms: durMs, bpm: g.bpm, replaced: had, lines: sync.lines ?? next.lines.length, timing: S.read(project, 'song.json').timing || null };
 }
 
 // ------------------------------------------------------------------ CLI
@@ -177,8 +209,14 @@ if (process.argv[1] && real(process.argv[1]) === real(self)) {
     a = parseArgs({ allowPositionals: true, options: { song: s, lyrics: s, title: s, bpm: s, 'beats-per-bar': s, offset: s, cap: s, render: s, force: { type: 'boolean' }, help: { type: 'boolean' } } });
   } catch (e) { console.error(e.message); process.exit(1); }
   const o = a.values, id = a.positionals[0];
-  if (!id || o.help) { console.log(fs.readFileSync(self, 'utf8').split('\n').slice(0, 13).join('\n')); process.exit(id ? 0 : 1); }
+  if (!id || o.help) { console.log(fs.readFileSync(self, 'utf8').split('\n').slice(0, 16).join('\n')); process.exit(id ? 0 : 1); }
   try {
+    if (!o.song) {
+      if (!o.lyrics) throw new Error('give --song <audio file>, --lyrics <file>, or both');
+      const r = await S.createGuidedProject({ id, title: o.title, lyrics: fs.readFileSync(o.lyrics, 'utf8'), bpm: o.bpm });
+      console.log(`created data/${r.id}: lyrics only, ${r.lines} lines (placeholder duration, estimated timings; add the song later)`);
+      process.exit(0);
+    }
     const r = newProject(id, { song: o.song, lyrics: o.lyrics ? fs.readFileSync(o.lyrics, 'utf8') : '', title: o.title, bpm: o.bpm ?? 120,
       beatsPerBar: o['beats-per-bar'] ?? 4, offset: o.offset ?? 0, cap: o.cap ?? 20, render: o.render, force: !!o.force });
     console.log(`created data/${r.id}: ${(r.duration_ms / 1000).toFixed(1)} s, ${r.sections} sections, ${r.lines} lines (timing: ${r.timing})`);

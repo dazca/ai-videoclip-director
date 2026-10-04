@@ -6,7 +6,7 @@
 //   sub     = { id, title, load, count?(store) }        `count` = the small number next to the name in the sub-nav
 //   tab: false = not in the tab strip (Settings: Edit > Settings, Ctrl+, or the gear at the far right)
 // To add a view: write tabs/<name>.js and add one line under its page (or WB.app.registerSub(pageId, sub) at runtime).
-// Number keys 1..9 follow this order (1 Timeline, 2 Assets, 3 Review, 4 Settings, then custom pages from
+// Number keys 1..9 follow this order (1 Timeline, 2 Assets, 3 Review, 4 Settings, 5 Stages, then custom pages from
 // Window > New page).
 export const PAGES = [
   { id: 'timeline', title: 'Timeline', load: () => import('./timeline.js') },
@@ -24,4 +24,6 @@ export const PAGES = [
     { id: 'costs', title: 'Costs', load: () => import('./costs.js'), count: (s) => s.costs ? '$' + Math.round(s.costs.items.reduce((a, x) => a + (Number(x.usd) || 0), 0)) : '' },
   ] },
   { id: 'settings', title: 'Settings', tab: false, load: () => import('./settings.js') },
+  // the guided flow: one workspace per stage, opened from the stage rail (core/rail.js), not a tab
+  { id: 'stage', title: 'Stages', tab: false, load: () => import('./stage.js') },
 ];
