@@ -1,0 +1,61 @@
+/* Interactive layer over an exported HyperFrames film. Everything here lives in the parent page; the film's own
+   document is never restyled except for margin 0 (and user-select while paused). */
+:root {
+  --ix-bg: rgba(14, 15, 18, .96);
+  --ix-line: rgba(255, 255, 255, .16);
+  --ix-fg: #e9ebef;
+  --ix-dim: #9aa1ab;
+  --ix-acc: #3d8bff;
+  --ix-font: 11px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ix-mono: 10px/1.4 ui-monospace, "Cascadia Mono", Consolas, "Lucida Console", monospace;
+}
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+body { font: var(--ix-font); color: var(--ix-fg); }
+
+#ix-film { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; pointer-events: none; background: #000; }
+body.ix-paused #ix-film { pointer-events: auto; }
+#ix-overlay { position: fixed; inset: 0; z-index: 10; cursor: default; }
+#ix-overlay.ix-over { cursor: pointer; }
+body.ix-paused #ix-overlay { pointer-events: none; }
+
+#ix-hover { position: fixed; z-index: 11; pointer-events: none; border: 1px solid var(--ix-acc); box-shadow: 0 0 0 1px rgba(0,0,0,.35); display: none; }
+#ix-hover b { position: absolute; left: -1px; bottom: 100%; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 600 10px/14px system-ui, sans-serif; padding: 0 4px; background: var(--ix-acc); color: #fff; }
+#ix-hover.ix-below b { bottom: auto; top: 100%; }
+body.ix-noinspect #ix-hover, body.ix-paused #ix-hover { display: none !important; }
+
+#ix-cards { position: fixed; inset: 0; z-index: 20; pointer-events: none; }
+.ix-card { position: fixed; pointer-events: auto; display: flex; flex-direction: column; background: var(--ix-bg); border: 1px solid var(--ix-line);
+  box-shadow: 0 10px 40px rgba(0,0,0,.55); transform-origin: 0 0; resize: both; overflow: hidden; min-width: 160px; min-height: 70px; }
+.ix-card.ix-pinned { border-color: var(--ix-acc); }
+.ix-head { flex: none; display: flex; align-items: center; gap: 6px; height: 18px; padding: 0 0 0 6px; cursor: move; user-select: none;
+  border-bottom: 1px solid var(--ix-line); white-space: nowrap; }
+.ix-kind { font-weight: 600; color: var(--ix-acc); text-transform: uppercase; font-size: 9px; letter-spacing: .06em; }
+.ix-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; color: var(--ix-fg); }
+.ix-btns { display: flex; height: 100%; }
+.ix-btns button, #ix-hud button { font: 10px/1 system-ui, sans-serif; color: var(--ix-dim); background: none; border: 0; border-left: 1px solid var(--ix-line);
+  padding: 0 6px; height: 100%; cursor: pointer; }
+.ix-btns button:hover, #ix-hud button:hover { color: #fff; background: rgba(255,255,255,.08); }
+.ix-card.ix-pinned [data-a="pin"] { color: var(--ix-acc); }
+.ix-body { flex: 1 1 auto; min-height: 0; overflow: auto; position: relative; }
+.ix-zoom { transform-origin: 0 0; width: max-content; }
+.ix-zoom img, .ix-zoom canvas { display: block; }
+.ix-extra { flex: none; display: flex; gap: 6px; align-items: center; border-top: 1px solid var(--ix-line); padding: 3px 6px; color: var(--ix-dim); font: var(--ix-mono); }
+.ix-extra:empty { display: none; }
+.ix-extra video { height: 72px; background: #000; }
+.ix-meta { flex: none; max-height: 64px; overflow: auto; border-top: 1px solid var(--ix-line); padding: 3px 6px; font: var(--ix-mono); color: var(--ix-dim); user-select: text; }
+.ix-meta b { color: var(--ix-fg); font-weight: 600; }
+.ix-meta div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ix-meta div.ix-wrap { white-space: normal; }
+.ix-sel, .ix-sel * { user-select: text !important; -webkit-user-select: text !important; cursor: text; }
+
+#ix-hud { position: fixed; left: 0; bottom: 0; z-index: 30; display: flex; align-items: center; height: 20px; background: var(--ix-bg);
+  border-top: 1px solid var(--ix-line); border-right: 1px solid var(--ix-line); font: var(--ix-mono); color: var(--ix-dim); user-select: none; transition: opacity .35s; }
+body.ix-idle #ix-hud { opacity: 0; }
+#ix-hud:hover, body.ix-paused #ix-hud, body.ix-scrubbed #ix-hud { opacity: 1 !important; }
+#ix-hud button { border-left: 0; border-right: 1px solid var(--ix-line); font-size: 10px; min-width: 22px; }
+#ix-live { color: var(--ix-acc) !important; }
+#ix-time { padding: 0 6px; color: var(--ix-fg); min-width: 92px; }
+#ix-scrub { width: 180px; height: 12px; margin: 0 6px 0 0; accent-color: var(--ix-acc); }
+#ix-hint { padding: 0 6px; border-left: 1px solid var(--ix-line); white-space: nowrap; }
+#ix-msg { position: fixed; inset: 0; display: grid; place-items: center; z-index: 40; color: #fff; background: #000; font: 13px/1.5 system-ui, sans-serif; text-align: center; }

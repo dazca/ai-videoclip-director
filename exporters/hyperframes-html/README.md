@@ -14,6 +14,9 @@ Chrome with H.264/AAC: `$CHROME_PATH`, else the Chrome for Testing that puppetee
 node exporters/hyperframes-html/export.mjs <compositionDir> <outDir> [--entry index.html] [--sample-fps 10]
 node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 12 | --times 4,18.5] [--play 6]
 node exporters/hyperframes-html/serve.mjs  <outDir> [port]      # any static server with byte ranges works
+node exporters/hyperframes-html/export.mjs <compositionDir> <outDir> --interactive [--project <workbench project dir>]
+node exporters/hyperframes-html/interactive/build.mjs <outDir> [--project <dir>]   # add the layer to an existing package
+node exporters/hyperframes-html/interactive/verify-interactive.mjs <outDir>        # headless test of the layer
 ```
 
 ## What `export.mjs` does
@@ -66,6 +69,57 @@ node exporters/hyperframes-html/serve.mjs  <outDir> [port]      # any static ser
 
 Report: `<outDir>-verify/verify.json` plus `cmp-<t>.jpg` (package | render) for each time. The exit code is non-zero
 on integrity, request or external-request failures.
+
+## Interactive layer (`--interactive`)
+
+Adds `interactive.html`, `interactive.js`, `interactive.css` (and `interactive.project.json` with `--project`) next to
+`index.html`, which stays the plain player. Nothing under `composition/` or `_hyperframes/` changes, and
+`manifest.json` is written exactly as without the flag. Open `http://<server>/interactive.html`: it must be served
+(same origin), `file://` cannot reach into the film.
+
+The film runs in a same-origin iframe in its own standalone mode (`composition/<entry>?standalone=1`, the master
+`<audio>` is the clock), scaled to the window. The layer lives in the parent page and only reads the film's document:
+`elementsFromPoint`, computed styles and boxes, node clones, video/canvas frames. Compositions without a standalone
+driver (no `standalone` in their scripts) are driven by the layer: their `__timelines` entry is seeked to the audio
+time each frame and `video[data-start]` elements are kept in step.
+
+| while playing | |
+|---|---|
+| hover | thin outline + label of the thing under the pointer: text, window, dialog, image, video, dancer, button, graphic, element |
+| click | lifts it into a card; the film keeps running |
+| click outside the cards | sends the unpinned cards back (lifts nothing) |
+| Ctrl/Cmd+click | lifts and keeps the other cards |
+| Shift+click | lifts the enclosing window/dialog instead of the text/image inside |
+| Alt+click | pause |
+
+Cards: text = real text with its computed styling (select, copy); window/dialog/button/element = a DOM clone frozen
+at that instant with every computed style inlined (text inside selectable, videos/canvases inside drawn as frames);
+image = the full-resolution source (Ctrl+wheel zoom, drag out or "save"); video clip = the current frame (save as
+PNG) + a small looping player of the clip file; dancer = its animation looping (sprite sheets step on the film's beat
+grid when `window.KIT` exists; stacked-alpha clips are decoded into a transparent canvas). Each card shows the song
+time, the scene (`[data-shot]`), the element, the source file with its manifest facts, and, with `--project`, the
+workbench shot (title, cast, locations, note), clip use, lyric line, script line and nearby notes. Cards drag by the
+header, resize at the corner, zoom with Ctrl+wheel or `- 100% +`, pin (or double-click the header). Closing (Esc, x,
+click outside) flies the card back to where that element is now in the film, or fades it out where it was lifted
+from when the element is gone.
+
+Paused (Space, the HUD button or Alt+click): the film's document takes the pointer, so everything is natively
+selectable / copyable, images drag out, right-click is the browser's own; double-click lifts. The film's own
+click-to-toggle (standalone mode) is stopped by a capture listener while paused. Space resumes from the paused ms
+(the audio clock is paused, not seeked) and clears the selection.
+
+HUD (bottom-left, hides after 2.5 s without pointer movement while playing): play/pause, time, scrubber, `live`
+(after a scrub or an arrow seek: back to where the film would be now had you not scrubbed), hint. Keys: Space,
+Esc, Left/Right seek 5 s, I toggles the outlines.
+
+`verify-interactive.mjs` plays, lifts a text, a window, an image, a video clip, a sprite dancer and a stacked-alpha
+dancer while playing (hover, click, content, drag, Ctrl+wheel, select, Esc), compares the audio-clock progress over
+6 s with a plain-playback baseline (within 50 ms, no stalls or jumps), then checks paused selection, double-click
+lift and resume from the paused ms. Screenshots and `verify-interactive.json` go to `<outDir>-verify/interactive/`.
+
+Limits: needs http (same origin); `--project` packages the project's shot titles, cast names, script and notes text
+(private file paths are dropped); clones show computed styles, so CSS animations inside them are frozen and
+cross-origin images (none in a package) would not draw.
 
 ## Next step (not here): compression
 

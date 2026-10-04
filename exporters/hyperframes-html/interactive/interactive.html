@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>%TITLE%</title>
+<link rel="stylesheet" href="interactive.css">
+</head>
+<body>
+<!-- the film, unchanged, in its own clock (standalone mode); the layer only reads it -->
+<iframe id="ix-film" src="%ENTRY%" allow="autoplay; fullscreen" title="film"></iframe>
+<div id="ix-overlay"></div>
+<div id="ix-hover"><b></b></div>
+<div id="ix-cards"></div>
+<div id="ix-hud">
+  <button id="ix-play" title="play / pause (Space)">&#9654;</button>
+  <span id="ix-time">0:00.0</span>
+  <input id="ix-scrub" type="range" min="0" max="1" step="0.01" value="0" title="scrub (arrows: 5 s)">
+  <button id="ix-live" title="back to where the film was before you scrubbed" hidden>live</button>
+  <span id="ix-hint">click anything</span>
+</div>
+<script src="interactive.js"></script>
+</body>
+</html>

@@ -4,13 +4,14 @@
 // manifest.json.
 //
 //   node export.mjs <compositionDir> <outDir> [--entry index.html] [--sample-fps 10] [--hyperframes <dir>]
-//                   [--hf-version 0.8.114]
+//                   [--hf-version 0.8.114] [--interactive [--project <workbench project dir>]]
 //
 // outDir/
 //   index.html                     wrapper: the official player, full window, its own controls, nothing else
 //   _hyperframes/                  vendored player + runtime (the player's CDN runtime URL points here: one rewrite)
 //   composition/                   every file the composition uses, byte-identical, same relative layout
 //   manifest.json                  assets {path, kind, bytes, sha256, mime, media facts, usage}, totals, composition
+//   interactive.*                  only with --interactive: the click-anything layer (README: Interactive layer)
 //
 // What is collected: static references (HTML src/href/poster/srcset/data-composition-src, inline and linked CSS url()
 // and @import, string literals in loaded scripts that name an existing file) plus every request the composition makes
@@ -18,11 +19,12 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync, copyFileSync, realpathSync, rmSync, readdirSync } from 'node:fs';
 import { join, resolve, dirname, relative, extname, posix, sep, basename } from 'node:path';
 import { serve, launch, kindOf, mimeOf, sha256, mediaInfo, sleep, argv, flag } from './lib.mjs';
+import { addInteractive } from './interactive/build.mjs';
 
-const VALUED = ['--entry', '--sample-fps', '--hyperframes', '--hf-version'];
+const VALUED = ['--entry', '--sample-fps', '--hyperframes', '--hf-version', '--project'];
 const [compArg, outArg] = process.argv.slice(2).filter((a, i, all) => !a.startsWith('--') && !(i > 0 && VALUED.includes(all[i - 1])));
 if (!compArg || !outArg) {
-  console.error('usage: node export.mjs <compositionDir> <outDir> [--entry index.html] [--sample-fps 10] [--hyperframes <dir>] [--hf-version X]');
+  console.error('usage: node export.mjs <compositionDir> <outDir> [--entry index.html] [--sample-fps 10] [--hyperframes <dir>] [--hf-version X] [--interactive [--project <dir>]]');
   process.exit(2);
 }
 const COMP = resolve(compArg), OUT = resolve(outArg), ENTRY = argv('--entry', 'index.html').replace(/\\/g, '/');
@@ -400,6 +402,8 @@ const manifest = {
   assets,
 };
 writeFileSync(join(OUT, 'manifest.json'), JSON.stringify(manifest, null, 1));
+// optional interactive layer: extra files next to index.html; the plain package above is unchanged by it
+const interactiveFiles = flag('--interactive') ? addInteractive(OUT, { entry: ENTRY, title, project: argv('--project') }) : [];
 
 const mb = (b) => (b / 1048576).toFixed(1) + ' MB';
 log(`\n${OUT}`);
@@ -411,4 +415,5 @@ if (missing.size) log(`  requested but missing in the source too (not packaged):
 if (external.size) log(`  external URLs (not packaged): ${[...external].slice(0, 10).join(', ')}`);
 if (fonts.system_fonts.length) log(`  system fonts used by on-screen text (not packaged; supplied by the viewer's OS): ${fonts.system_fonts.join(', ')}`);
 if (errors.length) log(`  page errors during the pass: ${[...new Set(errors)].slice(0, 5).join(' | ')}`);
+if (interactiveFiles.length) log(`  interactive layer: ${interactiveFiles.join(', ')} (open /interactive.html)`);
 log(`  serve it: node ${toPosix(relative(process.cwd(), join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), 'serve.mjs')))} ${toPosix(relative(process.cwd(), OUT)) || '.'}`);
