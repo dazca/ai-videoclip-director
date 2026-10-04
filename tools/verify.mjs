@@ -5,7 +5,10 @@
 // and (v4) the guided flow: the stage rail, the new-project wizard (lyrics only, then the song added), the lyrics stage,
 // and (v5) stage 2: the script draft (intake, scenes, beats, sketches inline + copy/paste, gaps, notes, versions, the
 // timeline Scenes column), and (v6) stage 3: the breakdown (suggest from script, versions, the matrix, merge, drop, context
-// menus, Create entity, the agent extracting live, the timeline markers).
+// menus, Create entity, the agent extracting live, the timeline markers), and (v7, tools/verify-characters.mjs) stage 4: the
+// characters (list, base picker: catalogue / Openverse mocked / photos, identity request -> approve -> simulated run ->
+// node, an edit with sketch + mask + pins, A/B compare, keep / branch / revert, approve identity, looks, the agent's
+// limits, the private export, the CSP, the toast stack).
 //   node tools/verify.mjs [--project <id>] [outDir]     (default project: the server's default; npm run verify = demo)
 // Copies data/<project> (and data/_template) into a scratch data folder under the OS temp dir and starts serve.mjs
 // on free ports with WORKBENCH_DATA = that folder, so nothing under data/ is written and several runs (or a running
@@ -1104,6 +1107,11 @@ try {
   check('breakdown project deleted', del.status === 200 && !fs.existsSync(ND), del.status);
   v6.pass = Object.values(v6.checks).every(c => c.pass);
 } catch (e) { v6.checks.aborted = blockFailed('v6', e); v6.pass = false; }
+// ---------------------------------------------------------------- v7: the guided flow, phase 4 (stage 4: characters)
+// tools/verify-characters.mjs (also runnable alone). Screenshots v7_*.png.
+const v7 = report.v7 = { checks: {} };
+try { const { verifyCharacters } = await import('./verify-characters.mjs'); Object.assign(v7, await verifyCharacters({ browser, BASE, DATA, OUT, post, writeHeaders })); }
+catch (e) { v7.checks.aborted = blockFailed('v7', e); v7.pass = false; }
 // write path: approve/needs-changes + a note, on another scratch copy (_verify, its own server), then a stale-rev POST must get 409
 try {
   const TMP = path.join(DATA, '_verify');
@@ -1130,8 +1138,8 @@ report.project = P;
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 1));
 const w = report.writes || {};
 const writesOk = w.noteSaved && w.noteShownInColumn && w.staleStatus === 409 && w.newState !== undefined && w.newState !== w.stateBefore && w.approvalsRev > w.approvalsRevBefore;
-console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
-process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
+console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· v7 (characters stage):', report.v7?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
+process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && report.v7?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
 await browser.close();
 for (const c of procs) c.kill();
 await new Promise(r => setTimeout(r, 300));   // let the servers release the scratch folder; cleanup() removes it on exit

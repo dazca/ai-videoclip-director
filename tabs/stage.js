@@ -1,13 +1,13 @@
 // Stage workspace (page "stage", opened from the stage rail): a 20 px bar with the stage, its status and the director's
 // status buttons (only here and on the rail can a stage be marked done), then the stage's own workspace. Stage 1
-// (lyrics) is tabs/lyrics.js, stage 2 (script) tabs/script.js, stage 3 (breakdown) tabs/breakdown.js; the later stages show what they will hold and where
+// (lyrics) is tabs/lyrics.js, stage 2 (script) tabs/script.js, stage 3 (breakdown) tabs/breakdown.js, stage 4 (characters)
+// tabs/charstage.js; the later stages show what they will hold and where
 // their data lives today.
 import { store, esc } from '../js/store.js';
 import { STAGES, STATUS_LABEL, stageById } from '../js/flow.js';
 
-const MODULES = { lyrics: () => import('./lyrics.js'), script: () => import('./script.js'), breakdown: () => import('./breakdown.js') };
+const MODULES = { lyrics: () => import('./lyrics.js'), script: () => import('./script.js'), breakdown: () => import('./breakdown.js'), characters: () => import('./charstage.js') };
 const LATER = {
-  characters: ['Assets > Characters: identity sheets and looks.', 'characters'],
   scenery: ['Assets > Locations and Props.', 'locations'],
   storyboard: ['Timeline > shots and clips columns (shots.json).', 'timeline'],
   final: ['Review > Approvals, Queue and Costs.', 'approvals'],

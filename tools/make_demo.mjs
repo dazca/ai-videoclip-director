@@ -105,10 +105,10 @@ for (const [f, e, l] of [['ada_face', 'ada', 'Ada face (placeholder)'], ['ada_bo
 
 // ---------------------------------------------------------------- entities (placeholders: no real people)
 const where = (id) => shots.filter(x => x.cast.includes(id)).map(x => ({ shot: x.id, t: x.t0 }));
-S.ops.entity_upsert(ID, { kind: 'character', id: 'ada', name: 'Ada', thumb_src: 'media/still/ada_face.jpg', fields: { short: 'A', color: '#ff8844', status: 'approved', role: 'the lead (a placeholder figure made of gradients)',
+S.ops.entity_upsert(ID, { import_ok: true, kind: 'character', id: 'ada', name: 'Ada', thumb_src: 'media/still/ada_face.jpg', fields: { short: 'A', color: '#ff8844', status: 'approved', role: 'the lead (a placeholder figure made of gradients)',
   face: 'media/still/ada_face.jpg', body: 'media/still/ada_body.jpg', refs: ['media/still/ada_face.jpg', 'media/still/ada_body.jpg'] },
   look: { id: 'base', name: 'Orange gradient (base look)', base: true, garments: ['orange hoodie', 'dark jeans'], colors: ['#ff8844', '#223355'], images: ['media/still/ada_body.jpg', 'media/still/ada_face.jpg'], clips: ['C1', 'C3'], used: where('ada'), status: 'approved', cost_usd: 0 } });
-S.ops.entity_upsert(ID, { kind: 'character', id: 'bo', name: 'Bo', thumb_src: 'media/still/bo_face.jpg', fields: { short: 'B', color: '#2a7f62', status: 'draft', role: 'counts the bars (placeholder)',
+S.ops.entity_upsert(ID, { import_ok: true, kind: 'character', id: 'bo', name: 'Bo', thumb_src: 'media/still/bo_face.jpg', fields: { short: 'B', color: '#2a7f62', status: 'draft', role: 'counts the bars (placeholder)',
   face: 'media/still/bo_face.jpg', body: 'media/still/bo_body.jpg', refs: ['media/still/bo_face.jpg', 'media/still/bo_body.jpg'] },
   look: { id: 'base', name: 'Green gradient (base look)', base: true, garments: ['green overalls'], colors: ['#2a7f62'], images: ['media/still/bo_body.jpg'], clips: ['C2', 'C3'], used: where('bo'), status: 'draft', cost_usd: 0 } });
 S.ops.entity_upsert(ID, { kind: 'location', id: 'studio', name: 'S · studio', thumb_src: 'media/still/studio.jpg', fields: { letter: 'S', status: 'approved', description: 'a room that is a test pattern',

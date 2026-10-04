@@ -58,8 +58,21 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
    entity"); `ok` is theirs. Entities come from the page's "Create entity" (a draft character / location / prop, or a
    look on a character): you cannot create them from a breakdown item; ask with `review` and a note
    (`breakdown_note_add`).
-4. **Characters, looks, locations, props**: `entity_upsert` with references; looks (costumes) live in the character's
-   `looks[]`. A missing look or angle becomes a generation request, not a guess.
+4. **Characters** (stage 4, the page's Characters stage): `character_get` lists every character (status: needs a
+   base / iterating / identity approved / looks) and, per character, the director's **base** (catalogue bodies,
+   Openverse images with licence / creator / URL, a description, private reference photos, sketches: open the ref
+   `file`s to look), the **iteration trees** ("identity" and one "look:<id>" per costume), the requests with the edit
+   text, the numbered **pins** ("necklace here, silver") and the sketch PNG / **mask** files, and what waits on whom
+   (`to_run`, `to_register`, `waiting_for_director`). Every generation is a `request_create` DRAFT with `char {id,
+   tree, from, kind: identity | edit | look}`, refs (for an edit: the node image, the sketch PNG, the mask), the tool and
+   an honest `est_cost`; the director approves it in the page. Run only approved ones (`request_update` queued ->
+   running -> done with outputs and the actual cost), then `character_iteration_add {id, request}`: the image becomes a
+   node; the director compares it with its parent and keeps, branches or reverts it, and approves the identity / a look
+   (locks it), all in the page. A look starts from the approved identity; propose new costumes with `look_create`
+   (status review). Answer the director's notes and asks with `character_note_add` (`reply_to`, `resolve`). Private
+   photos (friends, the director) and anything made from them stay under `private/`: never copy them anywhere shared.
+   **Locations, props**: `entity_upsert` with references (stage 5 will follow the same pattern). A missing look or
+   angle becomes a generation request, not a guess.
 5. **Storyboard**: cut into shots on downbeats / section starts (`shots.json`); each shot gets kind, title, cast,
    locations, and later the clip uses that fill it (`timeline_query` shows what a cut crosses); one frame per shot
    (thumbs), reviewed in the page; `ui_focus` to walk the director through it.
@@ -85,6 +98,8 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
   (`via: "page"`): use the tools, which stamp your writes `via: "agent"`. Never mark a scene `ok`.
 - Never invent intake answers: record only what the director said.
 - Never mark a breakdown item `ok`, and never try to turn one into an entity yourself: set `review` and ask.
+- Never choose keep / branch / revert, approve an identity or a look, or write a character's `iter` / `base` by hand:
+  those are the director's, in the page. Register only outputs of approved, done requests.
 
 ## Handy patterns
 

@@ -32,12 +32,12 @@ outside the project folder, extra PRIVATE path rule. Env vars win: `WB_PROJECT`,
 | `mcp/server.mjs`, `mcp/test.mjs` | MCP server (stdio) and its end-to-end test |
 | `index.html`, `app.js`, `app.css` | the page shell |
 | `core/` | command registry + keymap, menus, palette, undo history, selection, projects/exports, preview dock, default commands, `rail.js` (stage rail + stage commands), `wizard.js` (new-project wizard), `sketch/` (the sketch tool: `mountSketch` / `openSketch`, API in its header) |
-| `js/` | store (data + live reload), timeline (the warp), columns, player, verify hooks, `flow.js` (the guided flow: stages + lyrics model), `scenes.js` (stage 2: scenes, intake, gaps, snapping) and `breakdown.js` (stage 3: items, links, merge / split, the "Suggest from script" pre-pass), all shared with `lib/store.mjs` |
-| `tabs/` | one module per view; `tabs/registry.js` lists pages and sub-views; `stage.js` (stage workspaces), `lyrics.js` (stage 1), `script.js` (stage 2), `breakdown.js` (stage 3) |
-| `docs/SPEC_v3_GUIDED.md` | the guided creation flow (seven stages); phase 1 = stage rail, wizard, lyrics stage; phase 2 = the script stage + sketch files; phase 3 = the breakdown stage |
+| `js/` | store (data + live reload), timeline (the warp), columns, player, verify hooks, `flow.js` (the guided flow: stages + lyrics model), `scenes.js` (stage 2: scenes, intake, gaps, snapping), `breakdown.js` (stage 3: items, links, merge / split, the "Suggest from script" pre-pass) and `characters.js` (stage 4: iteration trees, branches, statuses, estimates, prompts), all shared with `lib/store.mjs` |
+| `tabs/` | one module per view; `tabs/registry.js` lists pages and sub-views; `stage.js` (stage workspaces), `lyrics.js` (stage 1), `script.js` (stage 2), `breakdown.js` (stage 3), `charstage.js` (stage 4; `characters.js` is the Assets sub-view) |
+| `docs/SPEC_v3_GUIDED.md` | the guided creation flow (seven stages); phase 1 = stage rail, wizard, lyrics stage; phase 2 = the script stage + sketch files; phase 3 = the breakdown stage; phase 4 = the characters stage |
 | `catalog/` | the free starter catalogue (CC0 / public-domain bases: bodies, poses, face angles, garments, locations, props; `catalog.json`, `LICENSES.md`), served read-only for stage 4 |
 | `importers/` | `new_project.mjs` (song + lyrics -> project), `azemar_*` (the owner's production, kept as a worked example) |
-| `tools/` | `verify.mjs` (UI suite), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `make_demo.mjs`, `chrome.mjs` |
+| `tools/` | `verify.mjs` (UI suite; its stage-4 block is `verify-characters.mjs`, runnable alone), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `make_demo.mjs`, `chrome.mjs` |
 | `exporters/hyperframes-html/` | HTML package of a HyperFrames composition: `export.mjs`, `verify.mjs`, `serve.mjs` (see Export) |
 | `data/<project>/` | one folder per project; only `data/_template/` and `data/demo/` are in git |
 
@@ -53,10 +53,18 @@ relative to the media base; any other path is relative to the project folder. Fu
 - `script.json`: `lines[{id "s07", t0, lyric, mode W|S|B|W→S, action, line_id}]`.
 - `shots.json`: `shots[{id, t0, t1, section, kind, title, cast[], locations[], clips[use ids], thumb}]` and clip
   `uses[{id "G05@20158", clip, take, in_ms, t0, t1, file, start_image, location, thumb}]`.
-- `entities/{characters,locations,props}/<id>.json` + `entities/index.json`: characters carry `looks[]`.
+- `entities/{characters,locations,props}/<id>.json` + `entities/index.json`: characters carry `looks[]` (status draft /
+  review / approved; approved only from the page). Stage 4 adds to a character `base{text, refs[{path, source:
+  catalog|openverse|photo|sketch|media, private?, licence?, creator?, url?, ...}], at, by, via}` (the director's) and
+  `iter{nodes[{id "n03", tree "identity"|"look:<id>", parent, from_identity?, image, request, kind, edit{text, sketch?,
+  png?, mask?, pins[]}, choice null|kept|branch|reverted, private?, at, by, via}], trees{<tree>: {head, approved?}},
+  notes[], log[]}`: append-only iteration trees (nodes never change except the director's `choice`; every act is
+  logged). `catalog/...` ref paths are relative to the workbench folder. Logic: `js/characters.js`. Reference images:
+  `refs/<character>/` (Openverse, with provenance), `private/refs/<character>/` (the director's photos, always private).
 - `media.json`: every generated/imported file with kind, links (entities, shots, uses, job, take), status, thumbnails.
 - Shared with the page, each `{rev, ...}`: `notes.json`, `approvals.json` (`"kind:id" -> {state}`; states draft,
-  review, changes, approved, locked), `requests.json` (the generation queue), `overrides.json`, `settings.json`.
+  review, changes, approved, locked), `requests.json` (the generation queue; a stage-4 generation carries `char{id,
+  tree, from, kind: identity|edit|look, text?, sketch?, png?, mask?, pins[]}`), `overrides.json`, `settings.json`.
 - `costs.json`: `cap_usd`, `items[{id, t, usd, tool, date, request?}]`.
 - `stages.json` (shared, `{rev}`): the guided flow, `stages[{id, status: empty|in_progress|needs_you|done, done_by,
   via, updated, blockers[], note?}]` for lyrics, script, breakdown, characters, scenery, storyboard, final. Missing =
@@ -134,6 +142,17 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 
    `extract` means draft or refresh the whole breakdown, then resolve it. Item status `ok` is the director's; to ask
    for an entity, set `review` and say why in a note: only the page's "Create entity" makes one (nothing is generated
    or spent by it).
+   Characters (stage 4): `character_get` (no id: every character and its status; with id: the base with ref files,
+   the trees, the requests with the edit text, pins and sketch / mask files, `to_run`, `to_register`,
+   `waiting_for_director`, notes, asks). Every generation is a `request_create` draft with `char {id, tree, from,
+   kind}`, refs (the node image first, then the sketch PNG and mask for an edit), the tool and an honest `est_cost`
+   (identity / look sheet ~$0.08, an edit $0.04, a masked inpaint $0.05: `js/characters.js` EST). Run only approved
+   ones (`request_update` queued -> running -> done with `outputs` + `actual_cost_usd`), then
+   `character_iteration_add {id, request}`: the node joins its tree; the first one is the head, later ones wait for
+   the director. The base, keep / branch / revert, approving / unlocking the identity or a look are the director's, in
+   the page (no tool); a look starts from the approved identity; `look_create` proposes a look in `review`. Ask with
+   `character_note_add` and show it with `ui_focus` view "stage". Never copy a private photo or a node made from one
+   anywhere shared.
 5. **Snapshot before big edits** (`snapshot_save`); a restore snapshots the current state first, so it is undoable.
 6. Register every new file (`media_add`, or automatically on `request_update` done) so it shows up in the page.
 
@@ -149,9 +168,11 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 
 - Only the page's own files are served from the workbench folder (an allow-list: `index.html`, `dock.html`, `app.js`,
   `app.css`, `README.md`, `core/`, `core/sketch/`, `js/`, `tabs/`, and the free starter catalogue `catalog/` (images,
   `catalog.json`, `LICENSES.md`); case-insensitive). The page shell carries a Content-Security-Policy
-  with `script-src 'self'` (no inline scripts, no eval; media may also be `https:` / `data:` / `blob:`); every other
-  file gets a sandboxing CSP and `nosniff`, so an HTML/SVG file in a project cannot run script in the workbench origin.
-  An invalid `?project=` is redirected to the default project.
+  with `script-src 'self'` (no inline scripts, no eval; media may also be `https:` / `data:` / `blob:`) and
+  `connect-src 'self' https://api.openverse.org` (the stage-4 Openverse search from the browser; every other origin is
+  blocked); every other file gets a sandboxing CSP and `nosniff`, so an HTML/SVG file in a project cannot run script in
+  the workbench origin. An invalid `?project=` is redirected to the default project. A remote (LAN) client reads the
+  project's JSON scrubbed of private paths and items flagged private (`lib/store.mjs` `scrubPrivate`).
 - Paths with `..`, `.`, backslashes, NUL, `:` (NTFS streams) or `~<digit>` (8.3 short names) are rejected; dot-folders are never served; private files (by rule or
   `private: true` in `media.json`) live under `private/<kind>/` and are never exported or packaged.
 - Approvals are the director's, and by default **only the page approves**: a click in the page (POST `/api/save`) is
@@ -193,6 +214,18 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 
   anything else (403); entity ids are checked like every entity id; it writes a draft entity (or a look) and spends
   nothing. Like a page save, a local process holding the token could forge the Origin header: this guards the tool
   surface. An agent's snapshot restore brings a lost item `ok` back as `review`.
+- Stage 4 (characters): `character_act` (the base, keep / branch / revert / make head, approve / unlock the identity
+  or a look, new looks, page notes) and `ref_upload` (reference images) run only for the page's own request (the
+  server passes `via: "page"` for this server's Origin + the token, like `breakdown_promote`); the MCP server has no
+  such tools; the agent surface and offline mode get 403. `ref_upload` takes real images only (PNG / JPEG / WebP / GIF
+  by signature, up to 20 MB, body 25 MB); a photo always lands in `private/refs/<character>/` (name sanitised) and is
+  flagged private; an Openverse image goes to `refs/<character>/` with its licence, creator and URL. An agent adds a
+  node only from a request approved in the page and `done` (`character_iteration_add`), never to an approved (locked)
+  tree, never a look before the identity is approved; nodes made from a private photo are private (image copied under
+  `private/characters/<id>/`) and outputs of a request with private refs are flagged private. `entity_upsert` ignores
+  `iter` / `base` and refuses to approve or lock a look (403; `import_ok`, for local scripts calling the data layer, is
+  stripped from HTTP calls). An agent's snapshot restore brings back no identity / look approval and keeps the nodes
+  made since (undecided).
 - Entity thumbnails and copies made from private media stay private (`thumbs/priv_*`, `private/<kind>/`).
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.
@@ -221,6 +254,10 @@ initial project. Tools:
 | `sketch_save`, `sketch_get`, `sketch_list` | sketch files: save (JSON + base64 PNG + mask), get the PNG / mask paths (absolute too) and the numbered pins, list (by scene) |
 | `breakdown_get`, `breakdown_update` | stage 3: the items (characters, locations, props, wardrobe, FX) with their scene / beat links, statuses, entity links, the matrix, asks for the agent, versions + diff, and the script + intake to extract from; a new version (full list / upsert + remove / restore; statuses draft / review) |
 | `breakdown_note_add`, `breakdown_note_resolve` | notes on an item or a scene, thread replies, resolve |
+| `character_get` | stage 4: no id = every character (status, scenes, open requests, nodes waiting) + breakdown characters not yet entities; id = base (ref files), trees (nodes with image files, branches, head, approved), looks, requests (edit text, pins, sketch PNG / mask files, ref files), `to_run`, `to_register`, `waiting_for_director`, notes, asks |
+| `character_iteration_add` | register the output of an approved, done request as a node of its tree (never approves or chooses) |
+| `character_note_add` | a note on a character, a tree or a node; reply_to (+ resolve) answers the director's asks |
+| `look_create` | propose a look (costume): status `review`; its tree starts from the approved identity |
 | `snapshot_save`, `snapshot_list`, `snapshot_restore` | durable checkpoints |
 | `song_get` | sections, lyric lines with word timings, events, grid |
 | `timeline_query` | everything between t0 and t1 across all columns |
@@ -229,7 +266,7 @@ initial project. Tools:
 | `media_list`, `media_add` | the media index; add = thumbnails + links |
 | `notes_list`, `note_add`, `note_resolve` | notes pinned to time; resolve with a reply |
 | `approvals_get`, `approve`, `request_changes` | approval states |
-| `requests_list`, `request_create`, `request_update` | the generation queue and its lifecycle |
+| `requests_list`, `request_create`, `request_update` | the generation queue and its lifecycle (`char` links a stage-4 generation to a character tree) |
 | `costs_get` | spent / committed / cap |
 | `ui_focus` | move the open page: seek, select, open a view, preview in the dock, toast |
 
@@ -251,7 +288,11 @@ Resources: `workbench://docs/readme`, `workbench://docs/claude` (this file), `wo
 - **A stage workspace**: a module in `tabs/` loaded from `MODULES` in `tabs/stage.js` and imported by `core/rail.js`
   (so its commands exist before it is opened); offer `WB.stageActions[<stage>] = {canSave, save, canNote, note}` and
   the rail's `stage.save` (Ctrl+Enter) / `stage.note` (Alt+N) reach it. A sketch anywhere: `mountSketch(el, {sketch?,
-  id, resolve: mediaUrl, save})` from `core/sketch/sketch.js`, saving through `POST /api/op/sketch_save`.
+  id, resolve: mediaUrl, save})` from `core/sketch/sketch.js`, saving through `POST /api/op/sketch_save` (stage 4 mounts
+  it over a node image for an edit: strokes, mask and pins go into the request).
+- **A page-only act** (the director's decision): an op in `lib/store.mjs` that fails unless `via === 'page'`, and one
+  line in `serve.mjs` setting `body.via` from the request's Origin (see `breakdown_promote`, `character_act`,
+  `ref_upload`); no MCP tool; a security check that the agent surface gets 403.
 - **An agent op / MCP tool**: a function in `ops` in `lib/store.mjs` (it is then also `POST /api/op/<name>`), and a
   `registerTool` in `mcp/server.mjs` with a zod schema and a description an agent can follow; cover it in `mcp/test.mjs`.
 - **Tests**: `npm run test:mcp` and `npm run verify` must pass (the verify suite runs on the demo; the owner's extra

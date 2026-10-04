@@ -40,9 +40,11 @@ function download(name, text, type = 'application/json') {
 const fmt = (ms) => { const s = Math.max(0, ms) / 1000, m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(3).padStart(6, '0')}`; };
 const csv = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 
+// a path is private by the PRIVATE rule or when media.json flags it (e.g. a sheet generated from a private photo)
+const priv = (x) => isPrivatePath(x) || (typeof x === 'string' && store.mediaByPath?.[x]?.private === true);
 function scrub(v) {
-  if (Array.isArray(v)) return v.filter(x => !isPrivatePath(x) && !(x && typeof x === 'object' && (x.private === true || isPrivatePath(x.path)))).map(scrub);
-  if (v && typeof v === 'object') { const o = {}; for (const [k, x] of Object.entries(v)) { if (k === 'private_refs' || k === 'private_media' || isPrivatePath(x)) continue; o[k] = scrub(x); } return o; }
+  if (Array.isArray(v)) return v.filter(x => !priv(x) && !(x && typeof x === 'object' && (x.private === true || priv(x.path) || priv(x.image)))).map(scrub);
+  if (v && typeof v === 'object') { const o = {}; for (const [k, x] of Object.entries(v)) { if (k === 'private_refs' || k === 'private_media' || priv(x)) continue; o[k] = scrub(x); } return o; }
   return v;
 }
 export const exporter = {

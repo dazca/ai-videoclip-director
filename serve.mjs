@@ -65,10 +65,14 @@ const tokenOk = (t) => typeof t === 'string' && t.length === TOKEN.length && cry
 // the page gets the token in its HTML (another site cannot read it); core/token.js adds it to every /api POST
 const TOKEN_TAG = `<meta name="wb-token" content="${TOKEN}"><script src="core/token.js"></script>`;
 // the page shell: scripts only from this server (no inline script, no eval), styles may be inline (style attributes);
-// media may also come from https: / data: / blob: (a project can reference remote files). Every other file served
-// gets a sandboxing policy, so an HTML or SVG file in a project folder cannot run script in this origin.
+// media may also come from https: / data: / blob: (a project can reference remote files; Openverse thumbnails come from
+// https://api.openverse.org/v1/images/<id>/thumb/ and its result tiles may show the original hosts' images). The page may
+// fetch() only from this server and the Openverse API (stage 4's "Openverse" base picker searches it from the browser,
+// CC0 / public domain by default); every other origin is blocked. Every other file served gets a sandboxing policy, so
+// an HTML or SVG file in a project folder cannot run script in this origin.
+const OPENVERSE = 'https://api.openverse.org';
 const CSP_PAGE = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; "
-  + "connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
+  + `connect-src 'self' ${OPENVERSE}; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'`;
 const CSP_FILE = "sandbox; default-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'unsafe-inline'";
 // static files: only the page's own (compared lower-cased: Windows and macOS file systems ignore case), the sketch tool
 // (core/sketch/) and the free starter catalogue (catalog/: images + catalog.json + LICENSES.md, one folder deep)
@@ -138,7 +142,7 @@ function pushUi(project, cmd) {
 
 // request bodies: 5 MB, except a sketch save (two base64 PNGs + the stroke JSON): 25 MB. Over the limit: 413 at once
 // (by Content-Length when sent, else while reading); the rest of the upload is discarded and the connection closed.
-const bodyLimit = (p) => p === '/api/op/sketch_save' ? 25e6 : 5e6;
+const bodyLimit = (p) => p === '/api/op/sketch_save' || p === '/api/op/ref_upload' ? 25e6 : 5e6;
 function readBody(req, limit) {
   return new Promise((ok, bad) => {
     const too = () => new S.WbError(413, `body too big (${limit / 1e6} MB max)`);
@@ -294,6 +298,10 @@ http.createServer(async (req, res) => {
         // only the page turns a breakdown item into an entity: a browser request from this origin (the MCP server has no
         // such tool, and a request without the page's Origin is the agent surface and refused by the op)
         if (name === 'breakdown_promote') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
+        // stage 4: the director's acts (base, keep / branch / revert, approving the identity or a look) and reference
+        // uploads are the page's only, the same way
+        if (name === 'character_act' || name === 'ref_upload') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
+        delete body.import_ok;   // only a local script calling lib/store.mjs directly may import approved looks
         return json(res, 200, await S.ops[name](project, body));
       }
       if (p === '/api/projects/new') return json(res, 200, body.lyrics != null || body.song ? await S.createGuidedProject(body) : S.createProject(body.id, body.title));
@@ -338,6 +346,12 @@ http.createServer(async (req, res) => {
       if (priv(rel, [m[1]]) || priv(`data/${m[1]}/${rel}`, [])) { res.writeHead(403); return res.end('private: local only'); }
       // a writable state file that does not exist yet reads as null (the page uses its default; first save creates it)
       if (S.WRITABLE.has(m[2]) && !fs.existsSync(f)) return json(res, 200, null);
+      // a remote (LAN) client reads the project's JSON without private paths or items flagged private (media.json,
+      // entities with private refs and iteration nodes, requests built on private photos)
+      if (!isLocal(req) && /\.json$/i.test(f) && fs.existsSync(f)) {
+        const j = S.readJSON(f, null); if (j == null) { res.writeHead(404); return res.end(); }
+        res.writeHead(200, { 'content-type': MIME['.json'], 'cache-control': 'no-cache', 'content-security-policy': CSP_FILE }); return res.end(JSON.stringify(S.scrubPrivate(j, [m[1]])));
+      }
     } else {
       f = S.inside(WB, p === '/' ? 'index.html' : p.slice(1)); if (!f) { res.writeHead(403); return res.end(); }
       const rel = S.relTo(WB, f).toLowerCase();

@@ -202,9 +202,16 @@ export const store = {
   _missed: new Set(),     // files whose reload was skipped (or whose save failed) while a save was in flight
 };
 
+// toasts stack in one bottom-centre column (newest at the bottom, at most 4); the same message again restarts its timer
+// instead of drawing a second copy on top of the first
 export function toast(msg) {
-  const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg;
-  document.body.appendChild(el); setTimeout(() => el.remove(), 3000);
+  let box = document.getElementById('toasts');
+  if (!box) { box = document.createElement('div'); box.id = 'toasts'; box.setAttribute('role', 'status'); box.setAttribute('aria-live', 'polite'); document.body.appendChild(box); }
+  let el = [...box.children].find(x => x.textContent === String(msg));
+  if (el) el.remove(); else { el = document.createElement('div'); el.className = 'toast'; el.textContent = msg; }
+  box.appendChild(el);
+  while (box.children.length > 4) box.firstElementChild.remove();
+  clearTimeout(el._t); el._t = setTimeout(() => el.remove(), 3000);
 }
 
 // localStorage, wrapped (private windows / blocked storage must not break the page)

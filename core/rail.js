@@ -9,6 +9,7 @@ import { store, prefs, toast, esc } from '../js/store.js';
 import '../tabs/lyrics.js';   // registers the lyrics commands (palette, keys) before its workspace is first opened
 import '../tabs/script.js';   // the same for the script stage
 import '../tabs/breakdown.js';   // and the breakdown stage
+import '../tabs/charstage.js';   // and the characters stage
 import { STAGES, STATUS_LABEL, stagesView, projectFacts, stageById } from '../js/flow.js';
 
 const WB = () => window.WB;
@@ -58,7 +59,7 @@ C.push(
   { id: 'stage.progress', group: 'Stages', title: 'Mark stage in progress', hidden: true, when: (c) => !!target(c) && view().stages.find(s => s.id === target(c))?.status !== 'in_progress', run: (c) => stages.setStatus(target(c), 'in_progress') },
   { id: 'stage.needsYou', group: 'Stages', title: 'Flag stage: needs you', hidden: true, when: (c) => !!target(c) && view().stages.find(s => s.id === target(c))?.status !== 'needs_you', run: (c) => stages.setStatus(target(c), 'needs_you') },
   // one key per act across the stage workspaces: each stage module offers WB.stageActions[<stage>] {canSave, save, canNote, note}
-  { id: 'stage.save', group: 'Stages', title: 'Save a version (lyrics / script / breakdown)', keys: ['Ctrl+Enter'], global: true, when: (c) => onStage(c) && !!WB().stageActions?.[current()]?.canSave(), run: () => WB().stageActions[current()].save() },
+  { id: 'stage.save', group: 'Stages', title: 'Save a version (lyrics / script / breakdown) / send the edit request (characters)', keys: ['Ctrl+Enter'], global: true, when: (c) => onStage(c) && !!WB().stageActions?.[current()]?.canSave(), run: () => WB().stageActions[current()].save() },
   { id: 'stage.note', group: 'Stages', title: 'Note (lyrics: the selected words; script: the open scene; breakdown: the open item)', keys: ['Alt+N'], when: (c) => onStage(c) && !!WB().stageActions?.[current()]?.canNote(), run: () => WB().stageActions[current()].note() },
   { id: 'view.rail', group: 'View', title: 'Stage rail', checked: () => !document.body.classList.contains('norail'), run: () => { const off = !document.body.classList.contains('norail'); document.body.classList.toggle('norail', off); prefs.set('rail', !off); WB().timeline?.requestRelayout(); } },
 );

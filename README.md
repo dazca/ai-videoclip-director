@@ -70,7 +70,9 @@ Tools: `status`, `projects` (list/create/duplicate/open), `snapshot_save` / `sna
 `lyrics_get` / `lyrics_update` / `lyrics_versions` / `lyrics_note_add` / `lyrics_note_resolve`, `song_attach`; stage 2:
 `intake_get` / `intake_answer`, `script_get` / `scenes_update`, `scene_note_add` / `scene_note_resolve`, `sketch_save` /
 `sketch_get` / `sketch_list` (image paths + pins, so the agent can look at the director's drawings); stage 3:
-`breakdown_get` / `breakdown_update`, `breakdown_note_add` / `breakdown_note_resolve`. Resources: the README, `CLAUDE.md`, the file formats, the
+`breakdown_get` / `breakdown_update`, `breakdown_note_add` / `breakdown_note_resolve`; stage 4: `character_get`,
+`character_iteration_add`, `character_note_add`, `look_create` (generations are `request_create` drafts with a `char`
+link to the character's tree). Resources: the README, `CLAUDE.md`, the file formats, the
 skill, and each project's JSON files. Prompt: `director-session`. Rules the tools enforce: an agent cannot approve on
 its own, a request runs only after the director approved it, queueing is refused above the cost cap, and `done` needs
 the output files and the actual cost (recorded in `costs.json`, outputs indexed as media). The agent guide is
@@ -131,6 +133,27 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   look on a character: no images, no request, nothing spent; page only. Side panel: notes (per item or all, Ask the
   agent) and versions (A/B diff, restore). Right-click a scene (timeline, script, matrix) > **Breakdown items in this
   scene**; the timeline Scenes column shows each scene's characters and locations under its title.
+- **Characters stage** (stage 4): the characters of the breakdown (left: each with the scenes it appears in and where
+  it stands: needs a base / base chosen / identity · n nodes / identity approved / looks a/n approved; breakdown
+  characters not yet entities are listed greyed with a link to make them). Per character, three tabs:
+  **Identity**: the **base**, from any mix of the CC0 **catalogue** (`catalog/`, filtered by kind and tags),
+  an **Openverse** search (from your browser straight to `api.openverse.org`, CC0 + public domain by default, "+ CC BY"
+  optional; sensitive results hidden; a warning on photographs of people; the chosen image is stored in
+  `refs/<character>/` with its licence, creator and URL), a **description**, your own **reference photos** (upload or a
+  path on this machine: stored under `private/refs/<character>/`, flagged private, never exported) and a **sketch**.
+  **Request identity sheet** makes a DRAFT generation request (refs, tool and an honest estimate); **Approve** it here
+  (the steps draft › approved › running › done show on each request); an agent runs it through MCP and the output
+  comes back as a node of the **iteration tree**, drawn as horizontal strips, one per branch (● head, ✓ approved,
+  "new" = waiting for you). Open a node: **Edit from nX** opens the sketch tool over the image: say what to change in
+  text, draw on it, paint a **mask** (M: only that region changes) and drop numbered **pins** (P: "necklace here,
+  silver"); **Request edit** sends all of it as a draft request. A new node opens **side by side with its parent**:
+  A/B **slider**, **toggle** or **side by side**; then **Keep** (it becomes the head), **Branch** (kept on a side
+  strip) or **Revert** (dropped; the head stays). **Make head** goes back to any node. **Approve identity** locks it
+  (page only; Unlock reopens). **Looks**: one tree per costume, starting from the approved identity; the breakdown's
+  wardrobe items are its draft looks (or "make it a look"), **+ New look**, **Request look sheet**, then the same edit /
+  compare / keep loop and **Approve look**. **Notes**: notes on the character, a tree or a node, "ask the agent", and
+  the history of every act. Commands: palette "Characters: …", right-click a node (compare, edit, keep, branch,
+  revert, approve), Ctrl+Enter sends the open edit request.
 - **Top bar** (18 px; `` ` `` hides / shows it; **Esc never hides it**: Esc only closes menus, dialogs, the palette and
   the cheat sheet): menu bar (File Edit View Timeline Generate Window Help; F10 opens it from the keyboard), the
   **page tabs**, project name, transport, `⌘` = command palette, `⌃` = hide the bar, `⚙` = Settings (far right).
@@ -214,7 +237,7 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `energy.json` | `{fps, rms[], onset[]}` (0-1) |
 | `script.json` | `{stages[{name,t0,t1,text}], lines[{id:"s07", t0, t_end?, lyric, mode:"W"|"S"|"B"|"W→S", action, line_id}]}` |
 | `shots.json` | `{shots[{id, t0, t1, section, kind, title, cast[], locations[], clips[use ids], thumb, render_frame_ms}], uses[{id:"G05@20158", clip, take, in_ms, t0, t1, file, start_image, location, thumb, label}]}` |
-| `entities/{characters,locations,props}/<id>.json` | `{id, kind, name, role|description, refs[paths], thumb, status, private_refs?, ...}`; `entities/index.json` lists them |
+| `entities/{characters,locations,props}/<id>.json` | `{id, kind, name, role|description, refs[paths], thumb, status, private_refs?, breakdown?{item, scenes}, ...}`; `entities/index.json` lists them. A character also carries `looks[{id, name, garments[], colors[], images[], notes, status: draft/review/approved, from?: breakdown/agent/page, breakdown?}]` and stage 4: `base{text, refs[{path, source: catalog/openverse/photo/sketch/media, private?, title?, licence?, licence_url?, creator?, url?, original?, attribution?, catalog_id?, openverse_id?}], at, by, via}` and `iter{nodes[{id: "n03", tree: "identity" \| "look:<id>", parent, from_identity?, image, request, kind: identity/edit/look, edit{text, sketch?, png?, mask?, pins[{n, x, y, text}]}, choice: null/kept/branch/reverted, private?, at, by, via, note?}], trees{<tree>: {head, approved?, approved_at?, approved_by?, via?}}, notes[{id: "cn01", tree?, node?, text, by, via, to?, status, at, replies[]}], log[{at, by, via, act, tree?, node?, detail?}]}`: append-only (a node never changes except the director's `choice`; every act is logged); `identity_sheet` = the approved identity image. Catalogue paths (`catalog/...`) are relative to the workbench folder. Logic: `js/characters.js` |
 | `notes.json` | `{rev, notes[{id, t, line_id, by, text, status:"open"|"resolved", at, about?, source?}]}` |
 | `approvals.json` | `{rev, states[], items:{"<kind>:<id>": {state, by, at, why?, comment?}}}`; kinds: `shot`, `use`, `job`, `script`, `character`, `location`, `prop` |
 | `costs.json` | `{cap_usd, fal_total_usd, items[{id, t, usd, tool, date}], pre_production[], ledger[]}` |
@@ -224,7 +247,8 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `media.json` | `{generated, count, by_kind, items[{id, path, kind, label, entities[], shots[], uses[], take, job, group, size, w, h, duration_ms, private, status: used/picked/unused/private, cost_usd, thumb, strip?, strip_n?, packed_alpha?}]}`; kinds: render, clip, still, avatar, body, motion, dancer, motion-ref, sheet, variation, contact, audio, ref |
 | `thumbs/m_*.jpg`, `s_*.jpg`, `priv_*.jpg` | media thumbnails (max 240 px, sheets 600 px), 8-frame hover-scrub strips of videos, thumbnails of PRIVATE files |
 | `_src/probe.json` | ffprobe cache (size/mtime keyed) |
-| `requests.json` | `{rev, items[{id, kind, target, prompt, refs[], est_cost, status: draft/approved/queued/running/done/rejected, by, at, outputs?[]}]}`; kinds: regenerate, new-costume, new-variant, generate, duplicate, choose-take, set-in, edit-timing, swap-costume, section-variant, import |
+| `requests.json` | `{rev, items[{id, kind, target, prompt, refs[], est_cost, tool?, status: draft/approved/queued/running/done/rejected, by, at, outputs?[], char?{id, tree, from, kind: identity/edit/look, text?, sketch?, png?, mask?, pins[]}}]}`; kinds: regenerate, new-costume, new-variant, generate, duplicate, choose-take, set-in, edit-timing, swap-costume, section-variant, import, identity-sheet, character-edit, look-sheet. `char` links a stage-4 generation to the character tree it grows |
+| `refs/<character>/`, `private/refs/<character>/`, `private/characters/<character>/` | stage-4 references: Openverse images (public, provenance in `media.json` `provenance{}`), the director's reference photos (always private), and iteration images made from private photos (private) |
 | `overrides.json` | `{rev, sections:{<id>:{label?, color?}}}`: the director's section renames / colours over `song.json` |
 | `settings.json` | `{rev, keybindings:{<command id>:[keys]}}` (not snapshotted) |
 | `project.json` | `{title, created, from?}` |
@@ -262,7 +286,7 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 Every `/api` call takes `?project=<id>` (default: `$WB_PROJECT`, the config's `default_project`, else `demo`). The data layer is
 `lib/store.mjs`, shared with the MCP server.
 `GET /api/config` (media roots, private rule) · `GET /api/status` (pages open) · `POST /api/op/<op>` (every MCP tool op, local
-only; bodies up to 5 MB, `sketch_save` up to 25 MB) · `POST /api/ui {t?, range?, view?, select?, preview?, message?, play?, open_project?}` (live UI channel: pushed to the
+only; bodies up to 5 MB, `sketch_save` and `ref_upload` up to 25 MB) · `POST /api/ui {t?, range?, view?, select?, preview?, message?, play?, open_project?}` (live UI channel: pushed to the
 open pages over SSE; returns `{pages, delivered}` once they ack via `POST /api/ui/ack`) ·
 `POST /api/save/<file>` `{base_rev, data}` (409 + current file when stale) · `GET /api/events` (SSE `{project, file}`) ·
 `GET /api/projects` · `POST /api/projects/new {id, title?, lyrics?, song?, bpm?}` (with `lyrics` / `song`: the wizard's guided project) · `POST /api/projects/duplicate {from, to, reset_state?}` ·
@@ -283,9 +307,12 @@ small files are served in one read so no handle stays open.
 - Only the page's own files are served from the workbench folder (an allow-list: `index.html`, `dock.html`, `app.js`,
   `app.css`, `README.md`, `core/`, `core/sketch/`, `js/`, `tabs/`, and the free starter catalogue `catalog/` (images,
   `catalog.json`, `LICENSES.md`); case-insensitive). The page shell carries a Content-Security-Policy
-  with `script-src 'self'` (no inline scripts, no eval; media may also be `https:` / `data:` / `blob:`); every other
-  file gets a sandboxing CSP and `nosniff`, so an HTML/SVG file in a project cannot run script in the workbench origin.
-  An invalid `?project=` is redirected to the default project.
+  with `script-src 'self'` (no inline scripts, no eval; media may also be `https:` / `data:` / `blob:`) and
+  `connect-src 'self' https://api.openverse.org` (the stage-4 Openverse search; every other origin is blocked); every
+  other file gets a sandboxing CSP and `nosniff`, so an HTML/SVG file in a project cannot run script in the workbench
+  origin. An invalid `?project=` is redirected to the default project.
+- A remote (LAN) client reads the project's JSON files scrubbed: no private path and no item flagged private (so
+  `media.json`, a character's base and iteration nodes, requests built on private photos list nothing private).
 - Paths with `..`, `.`, backslashes, NUL, `:` (NTFS streams) or `~<digit>` (8.3 short names) are rejected; dot-folders are never served; private files (by rule or
   `private: true` in `media.json`) live under `private/<kind>/` and are never exported or packaged.
 - Approvals are the director's, and by default **only the page approves**: a click in the page (POST `/api/save`) is
@@ -320,6 +347,17 @@ small files are served in one read so no handle stays open.
   "Create entity" (`/api/op/breakdown_promote`) runs only for the page's own request (this server's Origin + the
   token), never for the MCP tools (no such tool) or offline; it spends nothing. An agent's restore brings a lost `ok`
   back as `review`.
+- Stage 4 (characters): the director's acts (`POST /api/op/character_act`: the base, keep / branch / revert / make
+  head, approve and unlock the identity or a look, new looks, notes from the page) and reference uploads
+  (`/api/op/ref_upload`) run only for the page's own request (this server's Origin + the token); the MCP server has no
+  such tools and the ops refuse anything else (403), offline too. `ref_upload` takes real images only (PNG / JPEG / WebP /
+  GIF by signature; SVG, HTML and other files 400), up to 20 MB; a photo always goes to `private/refs/<character>/`
+  (the name is reduced to letters, digits, `-` and `_`) and is flagged private. An agent adds a node only from a
+  request the director approved in the page and that is `done` (`character_iteration_add`), never to an approved
+  (locked) tree, and a look only after the identity is approved; a node made from a private photo is private and its
+  image is copied under `private/characters/<id>/`; outputs of a request with private refs are flagged private.
+  `entity_upsert` ignores `iter` / `base` and refuses to approve or lock a look (403); `look_create` makes looks in
+  `review`. An agent's snapshot restore brings back no identity / look approval and keeps the nodes made since.
 - Entity thumbnails and copies made from private media stay private (`thumbs/priv_*`, `private/<kind>/`).
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.

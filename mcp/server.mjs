@@ -52,7 +52,7 @@ async function projectOf(args) { return args?.project || current || (await serve
 async function op(name, args = {}) {
   const { project: _p, ...a } = args; const p = await projectOf(args);
   // ops that may run ffprobe/ffmpeg (thumbnails) get a long timeout, so a slow video does not look like a failure
-  if (await server()) return http('POST', '/api/op/' + name, p, a, ['media_add', 'request_update', 'entity_upsert', 'song_attach', 'sketch_save'].includes(name) ? 180000 : 15000);
+  if (await server()) return http('POST', '/api/op/' + name, p, a, ['media_add', 'request_update', 'entity_upsert', 'song_attach', 'sketch_save', 'character_iteration_add', 'look_create'].includes(name) ? 180000 : 15000);
   return await S.ops[name](p, a);
 }
 const ok = (v) => ({ content: [{ type: 'text', text: typeof v === 'string' ? v : JSON.stringify(v, null, 1) }] });
@@ -316,6 +316,31 @@ mcp.registerTool('breakdown_note_resolve', {
   inputSchema: { project, id: z.string(), reply: z.string().optional(), reopen: z.boolean().optional(), by },
 }, wrap((a) => op('breakdown_note_resolve', a)));
 
+// ------------------------------------------------------------------ stage 4: characters (identity + looks as iteration trees)
+const charId = z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/).describe('Character entity id (character_get without id lists them).');
+const treeId = z.string().regex(/^(identity|look:[A-Za-z0-9_][A-Za-z0-9_-]{0,63})$/).describe('"identity" or "look:<look id>".');
+mcp.registerTool('character_get', {
+  title: 'Get a character workspace (stage 4)',
+  description: 'Without id: every character entity with its stage-4 status (base / iterating / identity approved / looks), the scenes it appears in (from the breakdown), open requests and nodes waiting for the director, plus the breakdown characters not yet entities (the director makes them in the page). With id: the base the director chose (text + refs: catalogue, Openverse with licence / creator / URL, private photos, sketches; each with its absolute `file`), the iteration trees ("identity" and one "look:<id>" per look): nodes {id, parent, image, file, request, kind, edit {text, sketch, png, mask, pins}, choice, private}, branches (horizontal strips), head and approved node; the looks; every request of this character with its status, refs (ref_files absolute), the edit text, the numbered pins and the sketch PNG / mask paths (absolute files) to send to the image model; to_run (approved, yours to run), to_register (done, waiting for character_iteration_add), waiting_for_director (nodes to keep / branch / revert), notes and asks_for_agent.',
+  inputSchema: { project, id: charId.optional(), notes: z.enum(['open', 'resolved', 'all']).optional() },
+}, wrap((a) => op('character_get', a)));
+mcp.registerTool('character_iteration_add', {
+  title: 'Register a generated image as a new node',
+  description: 'After you ran an APPROVED request of this character (request_update queued -> running -> done with outputs and actual_cost_usd), register its output as a node of the tree the request names (char.tree, parent char.from). image = one of the request\'s outputs (default the first). The first node of a tree becomes its head; any later one waits for the director, who compares it with its parent and keeps, branches or reverts it in the page. Refused: a request that is not this character\'s, not approved by the director, not done; a locked (approved) tree; a look before the identity is approved. A node made from a private photo is private (its image is copied under private/). You never approve or choose.',
+  inputSchema: { project, id: charId, request: z.string(), image: z.string().optional(), note: z.string().optional().describe('What you did (model, seed, anything the director should know).'), by },
+}, wrap((a) => op('character_iteration_add', a)));
+mcp.registerTool('character_note_add', {
+  title: 'Note on a character',
+  description: 'Pin a note to a character, one of its trees ("identity", "look:<id>") or a node (node id). reply_to = a note id adds your reply to its thread (answer the director\'s asks this way); resolve:true with reply_to closes it once you did what they asked. Notes are marked via "agent" and change nothing else. To ask the director to approve the identity or a look, say so in a note and show it with ui_focus view "stage".',
+  inputSchema: { project, id: charId, text: z.string().optional(), tree: treeId.optional(), node: z.string().optional(), reply_to: z.string().optional(), resolve: z.boolean().optional(), by },
+}, wrap((a) => op('character_note_add', a)));
+mcp.registerTool('look_create', {
+  title: 'Propose a look (costume) for a character',
+  description: 'Add a look to a character\'s looks[] with status "review" (only the director approves looks, in the page). name, garments, colors, description; from_item = the breakdown wardrobe item it comes from. Its tree "look:<id>" starts from the approved identity: then propose the look sheet with request_create (kind "look-sheet", char {id, tree: "look:<id>", from: <approved identity node>, kind: "look"}, refs = the identity image + garment refs).',
+  inputSchema: { project, id: charId, name: z.string(), look_id: z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/).optional(), garments: z.array(z.string()).optional(), colors: z.array(z.string()).optional(),
+    description: z.string().optional(), from_item: z.string().optional(), by },
+}, wrap((a) => op('look_create', a)));
+
 // ------------------------------------------------------------------ approvals
 mcp.registerTool('approvals_get', {
   title: 'Get approval states', description: 'Approval records {"kind:id": {state, by, at, comment?}} with counts per state. States: draft, review, changes, approved, locked; an item without a record is draft. Filter by keys, key prefix ("shot:", "use:"), or state ("changes" = the director wants something redone).',
@@ -339,7 +364,11 @@ mcp.registerTool('request_create', {
   title: 'Propose a generation', description: 'Add a DRAFT request to the queue (it costs nothing yet). The director reviews it in Review > Queue and approves it; only then may it run. Give a concrete prompt, the reference files, the tool/model you would use and an honest est_cost in USD.',
   inputSchema: { project, kind: z.string().describe('regenerate, new-costume, new-variant, generate, choose-take, set-in, edit-timing, swap-costume, section-variant, import…'),
     target: z.string().optional().describe('Item key it is about, e.g. "use:G05@20158", "character:ada".'), prompt: z.string(), refs: z.array(z.string()).optional(),
-    est_cost: z.number().min(0).describe('Estimated USD.'), tool: z.string().optional().describe('Provider/model you would use.'), look: z.object({}).passthrough().optional(), by },
+    est_cost: z.number().min(0).describe('Estimated USD.'), tool: z.string().optional().describe('Provider/model you would use.'), look: z.object({}).passthrough().optional(), by,
+    char: z.object({ id: charId, tree: treeId.optional(), from: z.string().nullable().optional().describe('The node the edit starts from (null = the identity sheet from the base).'),
+      kind: z.enum(['identity', 'edit', 'look']).optional(), text: z.string().optional(), sketch: z.string().optional().describe('Sketch id (sketch_save) drawn over the node image.'),
+      png: z.string().optional(), mask: z.string().optional(), pins: z.array(z.object({ n: z.number().optional(), x: z.number(), y: z.number(), text: z.string() })).optional() }).optional()
+      .describe('Stage 4: the character tree this generation grows (character_iteration_add reads it back once the request is done).') },
 }, wrap((a) => op('request_create', a)));
 mcp.registerTool('request_update', {
   title: 'Advance or edit a request',

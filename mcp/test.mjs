@@ -6,7 +6,9 @@
 // official SDK client and exercises: tools/list, song_get, timeline_query, note_add + note_resolve, request_create +
 // request_update (the approval and cap rules, done -> cost + media), snapshot_save + snapshot_restore, ui_focus, the guided
 // flow (stages_get / stage_update, lyrics_* on a derived and on a new lyrics-only project, song_attach; stage 2: intake_*,
-// script_get / scenes_update (derived from script.json, versions, snap, restore, diff, status rules), scene notes, sketches; stage 3: breakdown_* (versions, statuses, notes, the page-only promotion)),
+// script_get / scenes_update (derived from script.json, versions, snap, restore, diff, status rules), scene notes, sketches; stage 3: breakdown_* (versions, statuses, notes, the page-only promotion); stage 4: character_* and look_create (the
+// page-only base / choices / approvals, requests linked to a tree, nodes from approved runs only, locks, looks, notes, an
+// agent restore)),
 // resources, the director-session prompt, the guard rules (edit voids approval, director-only approvals, media kind,
 // CSRF / Host / token checks, path traversal and the PRIVATE rule) and the offline (files only) mode. The temp folder
 // is removed at the end, whatever happens; data/demo must be byte-identical afterwards.
@@ -109,7 +111,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     'media_list', 'media_add', 'notes_list', 'note_add', 'note_resolve', 'approvals_get', 'approve', 'request_changes', 'requests_list', 'request_create', 'request_update', 'costs_get', 'ui_focus',
     'stages_get', 'stage_update', 'lyrics_get', 'lyrics_update', 'lyrics_versions', 'lyrics_note_add', 'lyrics_note_resolve', 'song_attach',
     'script_get', 'scenes_update', 'scene_note_add', 'scene_note_resolve', 'intake_get', 'intake_answer', 'sketch_save', 'sketch_get', 'sketch_list',
-    'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve'];
+    'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve', 'character_get', 'character_iteration_add', 'character_note_add', 'look_create'];
   check('tools/list has every tool', EXPECT.every(t => tools.includes(t)), { count: tools.length, missing: EXPECT.filter(t => !tools.includes(t)) });
   const schemaOk = (await mcp.listTools()).tools.every(t => t.description?.length > 40 && t.inputSchema?.type === 'object');
   check('every tool has a description and a JSON schema', schemaOk);
@@ -438,6 +440,96 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const st3 = await call(mcp, 'stages_get');
   check('stages_get: the breakdown counts items and asks; the characters stage lists the items not yet entities',
     st3.facts?.items === 6 && st3.facts.itemsToPromote === 4 && st3.stages.find(x => x.id === 'characters').blockers_all.some(b => /4 breakdown items not yet entities/.test(b)), { facts: st3.facts });
+}
+
+// 11e. stage 4 (characters): the base and every choice are the page's; generations are requests; an agent registers
+// the output of an approved, done request as a node; keep / branch / revert and approvals stay the director's
+{
+  const pageAct = (body) => post(`/api/op/character_act?project=${PROJECT}`, body, { origin: URL_ });
+  const agentAct = (body) => post(`/api/op/character_act?project=${PROJECT}`, body);
+  const approveInPage = async (rid) => { const cur = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')); cur.items.find(r => r.id === rid).status = 'approved'; return post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur }); };
+  const out = (f, rgb) => { fs.mkdirSync(path.join(D, 'media/gen'), { recursive: true }); fs.writeFileSync(path.join(D, 'media/gen', f), Buffer.from(tinyPngB64(32, 32, rgb), 'base64')); return `media/gen/${f}`; };
+  const runReq = async (rid, file) => { for (const s of ['queued', 'running']) await call(mcp, 'request_update', { id: rid, status: s }); return call(mcp, 'request_update', { id: rid, status: 'done', outputs: [file], actual_cost_usd: 0 }); };
+  const l0 = await call(mcp, 'character_get');
+  check('character_get (no id): every character with its stage-4 status', l0.characters?.some(c => c.id === 'bo' && c.status === 'base' && c.label === 'needs a base') && l0.characters.some(c => c.id === 'ada'), { chars: l0.characters?.map(c => [c.id, c.status]) });
+  // the base: the page's (with its Origin); the agent surface is refused, over HTTP and offline
+  const base = { text: 'tall, calm, counts the bars', refs: [{ path: 'catalog/body/mannequin_neutral_turnaround.jpg', source: 'catalog', licence: 'CC0-1.0' }, { path: 'media/still/bo_face.jpg', source: 'media' }] };
+  const pb = await pageAct({ id: 'bo', act: 'base', base }), pbA = await agentAct({ id: 'bo', act: 'base', base });
+  let offAct = null; try { S.ops.character_act(PROJECT, { id: 'bo', act: 'base', base }); } catch (e) { offAct = e.code; }
+  const badRef = await pageAct({ id: 'bo', act: 'base', base: { refs: [{ path: 'catalog/../package.json', source: 'catalog' }] } });
+  const pubPhoto = await pageAct({ id: 'bo', act: 'base', base: { refs: [{ path: 'media/still/bo_face.jpg', source: 'photo' }] } });
+  check('the base is the page\'s (character_act, via page): the agent surface gets 403; bad / escaping refs refused; a "photo" ref must be private',
+    pb.status === 200 && pb.body?.base?.refs?.length === 2 && pb.body.base.via === 'page' && pbA.status === 403 && offAct === 403 && badRef.status === 400 && pubPhoto.status === 400 && !(await mcp.listTools()).tools.some(t => t.name === 'character_act' || t.name === 'ref_upload'),
+    { pb: pb.status, pbA: pbA.status, offAct, badRef: badRef.status, pubPhoto: pubPhoto.status });
+  // an identity request (draft) linked to the tree; bad links refused
+  const r1 = await call(mcp, 'request_create', { kind: 'identity-sheet', prompt: 'identity sheet of Bo', est_cost: 0.08, tool: 'fal-ai/flux-pro/kontext/max/multi', refs: base.refs.map(r => r.path), char: { id: 'bo', tree: 'identity', kind: 'identity' } });
+  const rBad = await call(mcp, 'request_create', { kind: 'identity-sheet', prompt: 'x', est_cost: 0.08, char: { id: 'nobody' } });
+  const rBad2 = await call(mcp, 'request_create', { kind: 'character-edit', prompt: 'x', est_cost: 0.04, char: { id: 'bo', from: 'n99' } });
+  const early = await call(mcp, 'character_iteration_add', { id: 'bo', request: r1.id });
+  const ap = await approveInPage(r1.id);
+  const notDone = await call(mcp, 'character_iteration_add', { id: 'bo', request: r1.id });
+  const d1 = await runReq(r1.id, out('bo_n1.png', [40, 120, 90]));
+  const n1 = await call(mcp, 'character_iteration_add', { id: 'bo', request: r1.id, note: 'placeholder' });
+  const dup = await call(mcp, 'character_iteration_add', { id: 'bo', request: r1.id });
+  const notOut = await call(mcp, 'character_iteration_add', { id: 'bo', request: r1.id, image: 'media/still/ada_face.jpg' });
+  const wrongChar = await call(mcp, 'character_iteration_add', { id: 'ada', request: r1.id });
+  check('a generation is a draft request with a char link (target character:bo); bad links refused; character_iteration_add only after a page approval and done; n01 is the head; idempotent; only the request\'s outputs; only its character',
+    r1.status === 'draft' && r1.target === 'character:bo' && r1.char?.tree === 'identity' && /404/.test(rBad.error || '') && /404/.test(rBad2.error || '') && /403/.test(early.error || '') && ap.status === 200
+    && /409/.test(notDone.error || '') && d1.request?.status === 'done' && n1.node?.id === 'n01' && n1.head === 'n01' && n1.node.via === 'agent' && dup.duplicate === true && /400/.test(notOut.error || '') && /400/.test(wrongChar.error || ''),
+    { r1: r1.char, rBad: rBad.error, rBad2: rBad2.error, early: early.error, notDone: notDone.error, n1: n1.node?.id, dup: dup.duplicate, notOut: notOut.error });
+  // an edit: a sketch over n01 with a mask and a pin; the request carries them; n02 waits for the director
+  const sk = { w: 32, h: 32, underlay: { src: 'media/gen/bo_n1.png' }, strokes: [{ t: 'pen', c: '#ff3b30', size: 3, o: 1, pts: [[4, 4, 0.5], [20, 20, 0.5]] }], mask: [{ t: 'paint', size: 8, pts: [[10, 10, 1]] }], pins: [{ n: 1, x: 12, y: 8, text: 'necklace here, silver' }] };
+  const sv = await call(mcp, 'sketch_save', { id: 'bo-edit1', sketch: sk, png: tinyPngB64(32, 32), mask: tinyPngB64(32, 32, [255, 255, 255]), links: { entities: ['bo'] } });
+  const r2 = await call(mcp, 'request_create', { kind: 'character-edit', prompt: 'add a silver necklace', est_cost: 0.05, tool: 'fal-ai/flux-pro/v1/fill', refs: ['media/gen/bo_n1.png', sv.png, sv.mask],
+    char: { id: 'bo', from: 'n01', text: 'add a silver necklace', sketch: 'bo-edit1', png: sv.png, mask: sv.mask, pins: sk.pins } });
+  await approveInPage(r2.id); await runReq(r2.id, out('bo_n2.png', [200, 200, 200]));
+  const n2 = await call(mcp, 'character_iteration_add', { id: 'bo', request: r2.id });
+  const g = await call(mcp, 'character_get', { id: 'bo' });
+  const rq2 = g.requests?.find(r => r.id === r2.id);
+  check('an edit request carries the text, the pins and the sketch: character_get gives the sketch PNG / mask (absolute files) and the pins; n02 (parent n01) waits for the director',
+    r2.char?.kind === 'edit' && r2.char.pins?.[0]?.text === 'necklace here, silver' && n2.node?.parent === 'n01' && n2.waiting_for_director === true && g.waiting_for_director?.includes('n02')
+    && fs.existsSync(rq2?.sketch?.files?.png || '') && fs.existsSync(rq2?.sketch?.files?.mask || '') && rq2.pins[0].n === 1 && rq2.ref_files?.every(Boolean) && g.base?.refs?.[0]?.file && fs.existsSync(g.base.refs[0].file)
+    && g.trees?.[0]?.nodes?.length === 2 && g.trees[0].branches?.[0]?.nodes?.join() === 'n01,n02' && g.trees[0].nodes[0].file,
+    { n2: n2.node && { id: n2.node.id, parent: n2.node.parent }, waiting: g.waiting_for_director, sketch: rq2?.sketch, branches: g.trees?.[0]?.branches });
+  // keep / branch / revert and approve are the page's
+  const cA = await agentAct({ id: 'bo', act: 'choose', node: 'n02', choice: 'kept' });
+  const cP = await pageAct({ id: 'bo', act: 'choose', node: 'n02', choice: 'kept' });
+  const aA = await agentAct({ id: 'bo', act: 'approve', tree: 'identity' });
+  const uA = await call(mcp, 'entity_upsert', { kind: 'character', id: 'bo', fields: { iter: { trees: { identity: { head: 'n01', approved: 'n01' } } } } });
+  const aP = await pageAct({ id: 'bo', act: 'approve', tree: 'identity' });
+  const r3 = await call(mcp, 'request_create', { kind: 'character-edit', prompt: 'messier hair', est_cost: 0.04, char: { id: 'bo', from: 'n02', text: 'messier hair' } });
+  await approveInPage(r3.id); await runReq(r3.id, out('bo_n3.png', [90, 90, 90]));
+  const locked = await call(mcp, 'character_iteration_add', { id: 'bo', request: r3.id });
+  const E = JSON.parse(fs.readFileSync(path.join(D, 'entities/characters/bo.json'), 'utf8'));
+  check('keep / approve are the page\'s: the agent gets 403 and cannot write the trees through entity_upsert (ignored); the page keeps n02 and approves the identity (locked: a new node is refused, 409)',
+    cA.status === 403 && cP.status === 200 && cP.body?.head === 'n02' && aA.status === 403 && uA.warnings?.some(w => /iter ignored/.test(w)) && aP.status === 200 && aP.body?.approved === 'n02'
+    && /409/.test(locked.error || '') && E.iter.trees.identity.approved === 'n02' && E.iter.trees.identity.via === 'page' && E.identity_sheet === 'media/gen/bo_n2.png' && E.iter.log.some(l => l.act === 'approve' && l.via === 'page'),
+    { cA: cA.status, aA: aA.status, uA: uA.warnings, aP: aP.body, locked: locked.error, identity: E.iter.trees.identity });
+  // looks: the agent proposes one (review), cannot approve it; its tree starts from the approved identity
+  const lc = await call(mcp, 'look_create', { id: 'bo', name: 'Night shift', garments: ['grey overalls', 'headlamp'] });
+  const lcDup = await call(mcp, 'look_create', { id: 'bo', name: 'Night shift' });
+  const lcAp = await call(mcp, 'entity_upsert', { kind: 'character', id: 'bo', look: { id: 'night-shift', status: 'approved' } });
+  const r4 = await call(mcp, 'request_create', { kind: 'look-sheet', prompt: 'Bo in night shift', est_cost: 0.08, refs: ['media/gen/bo_n2.png'], char: { id: 'bo', tree: 'look:night-shift', from: 'n02', kind: 'look' } });
+  await approveInPage(r4.id); await runReq(r4.id, out('bo_n4.png', [30, 30, 140]));
+  const n4 = await call(mcp, 'character_iteration_add', { id: 'bo', request: r4.id });
+  const no1 = await call(mcp, 'character_note_add', { id: 'bo', node: n4.node?.id, text: 'mcp: headlamp too bright?' });
+  const no2 = await call(mcp, 'character_note_add', { id: 'bo', reply_to: no1.id, text: 'mcp: toned down', resolve: true });
+  const g2 = await call(mcp, 'character_get', { id: 'bo', notes: 'all' });
+  check('look_create: status review (a duplicate 409; approving it through entity_upsert 403); its look sheet roots the look tree from the approved identity (from_identity n02, head); notes on a node, a reply, resolved',
+    lc.status === 'review' && lc.tree === 'look:night-shift' && /409/.test(lcDup.error || '') && /403/.test(lcAp.error || '') && n4.node?.tree === 'look:night-shift' && n4.node.from_identity === 'n02' && n4.node.parent === null && n4.head === n4.node.id
+    && no1.via === 'agent' && no1.tree === 'look:night-shift' && no2.status === 'resolved' && no2.replies.length === 1 && g2.looks?.find(l => l.id === 'night-shift')?.status === 'review' && g2.status?.key === 'looks',
+    { n4: n4.error || (n4.node && { tree: n4.node.tree, from: n4.node.from_identity, parent: n4.node.parent, head: n4.head }), no1: no1.error || no1.tree, no2: no2.error || no2.status, status: g2.status?.key, look: g2.looks?.find(l => l.id === 'night-shift')?.status });
+  // a snapshot restored by the agent brings back no approval and keeps the nodes made since
+  const snap = await call(mcp, 'snapshot_save', { message: 'mcp: characters' });
+  await pageAct({ id: 'bo', act: 'unlock', tree: 'identity' });
+  const r5 = await call(mcp, 'request_create', { kind: 'character-edit', prompt: 'scarf', est_cost: 0.04, char: { id: 'bo', from: 'n02', text: 'scarf' } });
+  await approveInPage(r5.id); await runReq(r5.id, out('bo_n5.png', [120, 30, 30]));
+  const n5 = await call(mcp, 'character_iteration_add', { id: 'bo', request: r5.id });
+  const rs = await call(mcp, 'snapshot_restore', { snapshot: snap.id });
+  const E2 = JSON.parse(fs.readFileSync(path.join(D, 'entities/characters/bo.json'), 'utf8'));
+  check('an agent\'s snapshot restore brings no identity approval back and keeps the node made since (undecided)',
+    !!snap.id && n5.node?.id && rs.restored === snap.id && !E2.iter.trees.identity.approved && E2.iter.nodes.some(n => n.id === n5.node.id && n.choice === null) && rs.kept_since_snapshot?.some(k => /approval not restored/.test(k)),
+    { kept: rs.kept_since_snapshot, identity: E2.iter.trees.identity, nodes: E2.iter.nodes.map(n => n.id) });
 }
 
 // 12. offline: the server is unreachable -> the same tools work on the files; ui_focus explains
