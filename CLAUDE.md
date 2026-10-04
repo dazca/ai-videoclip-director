@@ -34,6 +34,7 @@ outside the project folder, extra PRIVATE path rule. Env vars win: `WB_PROJECT`,
 | `tabs/` | one module per view; `tabs/registry.js` lists pages and sub-views |
 | `importers/` | `new_project.mjs` (song + lyrics -> project), `azemar_*` (the owner's production, kept as a worked example) |
 | `tools/` | `verify.mjs` (UI suite), `make_demo.mjs`, `chrome.mjs` |
+| `exporters/hyperframes-html/` | HTML package of a HyperFrames composition: `export.mjs`, `verify.mjs`, `serve.mjs` (see Export) |
 | `data/<project>/` | one folder per project; only `data/_template/` and `data/demo/` are in git |
 
 ## Project files (`data/<project>/`)
@@ -57,6 +58,25 @@ relative to the media base; any other path is relative to the project folder. Fu
 
 Editing by hand: read the file, change it, **bump `rev`** on the shared files, write it whole via temp file + rename.
 The server watches the folder and every open page reloads the changed file. Keep ids stable and `t0 < t1`.
+
+## Export
+
+`exporters/hyperframes-html/` packages a HyperFrames composition **as itself**, not as a new render. Files are
+byte-identical in the same layout (`outDir/composition/`), the official player is vendored (`outDir/index.html`,
+`_hyperframes/`), and `manifest.json` records per-asset facts and the usage measured headless: visible/audible
+timeline ranges and media ranges played.
+
+```
+node exporters/hyperframes-html/export.mjs <compositionDir> <outDir> [--entry index.html] [--sample-fps 10]
+node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 12]
+```
+
+- Never edit composition files in the package. The exporter only rewrites root-absolute paths, and the player's CDN
+  runtime URL to the vendored runtime. Each rewrite is listed in `manifest.rewrites`.
+- No trimming, re-encoding, custom boot screens or prefetch logic in the package. Compression is a separate, later
+  step that reads `manifest.json` and must pass `verify.mjs` against the same render again.
+- `manifest.fonts.system_fonts` lists text that relies on fonts installed on the viewer's machine. Report it when
+  delivering.
 
 ## Rules (enforced by the MCP tools; follow them by hand too)
 

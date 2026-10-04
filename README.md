@@ -200,6 +200,22 @@ open pages over SSE; returns `{pages, delivered}` once they ack via `POST /api/u
 `POST /api/reveal {path}` (Explorer at a media file). Writes are temp file + rename with retries (Windows locks);
 small files are served in one read so no handle stays open.
 
+## Export: HTML package of a HyperFrames composition (`exporters/hyperframes-html/`)
+
+The film's composition itself, packaged 1:1 to play in any browser: every file it uses is copied byte-identical in its
+own layout under `composition/`, with the official `<hyperframes-player>` (vendored, no CDN) as `index.html`, and a
+`manifest.json`. The manifest has every asset's size, hash, codec, resolution, fps, bitrate and alpha, and where in the
+timeline each one is visible or audible and which media time it plays, all measured headless. That is the input for a
+later, separate compression step (HandBrakeCLI / ffmpeg presets).
+
+```
+node exporters/hyperframes-html/export.mjs <compositionDir> <outDir>            # [--entry index.html] [--sample-fps 10]
+node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4>      # frames vs the render, failed requests
+node exporters/hyperframes-html/serve.mjs  <outDir>                             # http://127.0.0.1:8150/
+```
+
+Details: `exporters/hyperframes-html/README.md`.
+
 ## Extension API (for tab modules; full reference at the top of `core/commands.js`)
 
 ```js
