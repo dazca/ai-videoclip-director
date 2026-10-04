@@ -76,7 +76,7 @@ export class Timeline {
 
   onData(what) {
     if (what === 'all') { const t = this.timeAtRead(); this.destroy(); this.build(); this.scrollToTime(t); return; }
-    if (what === 'approvals' || what === 'notes') {
+    if (what === 'approvals' || what === 'notes' || what === 'scenes') {
       for (const c of this.cols) if (c.def.refresh && c.def.refresh(c, what)) c.dirty = true;
       this.relayout({});
     }

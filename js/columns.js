@@ -3,6 +3,7 @@
 // A lane column has draw(c, env). Adding a column = adding one object here.
 import { el, fmt, secColor, upperBound } from './timeline.js';
 import { mediaUrl, esc } from './store.js';
+import { currentScript, sceneStatus } from './scenes.js';
 
 const LH = 14;              // lyric visual line height (px), 12 px type
 const RAMP = Array.from({ length: 32 }, (_, i) => { const a = i / 31; const l = 14 + a * 70; return `hsl(210, ${12 + a * 20}%, ${l}%)`; });
@@ -156,6 +157,25 @@ export function makeColumns(tl, store) {
       build(c) {
         addItems(c, store.script.lines, (s) => `<div class="sc" data-sel="script:${esc(s.id)}" title="${esc(s.lyric)}"><i class="m m-${esc(String(s.mode ?? '').replace('→', ''))}">${esc(s.mode)}</i><span class="st s-${esc(st('script:' + s.id))}" data-act="st" data-k="script:${esc(s.id)}"></span>${esc(s.action)}</div>`);
       }, act: seekAct, refresh: refreshChips },
+
+    // ---------------------------------------------------------------- scenes (stage 2, scenes.json): the scene on the left,
+    // its beats on the right, each at its own time; double-click opens the script stage on that scene
+    { id: 'scenes', title: 'scenes', kind: 'text', w: 170, mode: 'follow', stripColor: '#c3b2e8',
+      build(c) {
+        const doc = store.scenes, v = currentScript(doc), list = [];
+        for (const s of v?.scenes || []) {
+          list.push({ t0: s.t0, t1: s.t1, s, k: 0 });
+          s.beats.forEach((b, i) => list.push({ t0: b.t, t1: Math.max(b.t + 1, s.beats[i + 1]?.t ?? s.t1), b, s, k: 1 }));
+        }
+        list.sort((a, b) => a.t0 - b.t0 || a.k - b.k);
+        addItems(c, list, (x) => x.b
+          ? `<div class="scb" data-act="seek" data-t="${num(x.b.t)}" data-sel="scene:${esc(x.s.id)}" title="${fmt(x.b.t, true)} · ${esc(x.s.id)}/${esc(x.b.id)}: ${esc(x.b.text)}">${esc(x.b.text) || '·'}</div>`
+          : `<div class="scn s-${esc(sceneStatus(doc, x.s.id))}" data-act="seek" data-t="${num(x.s.t0)}" data-sel="scene:${esc(x.s.id)}" title="${esc(x.s.id)} · ${fmt(x.s.t0, true)}–${fmt(x.s.t1, true)} · ${esc(x.s.title)}\n${esc(x.s.text)}\n(double-click: open in the script stage)"><b>${esc(x.s.title || x.s.id)}</b>${x.s.sketches.length ? `<i>✎${x.s.sketches.length}</i>` : ''}<span>${esc(x.s.text)}</span></div>`, 'scit');
+        c.items.forEach((it) => it.el.classList.add(it.x.b ? 'beat' : 'scene'));
+      },
+      act: seekAct,
+      refresh(c, what) { if (what !== 'scenes') return false; this.build(c); return true; },
+      dblclick(c, t) { const s = currentScript(store.scenes)?.scenes.find(x => x.t0 <= t && t < x.t1); window.WB?.stages?.open('script').then(() => s && window.WB.script?.focus(s.id)); } },
 
     // ---------------------------------------------------------------- shots (storyboard, render frame)
     { id: 'shots', title: 'shots', kind: 'text', w: 104, mode: 'follow', stripColor: '#c9ccd1',

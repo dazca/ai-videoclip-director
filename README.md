@@ -67,7 +67,9 @@ Tools: `status`, `projects` (list/create/duplicate/open), `snapshot_save` / `sna
 `timeline_query`, `shots_list` / `shot_get` / `shot_update`, `entities_list` / `entity_get` / `entity_upsert`, `media_list` /
 `media_add`, `notes_list` / `note_add` / `note_resolve`, `approvals_get` / `approve` / `request_changes`, `requests_list` /
 `request_create` / `request_update`, `costs_get`, `ui_focus`; the guided flow: `stages_get` / `stage_update`,
-`lyrics_get` / `lyrics_update` / `lyrics_versions` / `lyrics_note_add` / `lyrics_note_resolve`, `song_attach`. Resources: the README, `CLAUDE.md`, the file formats, the
+`lyrics_get` / `lyrics_update` / `lyrics_versions` / `lyrics_note_add` / `lyrics_note_resolve`, `song_attach`; stage 2:
+`intake_get` / `intake_answer`, `script_get` / `scenes_update`, `scene_note_add` / `scene_note_resolve`, `sketch_save` /
+`sketch_get` / `sketch_list` (image paths + pins, so the agent can look at the director's drawings). Resources: the README, `CLAUDE.md`, the file formats, the
 skill, and each project's JSON files. Prompt: `director-session`. Rules the tools enforce: an agent cannot approve on
 its own, a request runs only after the director approved it, queueing is refused above the cost cap, and `done` needs
 the output files and the actual cost (recorded in `costs.json`, outputs indexed as media). The agent guide is
@@ -97,6 +99,20 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   (MCP `lyrics_get` lists it under `asks_for_agent`): nothing is generated, nothing is paid. **Versions**: the list,
   A/B -> side-by-side word diff (or click a row: it vs the one before; `diff` in the bar compares your unsaved edits),
   **Restore** = a new version copied from the old one. **Add song…** attaches the song file.
+- **Script stage** (stage 2): the song as a list in time order, each **scene** next to the lyric lines it covers and
+  every unscripted stretch as an amber **gap** row (`+ scene here`); the bar shows the version, the scene count and
+  how much of the song is scripted. Click a scene to edit it in place: title, **from / to** (m:ss.mmm; snapped to
+  lines, bars or sections with the bar's `snap`; `from = playhead`), the description, timed **beats** (`+ beat`), and
+  **sketches**: `+ new sketch` opens the sketch tool inline under the scene (Ctrl+S saves the drawing: `sketches/<id>`
+  .json/.png/.mask.png, a media item of kind sketch), `window` opens it floating, `copy` then `paste` on another
+  scene makes a copy for that scene. The scene status (**draft / needs you / ok**) is saved at once; ok is the
+  director's. Edits are a draft (kept in this browser) until **Save version** (Ctrl+Enter); a new sketch on a clean
+  draft is saved as a version by itself. **Fill the gaps** writes an ask for the agent listing the unscripted
+  ranges (`script_get` `asks_for_agent`); the agent answers with `scenes_update` and the page follows live. Side
+  panel: **Intake** (the nine starting questions, answered here or in a chat; "asked in chat" marks; **Ask for a
+  draft**), **Notes** (per scene or all, threads, resolve, Ask the agent about the open scene or the whole script),
+  **Versions** (A/B side-by-side diff with the scenes added / changed / removed, restore). Right-click a scene for its
+  commands; double-click a scene in the timeline Scenes column to open it here.
 - **Top bar** (18 px; `` ` `` hides / shows it; **Esc never hides it**: Esc only closes menus, dialogs, the palette and
   the cheat sheet): menu bar (File Edit View Timeline Generate Window Help; F10 opens it from the keyboard), the
   **page tabs**, project name, transport, `⌘` = command palette, `⌃` = hide the bar, `⚙` = Settings (far right).
@@ -159,6 +175,7 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
 | stems | lane | hidden | vocals, backing, bass, drums |
 | energy | lane | on | RMS (24 fps) + amber target overload ladder 0-10 per section |
 | script | text, drive | on | W/S/B + action per lyric line (TREATMENT §2), approval dot |
+| scenes | text, follow | on | stage 2 (`scenes.json`): each scene (title, text, sketch count, status colour) on the left, its beats on the right, each at its own time; double-click = open it in the script stage |
 | shots | text, follow | on | storyboard shot, frame of the v1 render, kind (screen/split/world), status dot |
 | clips | text, follow | on | world-clip uses (clip.take +in-point), frame at the in-point, location colour; overlaps share width |
 | cast | text, follow | on | D, H, A1-A8 chips + location letters per shot |
@@ -195,6 +212,8 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `project.json` | `{title, created, from?}` |
 | `stages.json` | `{rev, stages[{id: lyrics/script/breakdown/characters/scenery/storyboard/final, status: empty/in_progress/needs_you/done, done_by?, via?, updated?, updated_by?, blockers[], note?}]}`: the guided flow (shared with the page; only the page sets `done`, stamped `done_by: "director", via: "page"`); missing = derived (stages with content count as done) |
 | `lyrics.json` | `{rev, current: "v3", seq, versions[{id, n, created, by, via, message, from?, sections[{id, label, lines[{id, text, t?}]}]}], notes[{id, line, w: [first, last word] \| null, quote, text, by, via, to?: "agent", kind?, status, at, version, replies[{id, text, by, via, at}]}]}`: stage 1. Versions are immutable (a save appends one and moves `current`; the server keeps its copy of every saved version); line ids are stable across versions and are the `song.json` line ids (a missing file reads as v1 derived from `song.json`). The server re-syncs `song.json` lines on every new current version |
+| `scenes.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, scenes[{id: "sc03", t0, t1, title, text, line_ids[], beats[{id: "b1", t, text}], sketches[ids]}]}], states{<scene>: {status: draft/needs_you/ok, by, via, at}}, notes[{id: "sn01", scene \| null, beat?, text, by, via, to?: "agent", kind?: request/fill_gaps, gaps?, status, at, version, replies[]}], intake{<question>: {text, by, via, at, asked?}}}`: stage 2, the script draft (shared with the page). Versions are immutable (a save appends; restore copies); statuses and intake answers live outside them; only the page sets a scene `ok`. A missing file reads as v1 derived from `script.json` (`stages` -> scenes, `lines` -> beats), which is never rewritten. Shapes and logic: `js/scenes.js` |
+| `sketches/<id>.json` / `.png` / `.mask.png` | a sketch: `{id, w, h, paper, underlay{src, opacity, fit}, strokes[], mask[], pins[{n, x, y, text}], title?, created, updated, by, via}` (format: `core/sketch/sketch.js`), the flattened image and the edit mask; written by `sketch_save`, registered in `media.json` (`kind: "sketch"`, `sketch`, `mask`, `scenes[]`, `pins`); under `private/sketches/` when drawn over a private image; not snapshotted |
 | `.snapshots/<yyyymmdd-hhmmss>-<slug>/` | copies of the small JSON files (no peaks, thumbs, `_src`, settings) + `.meta.json {id, at, message, auto, files}` |
 
 ## How an agent edits them
@@ -224,7 +243,7 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 Every `/api` call takes `?project=<id>` (default: `$WB_PROJECT`, the config's `default_project`, else `demo`). The data layer is
 `lib/store.mjs`, shared with the MCP server.
 `GET /api/config` (media roots, private rule) · `GET /api/status` (pages open) · `POST /api/op/<op>` (every MCP tool op, local
-only) · `POST /api/ui {t?, range?, view?, select?, preview?, message?, play?, open_project?}` (live UI channel: pushed to the
+only; bodies up to 5 MB, `sketch_save` up to 25 MB) · `POST /api/ui {t?, range?, view?, select?, preview?, message?, play?, open_project?}` (live UI channel: pushed to the
 open pages over SSE; returns `{pages, delivered}` once they ack via `POST /api/ui/ack`) ·
 `POST /api/save/<file>` `{base_rev, data}` (409 + current file when stale) · `GET /api/events` (SSE `{project, file}`) ·
 `GET /api/projects` · `POST /api/projects/new {id, title?, lyrics?, song?, bpm?}` (with `lyrics` / `song`: the wizard's guided project) · `POST /api/projects/duplicate {from, to, reset_state?}` ·
@@ -243,7 +262,8 @@ small files are served in one read so no handle stays open.
   injects it into `index.html` / `dock.html` as `<meta name="wb-token">` (read by `core/token.js`); the page and the
   MCP server pick it up automatically. Set `WB_TOKEN` to fix it for scripts.
 - Only the page's own files are served from the workbench folder (an allow-list: `index.html`, `dock.html`, `app.js`,
-  `app.css`, `README.md`, `core/`, `js/`, `tabs/`; case-insensitive). The page shell carries a Content-Security-Policy
+  `app.css`, `README.md`, `core/`, `core/sketch/`, `js/`, `tabs/`, and the free starter catalogue `catalog/` (images,
+  `catalog.json`, `LICENSES.md`); case-insensitive). The page shell carries a Content-Security-Policy
   with `script-src 'self'` (no inline scripts, no eval; media may also be `https:` / `data:` / `blob:`); every other
   file gets a sandboxing CSP and `nosniff`, so an HTML/SVG file in a project cannot run script in the workbench origin.
   An invalid `?project=` is redirected to the default project.
@@ -264,6 +284,17 @@ small files are served in one read so no handle stays open.
   approval that is not the current one goes back to draft (listed in `kept_since_snapshot`); the current `cap_usd`
   is kept, and an agent's `snapshot_restore` brings an approved / locked item back as `review`, not approved.
   Duplicating a project sends the copy's approved / queued / running requests back to draft.
+- Guided flow: `stage_update` refuses `done` and refuses moving a done stage; a page save of `stages.json` is stamped
+  (`done_by: "director", via: "page"`). A page save of `lyrics.json` cannot rewrite a saved version nor a note's author;
+  the tools stamp `via: "agent"`.
+- Stage 2 (script): a page save of `scenes.json` cannot rewrite a saved version nor the author of an existing note,
+  status or intake answer; new versions, notes, replies, changed scene statuses and answers are stamped
+  `by: "director", via: "page"`; a malformed file is refused (400). Only the page marks a scene `ok` (`scenes_update`
+  refuses it; an agent's snapshot restore brings a lost `ok` back as `needs_you`). `sketch_save` takes ids
+  `^[a-z0-9][a-z0-9_-]{0,63}$` only (no path can leave `sketches/`), real PNGs only (signature + IHDR, image and mask),
+  and bodies up to 25 MB (every other request: 5 MB; over the limit: 413); it keeps the token / Origin / Host checks.
+  A sketch drawn over a PRIVATE underlay is written under `private/sketches/` and flagged private in `media.json`
+  (local only, never exported). Its `via` (page / agent) is provenance, not a permission.
 - Entity thumbnails and copies made from private media stay private (`thumbs/priv_*`, `private/<kind>/`).
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.

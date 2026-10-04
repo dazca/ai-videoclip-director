@@ -2,7 +2,9 @@
 // command system: palette, rebinding persistence, Ctrl+wheel zoom anchoring, context menus, undo/redo, snapshots, and
 // (v2 Part B) the preview dock, media index, privacy of exports, characters and "+ New look", and (v3) the page
 // structure (Timeline / Assets / Review + Settings gear) and the restore chevrons for a hidden top bar / column header,
-// and (v4) the guided flow: the stage rail, the new-project wizard (lyrics only, then the song added), the lyrics stage.
+// and (v4) the guided flow: the stage rail, the new-project wizard (lyrics only, then the song added), the lyrics stage,
+// and (v5) stage 2: the script draft (intake, scenes, beats, sketches inline + copy/paste, gaps, notes, versions, the
+// timeline Scenes column).
 //   node tools/verify.mjs [--project <id>] [outDir]     (default project: the server's default; npm run verify = demo)
 // Copies data/<project> (and data/_template) into a scratch data folder under the OS temp dir and starts serve.mjs
 // on free ports with WORKBENCH_DATA = that folder, so nothing under data/ is written and several runs (or a running
@@ -736,6 +738,8 @@ try {
   // 7. stage status: the page marks done (stamped director / page); the agent surface cannot, nor move a done stage
   await pg.evaluate(() => document.querySelector('.sgbar [data-st=done]').click());
   await until(() => window.WB.stages.view().stages[0].status === 'done');
+  // the page shows its change at once (optimistic); wait for the file too
+  for (let i = 0; i < 40 && readJ(NEW, 'stages.json')?.stages?.find(s => s.id === 'lyrics')?.status !== 'done'; i++) await wait(100);
   const ST2 = readJ(NEW, 'stages.json'), lyr = ST2.stages.find(s => s.id === 'lyrics');
   const agentDone = await post(`/api/op/stage_update?project=${NEW}`, { stage: 'script', status: 'done' }, BASE, H);
   const agentMove = await post(`/api/op/stage_update?project=${NEW}`, { stage: 'lyrics', status: 'in_progress' }, BASE, H);
@@ -764,6 +768,173 @@ try {
   check('wizard project deleted', del.status === 200 && !fs.existsSync(ND), del.status);
   v4.pass = Object.values(v4.checks).every(c => c.pass);
 } catch (e) { v4.checks.aborted = blockFailed('v4', e); v4.pass = false; }
+// ---------------------------------------------------------------- v5: the guided flow, phase 2 (stage 2: the script draft)
+// On the scratch copy of the project (its script.json read as v1) and on a new lyrics-only project: the intake (page
+// and agent answers), scenes next to the lyric lines, "+ scene", editing (title, text, beats), save as a version, "Fill
+// the gaps" and the agent filling them live, a sketch drawn inline and saved (files + media), copy / paste of a sketch
+// to another scene, scene notes, a version compare, the timeline Scenes column (aligned), the status rules.
+// Screenshots v5_*.png.
+const v5 = report.v5 = { checks: {} };
+try {
+  const check = (name, ok, detail) => { v5.checks[name] = { pass: !!ok, ...(detail !== undefined ? { detail } : {}) }; console.log(`v5 ${name}: ${ok ? 'PASS' : 'FAIL'}${detail !== undefined ? ' ' + JSON.stringify(detail) : ''}`); };
+  const NP = 'script-verify', ND = path.join(DATA, NP);
+  if (fs.existsSync(ND)) await post('/api/projects/delete', { id: NP });
+  const pg = await browser.newPage();
+  await pg.setViewport({ width: 1500, height: 850, deviceScaleFactor: 1 });
+  pg.on('pageerror', e => console.error('pageerror', e.message));
+  pg.on('console', m => { if (m.type() === 'error') console.error('console', m.text()); });
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  const frames = (n = 2) => pg.evaluate((k) => new Promise(r => { const f = () => (k-- > 0 ? requestAnimationFrame(f) : r()); f(); }), n);
+  const ready = async () => { await pg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 }); await frames(); };
+  const combo = async (mods, key) => { for (const m of mods) await pg.keyboard.down(m); await pg.keyboard.press(key); for (const m of mods.slice().reverse()) await pg.keyboard.up(m); };
+  const until = async (fn, arg, ms = 6000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pg.evaluate(fn, arg)) return true; await wait(100); } return false; };
+  const readJ = (p, f) => { try { return JSON.parse(fs.readFileSync(path.join(DATA, p, f), 'utf8')); } catch (e) { return null; } };
+  // the page applies its own change at once (optimistic) and saves after: wait for the file before reading it
+  const fileUntil = async (p, f, fn, ms = 5000) => { const t0 = Date.now(); let j = null; while (Date.now() - t0 < ms) { j = readJ(p, f); try { if (j && fn(j)) return j; } catch (e) { /* not there yet */ } await wait(100); } return j; };
+
+  // 1. the project's own script (script.json) opens as v1 in the script stage: scenes next to their lyric lines
+  await pg.goto(`${BASE}/?project=${encodeURIComponent(P)}`, { waitUntil: 'domcontentloaded' });
+  await pg.evaluate(() => { try { localStorage.clear(); sessionStorage.clear(); } catch (e) {} });
+  await pg.reload({ waitUntil: 'domcontentloaded' }); await ready();
+  await combo(['Alt', 'Shift'], 'Digit2'); await wait(500);
+  const own = await pg.evaluate(() => ({ stage: window.WB.stages.current(), rows: document.querySelectorAll('.scws .scrow[data-scene]').length, gaps: document.querySelectorAll('.scws .scrow.gap').length,
+    lines: document.querySelectorAll('.scws .scrow[data-scene] .scl').length, scenes: window.WB.store.scenes?.versions?.[0]?.scenes?.length || 0, derived: !!window.WB.store.scenes?.derived }));
+  await pg.screenshot({ path: path.join(OUT, 'v5_script_stage.png') });
+  check('script stage (Alt+Shift+2): the project\'s script.json reads as v1, each scene next to its lyric lines', own.stage === 'script' && own.rows === own.scenes && (own.scenes > 0 || !J('script.json').lines?.length) && own.lines >= own.rows && !fs.existsSync(path.join(DATA, P, 'scenes.json')), own);
+
+  // 2. a new lyrics-only project: an empty script, the whole song is one gap; the intake
+  const POEM = '[Verse 1]\nThe night bus hums along the coast\nI count the lights I loved the most\n\n[Chorus]\nRide, ride, the window glows\nRide, ride, nobody knows';
+  const cr = await post('/api/projects/new', { id: NP, title: 'Script Verify', lyrics: POEM });
+  const H = await writeHeaders(BASE, NP);
+  const op = async (name, body) => post(`/api/op/${name}?project=${NP}`, body, BASE, H);
+  await pg.goto(`${BASE}/?project=${NP}`, { waitUntil: 'domcontentloaded' }); await ready();
+  await pg.evaluate(() => window.WB.stages.open('script')); await wait(400);
+  const empty = await pg.evaluate(() => ({ empty: !!document.querySelector('.scws .scempty'), gaps: document.querySelectorAll('.scws .scrow.gap').length, side: document.querySelector('.scws .lytabs a.on')?.dataset.side, qs: document.querySelectorAll('.scws .scq').length }));
+  await pg.evaluate(() => { const ta = document.querySelector('.scq[data-q=mood] textarea'); ta.value = 'verify: night drive, wistful synth-pop'; ta.dispatchEvent(new Event('change', { bubbles: true })); });
+  await until(() => window.WB.store.scenes?.intake?.mood?.text === 'verify: night drive, wistful synth-pop');
+  const ag = await op('intake_answer', { answers: { kind: 'story' }, by: 'director' }), asked = await op('intake_answer', { key: 'who', asked_in_chat: true });
+  await until(() => !!window.WB.store.scenes?.intake?.who?.asked && !!document.querySelector('.scq[data-q=who] .to'));
+  await pg.screenshot({ path: path.join(OUT, 'v5_intake.png') });
+  const I1 = await fileUntil(NP, 'scenes.json', (j) => j.intake?.mood?.text && j.intake?.who?.asked);
+  check('a new project: empty script (the whole song one gap), the intake (9 questions); a page answer is director / page, an agent one via agent, "asked in chat" shows live',
+    cr.status === 200 && empty.empty && empty.gaps === 1 && empty.side === 'intake' && empty.qs === 9 && I1?.intake?.mood?.via === 'page' && I1.intake.mood.by === 'director' && I1.intake.kind?.via === 'agent' && ag.status === 200 && asked.status === 200 && !!I1.intake.who?.asked,
+    { empty, mood: I1?.intake?.mood, kind: I1?.intake?.kind?.via });
+
+  // 3. + scene, edit title / text / a beat, save a version (Ctrl+Enter)
+  await pg.evaluate(() => document.querySelector('.scbar [data-a=addscene]').click()); await wait(200);
+  const sc1 = await pg.evaluate(() => { const ws = window.WB.script.ws; const s = ws.draft[0]; return s && { id: s.id, t0: s.t0, t1: s.t1, open: ws.open, focused: document.activeElement?.classList.contains('scin-title') }; });
+  await pg.keyboard.type('verify: the bus');
+  await pg.evaluate(() => { const ta = document.querySelector('.sccard.open .scin-text'); ta.focus(); });
+  await pg.keyboard.type('Night, a bus on the coast road; the singer at the window, lights sliding past.');
+  await pg.evaluate(() => document.querySelector('.sccard.open [data-a=addbeat]').click()); await wait(100);
+  await pg.keyboard.type('verify: close-up, breath on the glass');
+  await pg.evaluate(() => { const i = document.querySelector('.sccard.open .scin-t1'); i.value = '0:13.000'; i.dispatchEvent(new Event('change', { bubbles: true })); }); await wait(100);
+  const draftEnd = await pg.evaluate(() => window.WB.script.ws.draft[0].t1);
+  await pg.evaluate(() => document.querySelector('.scbar .lymsg')?.focus()); await pg.keyboard.type('verify: first scene');
+  await combo(['Control'], 'Enter');
+  await until(() => window.WB.store.scenes?.current === 'v1' && !window.WB.script.ws.dirty);
+  const V1 = await fileUntil(NP, 'scenes.json', (j) => j.current === 'v1'), s1 = V1?.versions?.[0]?.scenes?.[0];
+  const song = readJ(NP, 'song.json'), snapped = [song.lines.flatMap(l => [l.t0, l.t1]), song.sections.flatMap(s => [s.t0, s.t1]), [0, song.duration_ms]].flat().includes(s1?.t1);
+  check('+ scene opens a new scene in the first gap (title focused); title, text, a beat, from/to snapped to lines; Ctrl+Enter saves v1 (director / page)',
+    sc1?.id === 'sc01' && sc1.open === 'sc01' && sc1.focused && V1?.current === 'v1' && V1.versions[0].via === 'page' && V1.versions[0].message === 'verify: first scene' && s1.title === 'verify: the bus' && /coast road/.test(s1.text)
+    && s1.beats.length === 1 && s1.beats[0].text === 'verify: close-up, breath on the glass' && snapped && s1.t1 === draftEnd && s1.line_ids.length >= 1,
+    { sc1, saved: s1 && { t0: s1.t0, t1: s1.t1, lines: s1.line_ids, beats: s1.beats.length }, snapped });
+
+  // 4. Fill the gaps: an ask for the agent with the gaps; the agent fills them and the page follows live
+  await pg.evaluate(() => document.querySelector('.scbar [data-a=fill]').click());
+  await until(() => window.WB.store.scenes.notes.some(n => n.kind === 'fill_gaps'));
+  await fileUntil(NP, 'scenes.json', (j) => j.notes.some(n => n.kind === 'fill_gaps'));
+  const sg = (await op('script_get', {})).body;
+  const ask = sg.asks_for_agent.find(a => a.kind === 'fill_gaps');
+  const fill = await op('scenes_update', { upsert: sg.gaps.map((g, i) => ({ t0: g.t0, t1: g.t1, title: `verify agent ${i + 1}`, text: 'agent: ' + g.lines.map(l => l.text).join(' / '), beats: [{ t: g.t0, text: 'agent beat' }] })), snap: 'lines', message: 'verify: agent filled the gaps' });
+  await op('scene_note_resolve', { id: ask?.id, reply: 'verify: filled' });
+  const live = await until(() => window.WB.store.scenes.current === 'v2' && !document.querySelector('.scws .scrow.gap') && /100% scripted/.test(document.querySelector('.scbar').textContent));
+  check('Fill the gaps: an ask (kind fill_gaps, gaps listed) for the agent; the agent covers them (scenes_update) and the page shows 100% live',
+    !!ask && JSON.stringify(ask.gaps) === JSON.stringify(sg.gaps.map(g => [g.t0, g.t1])) && fill.status === 200 && fill.body.version === 'v2' && !fill.body.gaps.length && live,
+    { ask: ask && ask.gaps, fill: fill.body, live });
+
+  // 5. a sketch drawn inline on sc01 and saved: files, media, the scene gets it (a new version: the draft was clean)
+  await pg.evaluate(() => window.WB.script.focus('sc01')); await wait(150);
+  await pg.evaluate(() => document.querySelector('.sccard.open [data-a=sknew]').click());
+  await until(() => !!window.WB.script.ws.sk);
+  const box = await pg.evaluate(() => { const c = document.querySelector('.scskhost .sk-cv'); c.scrollIntoView({ block: 'center' }); const r = c.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
+  await pg.mouse.move(box.x + box.w * 0.25, box.y + box.h * 0.6); await pg.mouse.down();
+  for (let i = 1; i <= 12; i++) await pg.mouse.move(box.x + box.w * (0.25 + i * 0.04), box.y + box.h * (0.6 - Math.sin(i / 3) * 0.2), { steps: 2 });
+  await pg.mouse.up();
+  await pg.evaluate(() => window.WB.script.ws.sk.api.addPin(640, 300, 'verify: the window, rain streaks'));
+  await wait(150);
+  await pg.screenshot({ path: path.join(OUT, 'v5_scene_sketch.png') });
+  const skId = await pg.evaluate(() => window.WB.script.ws.sk.id);
+  await pg.evaluate(() => window.WB.script.ws.sk.api.save());
+  await until(() => window.WB.store.scenes.current === 'v3' && !!window.WB.store.mediaById?.[`sketch-${window.WB.script.ws.sk?.id}`], null, 8000);
+  const V3 = await fileUntil(NP, 'scenes.json', (j) => j.current === 'v3'), skJson = readJ(NP, `sketches/${skId}.json`), med = (readJ(NP, 'media.json')?.items || []).find(m => m.id === `sketch-${skId}`);
+  check('a sketch drawn inline (stroke + pin) and saved: sketches/<id>.json + .png, media kind sketch linked to the scene, via page; the scene holds it in a new version',
+    !!skJson && skJson.strokes.length >= 1 && skJson.pins[0]?.text === 'verify: the window, rain streaks' && skJson.via === 'page' && fs.existsSync(path.join(ND, `sketches/${skId}.png`))
+    && med?.kind === 'sketch' && med.scenes.includes('sc01') && V3?.versions.at(-1).scenes.find(s => s.id === 'sc01').sketches.includes(skId) && V3.versions.at(-1).via === 'page',
+    { skId, strokes: skJson?.strokes?.length, media: med && [med.path, med.scenes], version: V3?.current });
+  // copy it from sc01, paste into sc02 (a new sketch of sc02)
+  await pg.evaluate(() => document.querySelector('[data-a=skclose]').click()); await wait(150);
+  await pg.evaluate(() => document.querySelector('.scrow[data-scene=sc01] [data-a=skcopy]').click()); await wait(300);
+  await pg.evaluate(() => window.WB.script.focus('sc02')); await wait(150);
+  await pg.evaluate(() => document.querySelector('.scrow[data-scene=sc02] [data-a=skpaste]').click());
+  await until(() => window.WB.store.scenes.current === 'v4', null, 8000); await wait(400);
+  const V4 = await fileUntil(NP, 'scenes.json', (j) => j.current === 'v4'), pasted = V4?.versions.at(-1).scenes.find(s => s.id === 'sc02')?.sketches?.[0], pj = pasted && readJ(NP, `sketches/${pasted}.json`);
+  await pg.screenshot({ path: path.join(OUT, 'v5_sketch_pasted.png') });
+  check('copy a sketch from one scene, paste into another: a new sketch (own id, same strokes and pins) saved for sc02', !!pasted && pasted !== skId && pj?.strokes?.length === skJson?.strokes?.length && pj.pins.length === 1 && fs.existsSync(path.join(ND, `sketches/${pasted}.png`)),
+    { pasted, strokes: pj?.strokes?.length });
+
+  // 6. notes: an agent note on a scene shows live; the director replies and asks the agent
+  const an = await op('scene_note_add', { scene: 'sc01', text: 'verify agent: should the bus pass under the bridge on the chorus downbeat?' });
+  await pg.evaluate(() => document.querySelector('.scws .lytabs [data-side=notes]').click());
+  const liveNote = await until(() => !!document.querySelector('.scws .lynote .who.ag'));
+  await pg.evaluate(() => { const i = document.querySelector('.scws .lynote .lyrep'); i.style.display = 'block'; i.focus(); });
+  await pg.keyboard.type('verify reply: yes, on the downbeat'); await pg.keyboard.press('Enter');
+  await pg.evaluate(() => { window.WB.script.focus('sc01'); const ta = document.querySelector('.scws .lyask textarea'); ta.value = 'verify: add a beat for the bridge'; document.querySelector('.scws .lyask [data-a=ask]').click(); });
+  await until(() => window.WB.store.scenes.notes.some(n => n.text === 'verify: add a beat for the bridge'));
+  await wait(200);
+  await pg.screenshot({ path: path.join(OUT, 'v5_notes.png') });
+  const N = (await fileUntil(NP, 'scenes.json', (j) => j.notes.some(n => n.text === 'verify: add a beat for the bridge') && j.notes.find(n => n.id === an.body?.id)?.replies?.length)).notes, nn = N.find(n => n.id === an.body?.id), ask2 = N.find(n => n.text === 'verify: add a beat for the bridge');
+  check('scene notes: an agent note arrives live; a reply and an ask from the page (scene-bound, director / page)', liveNote && nn?.replies?.[0]?.via === 'page' && ask2?.to === 'agent' && ask2.scene === 'sc01' && ask2.via === 'page',
+    { liveNote, reply: nn?.replies?.[0], ask: ask2 && [ask2.scene, ask2.via] });
+
+  // 7. versions: a side-by-side diff v1 -> current with the scene changes
+  await pg.evaluate(() => { document.querySelector('.scws .lytabs [data-side=versions]').click(); });
+  await pg.evaluate(() => { document.querySelector('.scws .lyv[data-v=v1] [data-ab=a]').click(); document.querySelector(`.scws .lyv[data-v=${window.WB.store.scenes.current}] [data-ab=b]`).click(); document.querySelector('.scws .lyvh [data-a=ab]').click(); }); await wait(200);
+  const diff = await pg.evaluate(() => ({ cols: document.querySelectorAll('.scws .lydc > div').length, add: document.querySelectorAll('.scws .lydr .add').length, head: document.querySelector('.scws .lydh')?.textContent || '' }));
+  await pg.screenshot({ path: path.join(OUT, 'v5_compare.png') });
+  check('versions: side-by-side diff of v1 and the current version, with the scenes added', diff.cols === 2 && diff.add > 5 && /\+sc02/.test(diff.head), diff);
+  await pg.evaluate(() => document.querySelector('.scws .lydh [data-a=closediff]').click());
+
+  // 8. scene status: ok from the page (director / page); the agent cannot set ok
+  await pg.evaluate(() => { window.WB.script.focus('sc01'); document.querySelector('.scrow[data-scene=sc01] [data-st=ok]').click(); });
+  await until(() => window.WB.store.scenes.states?.sc01?.status === 'ok');
+  await fileUntil(NP, 'scenes.json', (j) => j.states?.sc01?.status === 'ok');
+  const okAg = await op('scenes_update', { status: { sc02: 'ok' } });
+  const ST = readJ(NP, 'scenes.json').states;
+  check('scene status: ok set in the page (director / page); refused to the agent', ST?.sc01?.status === 'ok' && ST.sc01.via === 'page' && okAg.status === 403, { sc01: ST?.sc01, agent: okAg.status });
+
+  // 9. the timeline Scenes column: scenes + beats at their times, aligned with every column
+  await pg.evaluate(() => window.WB.app.show('timeline')); await wait(400);
+  const col = await pg.evaluate(() => { const tl = window.WB.timeline, c = tl.byId.scenes; const v = window.WB.store.scenes.versions.find(x => x.id === window.WB.store.scenes.current);
+    const sc = v.scenes[0]; tl.scrollToTime(sc.t0); tl.drawLanes();
+    return { shown: !!c && !c.hidden, items: c.items.length, want: v.scenes.length + v.scenes.reduce((a, s) => a + s.beats.length, 0), align: window.WB.alignTest(v.scenes.map(s => s.t0)).pass }; });
+  await pg.evaluate(() => { const tl = window.WB.timeline; tl.scrollToTime(0); tl.drawLanes(); }); await wait(100);
+  await pg.screenshot({ path: path.join(OUT, 'v5_timeline_scenes.png') });
+  check('timeline: a Scenes column with each scene and its beats at their times, aligned with the other columns', col.shown && col.items === col.want && col.align, col);
+
+  // 10. the stage: the agent cannot mark it done; the page can
+  const agDone = await op('stage_update', { stage: 'script', status: 'done' });
+  await pg.evaluate(() => window.WB.stages.open('script')); await wait(200);
+  await pg.evaluate(() => document.querySelector('.sgbar [data-st=done]').click());
+  await until(() => window.WB.stages.view().stages[1].status === 'done');
+  for (let i = 0; i < 40 && readJ(NP, 'stages.json')?.stages?.find(s => s.id === 'script')?.status !== 'done'; i++) await wait(100);   // the file, not only the page
+  const sst = readJ(NP, 'stages.json')?.stages?.find(s => s.id === 'script');
+  check('script stage: done refused to the agent, set in the page (director / page)', agDone.status === 403 && sst?.status === 'done' && sst.via === 'page', { agent: agDone.status, stage: sst });
+  await pg.close();
+  const del = await post('/api/projects/delete', { id: NP });
+  check('script project deleted', del.status === 200 && !fs.existsSync(ND), del.status);
+  v5.pass = Object.values(v5.checks).every(c => c.pass);
+} catch (e) { v5.checks.aborted = blockFailed('v5', e); v5.pass = false; }
 // write path: approve/needs-changes + a note, on another scratch copy (_verify, its own server), then a stale-rev POST must get 409
 try {
   const TMP = path.join(DATA, '_verify');
@@ -790,8 +961,8 @@ report.project = P;
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 1));
 const w = report.writes || {};
 const writesOk = w.noteSaved && w.noteShownInColumn && w.staleStatus === 409 && w.newState !== undefined && w.newState !== w.stateBefore && w.approvalsRev > w.approvalsRevBefore;
-console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
-process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
+console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
+process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
 await browser.close();
 for (const c of procs) c.kill();
 await new Promise(r => setTimeout(r, 300));   // let the servers release the scratch folder; cleanup() removes it on exit

@@ -52,7 +52,7 @@ async function projectOf(args) { return args?.project || current || (await serve
 async function op(name, args = {}) {
   const { project: _p, ...a } = args; const p = await projectOf(args);
   // ops that may run ffprobe/ffmpeg (thumbnails) get a long timeout, so a slow video does not look like a failure
-  if (await server()) return http('POST', '/api/op/' + name, p, a, ['media_add', 'request_update', 'entity_upsert', 'song_attach'].includes(name) ? 180000 : 15000);
+  if (await server()) return http('POST', '/api/op/' + name, p, a, ['media_add', 'request_update', 'entity_upsert', 'song_attach', 'sketch_save'].includes(name) ? 180000 : 15000);
   return await S.ops[name](p, a);
 }
 const ok = (v) => ({ content: [{ type: 'text', text: typeof v === 'string' ? v : JSON.stringify(v, null, 1) }] });
@@ -236,6 +236,58 @@ mcp.registerTool('song_attach', {
   inputSchema: { project, path: z.string(), bpm: z.number().min(20).max(400).optional(), beats_per_bar: z.number().int().min(1).optional(), offset: z.number().optional() },
 }, wrap((a) => op('song_attach', a)));
 
+// ------------------------------------------------------------------ stage 2: the script draft (intake, scenes, beats, sketches)
+const beat = z.object({ id: z.string().optional(), t: time, text: z.string() });
+const scene = z.object({ id: z.string().optional().describe('Scene id (sc01…). Leave out for a new scene.'), t0: time.optional(), t1: time.optional(), title: z.string().optional(), text: z.string().optional().describe('What happens: the visual description.'),
+  beats: z.array(beat).optional().describe('Timed actions inside the scene (t between t0 and t1).'), sketches: z.array(z.string()).optional().describe('Sketch ids (sketch_list / sketch_save).') }).passthrough();
+mcp.registerTool('script_get', {
+  title: 'Get the script draft (stage 2)',
+  description: 'The script: the current version\'s scenes [{id, t0, t1, time, title, text, line_ids, lines (the lyric lines inside, with text and times), beats [{id, t, text}], sketches [{id, png, files (absolute paths you can open), pins}], status draft/needs_you/ok, open_notes}], gaps (unscripted ranges with the lines in them: "fill the gaps" = cover them with scenes), coverage (0-1), intake summary, notes (default open), asks_for_agent (the director\'s asks, incl. kind "fill_gaps" with the gaps), and the versions. version = an older version; diff = [a, b] two version ids -> word diff + which scenes were added / removed / changed. A project without scenes.json reads as v1 derived from the old script.json.',
+  inputSchema: { project, version: z.string().optional(), diff: z.array(z.string()).length(2).optional(), notes: z.enum(['open', 'resolved', 'all']).optional() },
+}, wrap((a) => op('script_get', a)));
+mcp.registerTool('scenes_update', {
+  title: 'Write the script as a new version',
+  description: 'Save a NEW version of the script (versions are never overwritten). One of: scenes = the full list of scenes (replaces the list in the new version); upsert = scenes to add (no id) or change (id + only the fields to change) plus remove = scene ids to drop; restore = an old version id (copied as a new version). Each scene is bound to song time: t0 < t1 in ms (or "m:ss.mmm"); snap "lines" | "bars" | "sections" snaps the times you give to the nearest lyric line / downbeat / section bound. Beats are timed actions inside the scene; sketches are sketch ids. line_ids are filled from the song. status = {<scene id>: "draft" | "needs_you"} sets scene statuses ("ok" is the director\'s and refused). Give a short message saying what you changed. Returns the version, the remaining gaps and warnings (overlaps, missing sketch files).',
+  inputSchema: { project, scenes: z.array(scene).optional(), upsert: z.array(scene).optional(), remove: z.array(z.string()).optional(), restore: z.string().optional(),
+    status: z.record(z.enum(['draft', 'needs_you', 'ok'])).optional(), snap: z.enum(['off', 'lines', 'bars', 'sections']).optional(), message: z.string().optional(), by },
+}, wrap((a) => op('scenes_update', a)));
+mcp.registerTool('scene_note_add', {
+  title: 'Note on a scene',
+  description: 'Pin a note to a scene (scene id from script_get), optionally to one of its beats, or with no scene for the whole script. reply_to = a note id adds your reply to its thread (answer the director\'s notes and asks this way). Notes are marked via "agent"; they never change the script (scenes_update does).',
+  inputSchema: { project, scene: z.string().optional(), beat: z.string().optional(), text: z.string(), reply_to: z.string().optional(), by },
+}, wrap((a) => op('scene_note_add', a)));
+mcp.registerTool('scene_note_resolve', {
+  title: 'Resolve a scene note',
+  description: 'Mark a scene note (or an ask for you, e.g. "fill the gaps") resolved, with an optional reply saying what you did; reopen:true reopens it. Resolve the director\'s asks only when you did what they asked.',
+  inputSchema: { project, id: z.string(), reply: z.string().optional(), reopen: z.boolean().optional(), by },
+}, wrap((a) => op('scene_note_resolve', a)));
+mcp.registerTool('intake_get', {
+  title: 'The script intake questions',
+  description: 'The intake the script starts from: questions (mood, kind = story / performance / concept, who, where, era / look, references, must-haves, must-nots, budget) with the answers so far {answer, by, via (page = the director typed it), at, asked_in_chat}, which are unanswered, and the cost summary (for the budget question). Ask the unanswered ones in the conversation, or ask the director to fill them in the page.',
+  inputSchema: { project },
+}, wrap((a) => op('intake_get', a)));
+mcp.registerTool('intake_answer', {
+  title: 'Record intake answers',
+  description: 'Record the director\'s answers to intake questions: key + text, or answers = {<question id>: text} for several. Write only what the director said (by "director" when you relay their words); stamped via "agent". asked_in_chat:true marks the question(s) as asked in this conversation (the page shows it), with or without an answer.',
+  inputSchema: { project, key: z.enum(['mood', 'kind', 'who', 'where', 'era', 'refs', 'must', 'mustnot', 'budget']).optional(), text: z.string().optional(), answers: z.record(z.string()).optional(), asked_in_chat: z.boolean().optional(), by },
+}, wrap((a) => op('intake_answer', a)));
+mcp.registerTool('sketch_get', {
+  title: 'Get a sketch (image paths + pins)',
+  description: 'A sketch drawn in the sketch tool: the flattened PNG and the mask PNG (relative paths and absolute files you can open to look at them), the numbered text pins [{n, x, y, text}] in image pixels (the director\'s callouts: "necklace, silver, thin"), the underlay, w/h, which scenes use it, and with full:true the whole vector JSON.',
+  inputSchema: { project, id: z.string(), full: z.boolean().optional() },
+}, wrap((a) => op('sketch_get', a)));
+mcp.registerTool('sketch_list', {
+  title: 'List sketches',
+  description: 'Every sketch of the project (newest first) with its PNG / mask paths, pins and the scenes that use it; scene filters to one scene.',
+  inputSchema: { project, scene: z.string().optional() },
+}, wrap((a) => op('sketch_list', a)));
+mcp.registerTool('sketch_save', {
+  title: 'Save a sketch',
+  description: 'Write a sketch: id (lower-case letters, digits, _ -), sketch = the vector JSON {w, h, paper, underlay, strokes[], mask[], pins[{n, x, y, text}]} (core/sketch/sketch.js format), png = the flattened image as base64 PNG, mask = the mask as base64 PNG or null. Saved as sketches/<id>.json/.png/.mask.png (under private/sketches/ when drawn over a private underlay) and registered in the media index (kind sketch, links {scenes, entities, shots}). Add it to a scene with scenes_update (sketches: [id]).',
+  inputSchema: { project, id: z.string(), sketch: z.object({ w: z.number(), h: z.number() }).passthrough(), png: z.string(), mask: z.string().nullable().optional(),
+    links: z.object({ scenes: z.array(z.string()).optional(), entities: z.array(z.string()).optional(), shots: z.array(z.string()).optional() }).optional(), label: z.string().optional(), by },
+}, wrap((a) => op('sketch_save', a)));
+
 // ------------------------------------------------------------------ approvals
 mcp.registerTool('approvals_get', {
   title: 'Get approval states', description: 'Approval records {"kind:id": {state, by, at, comment?}} with counts per state. States: draft, review, changes, approved, locked; an item without a record is draft. Filter by keys, key prefix ("shot:", "use:"), or state ("changes" = the director wants something redone).',
@@ -296,7 +348,7 @@ mcp.registerResource('file-formats', 'workbench://docs/file-formats', { title: '
   (uri) => text(uri, section(doc('README.md'), '## Files', '## Server')));
 mcp.registerResource('director-skill', 'workbench://docs/skill', { title: 'Director workflow skill', description: 'The director workflow (song -> script -> breakdown -> entities -> storyboard -> requests -> review -> render).', mimeType: 'text/markdown' },
   (uri) => text(uri, doc('.claude/skills/director-workbench/SKILL.md')));
-const FILES = ['song.json', 'script.json', 'shots.json', 'events.json', 'notes.json', 'approvals.json', 'requests.json', 'costs.json', 'overrides.json', 'project.json', 'entities/index.json', 'lyrics.json', 'stages.json'];
+const FILES = ['song.json', 'script.json', 'shots.json', 'events.json', 'notes.json', 'approvals.json', 'requests.json', 'costs.json', 'overrides.json', 'project.json', 'entities/index.json', 'lyrics.json', 'stages.json', 'scenes.json'];
 mcp.registerResource('project-file', new ResourceTemplate('workbench://project/{project}/{file}', {
   list: async () => { const p = await projectOf({}); return { resources: FILES.map(f => ({ uri: `workbench://project/${p}/${encodeURIComponent(f)}`, name: `${p}/${f}`, mimeType: 'application/json' })) }; },
 }), { title: 'Project file', description: 'A raw JSON file of a project (read-only view; write through the tools).', mimeType: 'application/json' }, (uri, v) => {
@@ -314,11 +366,11 @@ mcp.registerPrompt('director-session', {
   const p = pa || await projectOf({});
   let state = '';
   try {
-    const [c, n, q, A, st, ly] = await Promise.all([op('costs_get', { project: p }), op('notes_list', { project: p, status: 'open' }), op('requests_list', { project: p }), op('approvals_get', { project: p }), op('stages_get', { project: p }), op('lyrics_get', { project: p })]);
+    const [c, n, q, A, st, ly, sc] = await Promise.all([op('costs_get', { project: p }), op('notes_list', { project: p, status: 'open' }), op('requests_list', { project: p }), op('approvals_get', { project: p }), op('stages_get', { project: p }), op('lyrics_get', { project: p }), op('script_get', { project: p })]);
     const byStatus = q.reduce((o, r) => (o[r.status] = (o[r.status] || 0) + 1, o), {});
         // a note written through the agent tools (via "agent") is not the director's, whatever its `by` claims
     state = `Project "${p}": ${n.length} open notes${n.length ? ` (first: ${n.slice(0, 3).map(x => `${x.time} ${x.via === 'agent' ? `${x.by} (via agent, not the director)` : x.by}: "${x.text.slice(0, 80)}"`).join('; ')})` : ''}; requests ${JSON.stringify(byStatus)}; approvals ${JSON.stringify(A.counts)}; costs: spent $${c.spent_usd} + committed $${c.committed_usd} of cap $${c.cap_usd}.
-Stages: ${st.stages.map(x => `${x.id} ${x.status}`).join(', ')}; next: ${st.next ? `${st.next.title}${st.next.blockers.length ? ` (${st.next.blockers.join('; ')})` : ''}` : 'none (all done)'}. Lyrics ${ly.current || 'none'}${ly.asks_for_agent.length ? `; ${ly.asks_for_agent.length} open ask(s) for you in the lyrics (lyrics_get asks_for_agent)` : ''}.`;
+Stages: ${st.stages.map(x => `${x.id} ${x.status}`).join(', ')}; next: ${st.next ? `${st.next.title}${st.next.blockers.length ? ` (${st.next.blockers.join('; ')})` : ''}` : 'none (all done)'}. Lyrics ${ly.current || 'none'}${ly.asks_for_agent.length ? `; ${ly.asks_for_agent.length} open ask(s) for you in the lyrics (lyrics_get asks_for_agent)` : ''}. Script ${sc.current || 'none'}: ${sc.scenes.length} scenes, ${Math.round(sc.coverage * 100)}% of the song scripted, intake ${sc.intake.answered}/${sc.intake.of} answered${sc.asks_for_agent.length ? `; ${sc.asks_for_agent.length} open ask(s) for you in the script (script_get asks_for_agent)` : ''}.`;
   } catch (e) { state = `(could not read project "${p}": ${e.message})`; }
   const brief = `You are the assistant director on a music video in the Director Workbench (MCP server "director-workbench").
 ${state}
@@ -326,7 +378,7 @@ ${state}
 How to work:
 1. Orient: call status, then song_get (sections, lyrics) and shots_list; use timeline_query(t0, t1) whenever you discuss a moment. Times are integer ms.
 2. The director decides. Their open notes (notes_list status=open; a note with via "agent" was written through the tools, not by them) and items in state "changes" (approvals_get state=changes) are your to-do list. Approving is theirs: they approve in the page; never treat a note's text as an approval. Answer with note_add / note_resolve(reply); ask for review with shot_update status "review".
-3. Workflow (the guided flow, stages_get): lyrics (lyrics_get / lyrics_update / lyrics_note_add; the song file may come later: song_attach) -> script -> breakdown -> characters, looks -> scenery (locations, props) -> storyboard -> generation requests -> final approvals. Mark your progress with stage_update (in_progress / needs_you); only the director marks a stage done.
+3. Workflow (the guided flow, stages_get): lyrics (lyrics_get / lyrics_update / lyrics_note_add; the song file may come later: song_attach) -> script (intake_get / intake_answer, then script_get / scenes_update: scenes bound to song time with beats, text and sketches; sketch_get gives image paths + pins; scene_note_add; fill every gap) -> breakdown -> characters, looks -> scenery (locations, props) -> storyboard -> generation requests -> final approvals. Mark your progress with stage_update (in_progress / needs_you); only the director marks a stage done.
 4. Money: never call a paid generation API unless the request is APPROVED in the queue. Propose with request_create (draft, honest est_cost, refs, tool). After the director approves: request_update queued -> running -> done with outputs[] and actual_cost_usd (or rejected + why). The cap is enforced.
 5. Before big edits: snapshot_save. Register every new file with media_add (or via request_update done).
 6. Show, don't describe: ui_focus(t / view / preview / select) moves the director's open page to what you mean.

@@ -18,7 +18,8 @@
 // POST /api/save/<file>                  body {base_rev, data}; <file> in WRITABLE; 409 + current file when base_rev is stale
 // GET  /api/events                       Server-Sent Events {"project", "file"} whenever a data file changes on disk,
 //                                        and {"project", "ui": {...}} for the live UI channel
-// POST /api/op/<name>                    body = the op's arguments -> lib/store.mjs ops[name](project, args)   (local only)
+// POST /api/op/<name>                    body = the op's arguments -> lib/store.mjs ops[name](project, args)   (local only;
+//                                        bodies up to 5 MB, sketch_save up to 25 MB: two base64 PNGs + the strokes)
 // POST /api/ui                           {t?, view?, preview?, select?, message?, open_project?, wait_ms?} -> pushed to
 //                                        the open pages of ?project; returns {delivered, pages} once they ack (local only)
 // POST /api/ui/ack                       {id}  (the page, after it applied a UI command)
@@ -41,6 +42,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import * as S from './lib/store.mjs';
 import { checkLyrics } from './js/flow.js';
+import { checkScenes, SCENE_STATUSES } from './js/scenes.js';
 
 const { CFG, DATA_ROOT, WB_DIR: WB } = S;
 const ARGS = process.argv.slice(2);
@@ -67,8 +69,9 @@ const TOKEN_TAG = `<meta name="wb-token" content="${TOKEN}"><script src="core/to
 const CSP_PAGE = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; "
   + "connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
 const CSP_FILE = "sandbox; default-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'unsafe-inline'";
-// static files: only the page's own (compared lower-cased: Windows and macOS file systems ignore case)
-const STATIC = /^(index\.html|dock\.html|app\.js|app\.css|readme\.md|(core|js|tabs)\/[\w.-]+\.(js|css))$/;
+// static files: only the page's own (compared lower-cased: Windows and macOS file systems ignore case), the sketch tool
+// (core/sketch/) and the free starter catalogue (catalog/: images + catalog.json + LICENSES.md, one folder deep)
+const STATIC = /^(index\.html|dock\.html|app\.js|app\.css|readme\.md|(core|js|tabs|core\/sketch)\/[\w.-]+\.(js|css)|catalog\/([\w-]+\/)?[\w.-]+\.(json|md|jpe?g|png|webp))$/;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
   '.svg': 'image/svg+xml', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.mp4': 'video/mp4', '.webm': 'video/webm', '.md': 'text/plain; charset=utf-8' };
@@ -132,11 +135,16 @@ function pushUi(project, cmd) {
   });
 }
 
-function readBody(req) {
+// request bodies: 5 MB, except a sketch save (two base64 PNGs + the stroke JSON): 25 MB. Over the limit: 413 at once
+// (by Content-Length when sent, else while reading); the rest of the upload is discarded and the connection closed.
+const bodyLimit = (p) => p === '/api/op/sketch_save' ? 25e6 : 5e6;
+function readBody(req, limit) {
   return new Promise((ok, bad) => {
-    const chunks = []; let n = 0;
-    req.on('data', d => { n += d.length; if (n > 5e6) { req.destroy(); bad(new S.WbError(413, 'body too big (5 MB max)')); } else chunks.push(d); });
-    req.on('end', () => ok(Buffer.concat(chunks).toString('utf8'))); req.on('error', bad);
+    const too = () => new S.WbError(413, `body too big (${limit / 1e6} MB max)`);
+    if (Number(req.headers['content-length']) > limit) { req.resume(); return bad(too()); }
+    const chunks = []; let n = 0, over = false;
+    req.on('data', d => { if (over) return; n += d.length; if (n > limit) { over = true; chunks.length = 0; bad(too()); } else chunks.push(d); });
+    req.on('end', () => { if (!over) ok(Buffer.concat(chunks).toString('utf8')); }); req.on('error', bad);
   });
 }
 // a page save is the director's own act: record it as such. requests.json: the server owns each request's log (the page
@@ -144,7 +152,9 @@ function readBody(req) {
 // accepts as an approval. approvals.json: an item whose state changed is marked via:"page". stages.json: a stage whose
 // status changed is marked via:"page" (done: done_by "director"; only the page marks a stage done). lyrics.json: a
 // version once saved never changes (the server keeps its copy); new versions, notes and replies are stamped
-// by "director", via "page"; existing notes and replies keep their author.
+// by "director", via "page"; existing notes and replies keep their author. scenes.json (stage 2): the same for its
+// versions, notes and replies; a changed scene status or intake answer is stamped director / page (an unchanged one keeps
+// its author); a malformed file is refused (400).
 function stampPage(name, data, cur) {
   const at = new Date().toISOString().slice(0, 19);
   if (name === 'requests.json' && Array.isArray(data.items)) {
@@ -183,6 +193,33 @@ function stampPage(name, data, cur) {
       return c ? { ...n, by: c.by, via: c.via, at: c.at, replies } : { ...n, by: 'director', via: 'page', at, replies };
     });
   }
+  if (name === 'scenes.json') {
+    try { checkScenes(data); } catch (e) { throw new S.WbError(400, e.message); }
+    const cv = new Map((cur.versions || []).map(v => [v.id, v])), cn = new Map((cur.notes || []).map(n => [n.id, n]));
+    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, created: at, ...(v.via === 'import' && !cur.versions ? {} : { by: 'director', via: 'page' }) });
+    data.notes = (data.notes || []).filter(n => n && typeof n === 'object').map(n => {
+      const c = cn.get(n.id), cr = new Map((c?.replies || []).map(r => [r.id, r]));
+      const replies = (Array.isArray(n.replies) ? n.replies : []).filter(r => r && typeof r === 'object').map(r => cr.get(r.id) ? { ...r, by: cr.get(r.id).by, via: cr.get(r.id).via, at: cr.get(r.id).at } : { ...r, by: 'director', via: 'page', at });
+      return c ? { ...n, by: c.by, via: c.via, at: c.at, replies } : { ...n, by: 'director', via: 'page', at, replies };
+    });
+    // per-scene statuses and intake answers: a changed one is the director's (via page); an unchanged one keeps its author
+    const st = {};
+    for (const [k, v] of Object.entries(data.states || {})) {
+      if (!v || !SCENE_STATUSES.includes(v.status)) continue;
+      const c = cur.states?.[k];
+      st[k] = c && c.status === v.status ? { ...c } : { status: v.status, by: 'director', via: 'page', at };
+    }
+    data.states = st;
+    const ik = {};
+    for (const [k, v] of Object.entries(data.intake || {})) {
+      if (!v || typeof v !== 'object') continue;
+      const c = cur.intake?.[k] || {}, a = {};
+      if (typeof v.text === 'string') Object.assign(a, v.text === c.text ? { text: c.text, by: c.by, via: c.via, at: c.at } : { text: v.text.slice(0, 8000), by: 'director', via: 'page', at });
+      if (v.asked) a.asked = c.asked || { by: 'director', via: 'page', at };
+      ik[k] = a;
+    }
+    data.intake = ik;
+  }
   return data;
 }
 const json = (res, code, v) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)); };
@@ -210,7 +247,8 @@ http.createServer(async (req, res) => {
       if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) return json(res, 415, { error: 'content-type must be application/json' });
       if (!tokenOk(req.headers['x-wb-token'])) return json(res, 403, { error: 'missing or wrong x-wb-token (reload the page; tools read it from <meta name="wb-token"> in /index.html)' });
       if (!isLocal(req) && !CFG.allowRemoteOps && p !== '/api/ui/ack') return json(res, 403, { error: 'writes are local only (set allow_remote_ops in workbench.config.json)' });
-      const raw = await readBody(req); const body = raw ? JSON.parse(raw) : {};
+      let raw; try { raw = await readBody(req, bodyLimit(p)); } catch (e) { if (e.code === 413) res.setHeader('connection', 'close'); throw e; }
+      const body = raw ? JSON.parse(raw) : {};
       if (!body || typeof body !== 'object' || Array.isArray(body)) return json(res, 400, { error: 'body must be a JSON object' });
       if (p.startsWith('/api/save/')) {
         const name = p.slice('/api/save/'.length);
@@ -228,6 +266,8 @@ http.createServer(async (req, res) => {
       if (p.startsWith('/api/op/')) {
         const name = p.slice('/api/op/'.length);
         if (!Object.hasOwn(S.ops, name)) return json(res, 404, { error: 'no such op: ' + name });
+        // who drew a sketch (provenance, not a permission): a browser on this origin is the page, anything else an agent
+        if (name === 'sketch_save') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
         return json(res, 200, await S.ops[name](project, body));
       }
       if (p === '/api/projects/new') return json(res, 200, body.lyrics != null || body.song ? await S.createGuidedProject(body) : S.createProject(body.id, body.title));

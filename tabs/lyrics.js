@@ -349,9 +349,9 @@ class Workspace {
 // ------------------------------------------------------------------ commands (registered at load: core/rail.js imports this module)
 const L = (c) => visible() && !!S;
 commands.register([
-  { id: 'lyrics.save', group: 'Lyrics', title: 'Save lyrics version', keys: ['Ctrl+Enter'], global: true, when: () => L() && S.dirty, run: () => S.save() },
+  { id: 'lyrics.save', group: 'Lyrics', title: 'Save lyrics version', when: () => L() && S.dirty, run: () => S.save() },
   { id: 'lyrics.discard', group: 'Lyrics', title: 'Discard unsaved lyrics edits', when: () => L() && S.dirty, run: () => S.discard() },
-  { id: 'lyrics.note', group: 'Lyrics', title: 'Note on the selected words / line', keys: ['Alt+N'], when: () => L(), run: () => S.noteOnSelection() },
+  { id: 'lyrics.note', group: 'Lyrics', title: 'Note on the selected words / line', when: () => L(), run: () => S.noteOnSelection() },
   { id: 'lyrics.text', group: 'Lyrics', title: 'Edit lyrics as text', checked: () => !!S?.textMode, when: () => L(), run: () => { S.textMode = !S.textMode; S.compare = null; S.render(); } },
   { id: 'lyrics.addSection', group: 'Lyrics', title: 'Add a lyrics section…', when: () => L(), run: () => S.addSection() },
   { id: 'lyrics.compare', group: 'Lyrics', title: 'Compare lyrics versions…', when: () => !!store.lyrics?.versions?.length, run: async () => {
@@ -364,6 +364,9 @@ commands.register([
   { id: 'lyrics.ask', group: 'Lyrics', title: 'Ask the agent about the lyrics…', run: async () => { if (!visible()) await WB().stages.open('lyrics'); S?.setSide('notes'); S?.$('.lyask textarea')?.focus(); } },
   { id: 'lyrics.addSong', group: 'Lyrics', title: () => store.song?.audio?.mix ? 'Replace the song file…' : 'Add the song file…', run: async () => { if (!visible()) await WB().stages.open('lyrics'); S?.songDialog(); } },
 ]);
+
+// Ctrl+Enter and Alt+N in a stage workspace are the rail's stage.save / stage.note (core/rail.js): they ask the visible stage
+window.WB = Object.assign(window.WB || {}, { stageActions: { ...(window.WB?.stageActions || {}), lyrics: { canSave: () => L() && S.dirty, save: () => S.save(), canNote: () => L(), note: () => S.noteOnSelection() } } });
 
 export default {
   mount(el, ctx) { S = new Workspace(el, ctx); },

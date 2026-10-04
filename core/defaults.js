@@ -304,6 +304,7 @@ export function contextArgs(target, clientX, clientY) {
       if (use) { names.push('clip'); args.use = use; args.shot = shotOfUse(use); }
       const note = k === 'note' && store.notes.notes.find(n => n.id === id);
       if (note) { names.push('note'); args.note = note; }
+      if (k === 'scene') { names.push('scene'); args.sceneId = id; }
     }
     if (args.col && (args.col.def.kind === 'lane' || args.col.strip)) names.push('ruler');
     names.push('timeline');
@@ -313,6 +314,8 @@ export function contextArgs(target, clientX, clientY) {
   // the stage rail (core/rail.js) and a stage workspace (tabs/stage.js)
   const st = target.closest('#rail [data-stage]');
   if (st?.dataset.stage) { names.push('stage'); args.stageId = st.dataset.stage; return { names, args }; }
+  const sc = target.closest('.scws [data-scene]');   // a scene in the script stage (tabs/script.js)
+  if (sc?.dataset.scene) { names.push('scene'); args.sceneId = sc.dataset.scene; }
   if (target.closest('.stagews')) { names.push('stage'); args.stageId = WB().stages?.current(); }
   names.push('global');
   return { names, args };

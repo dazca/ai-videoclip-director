@@ -36,8 +36,17 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
    A new song with timed lyrics: `node importers/new_project.mjs <id> --song <file> --lyrics <file>` (LRC timings are
    used; plain lyrics are spread evenly and marked `timing: "estimated"`: fix them before cutting). Sections, bars and
    lyric lines are the grid every later decision snaps to.
-2. **Script**: per lyric line a mode (W = world, S = screen, B = both, W→S) and an action (`script.json`). Ask
-   for review (state `review` on `script:<id>`), not approval.
+2. **Script** (stage 2, `scenes.json`): start from the **intake** (`intake_get`): ask the open questions in the
+   conversation (mark them `intake_answer` `asked_in_chat: true`) and record the director's own words with
+   `intake_answer` (`by: "director"` when you relay them). Then draft **scenes** with `scenes_update` (each call is a
+   NEW version with a message): every scene bound to song time (`t0` < `t1`, `snap: "lines"` / `"bars"` /
+   `"sections"`), a title, a visual description, timed **beats** inside it, and sketch ids. `script_get` shows the
+   scenes with their lyric lines, the **gaps** (unscripted ranges with the lines in them), coverage, notes and
+   `asks_for_agent`; an ask of kind `fill_gaps` means cover every listed gap, then `scene_note_resolve` it with a
+   reply. Work by notes when the director should decide (`scene_note_add`, `reply_to` in threads); set a scene
+   `needs_you` (`status`), never `ok` (the director's). The director's drawings: `sketch_get` / `sketch_list` give the
+   PNG and mask paths (open them to look) and the numbered pins ("necklace, silver, thin"); `sketch_save` writes one
+   (base64 PNG). A project scripted before the flow reads its old `script.json` as v1 (stages -> scenes, lines -> beats).
 3. **Breakdown**: cut into shots on downbeats / section starts (`shots.json`); each shot gets kind, title, cast,
    locations, and later the clip uses that fill it. Use `timeline_query` to see what a cut crosses.
 4. **Characters, looks, locations, props**: `entity_upsert` with references; looks (costumes) live in the character's
@@ -61,8 +70,9 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
 - Never touch PRIVATE files (crops of real photos, anything under a `private/` folder or flagged private) beyond
   reading them locally for the director; never copy them into exports, the demo, the template or a shared repo.
 - Never edit timing by moving pixels: times are integer ms in the JSON; layout follows.
-- Never mark a stage done or edit `stages.json` / `lyrics.json` by hand to look like the director's (`via: "page"`):
-  use the tools, which stamp your writes `via: "agent"`.
+- Never mark a stage done or edit `stages.json` / `lyrics.json` / `scenes.json` by hand to look like the director's
+  (`via: "page"`): use the tools, which stamp your writes `via: "agent"`. Never mark a scene `ok`.
+- Never invent intake answers: record only what the director said.
 
 ## Handy patterns
 

@@ -48,8 +48,8 @@ function scrub(v) {
 export const exporter = {
   // everything exported goes through scrub(): private media (crops of real photos) never leave the machine
   bundleData() {
-    const { song, events, energy, script, shots, uses, costs, notes, approvals, requests, overrides, entities, media } = store;
-    return scrub({ project: PROJECT, exported: new Date().toISOString(), song, events, energy, script, shots: { shots, uses }, costs, notes, approvals, requests, overrides, entities, media: (media || []).filter(m => !m.private) });
+    const { song, events, energy, script, scenes, shots, uses, costs, notes, approvals, requests, overrides, entities, media } = store;
+    return scrub({ project: PROJECT, exported: new Date().toISOString(), song, events, energy, script, scenes, shots: { shots, uses }, costs, notes, approvals, requests, overrides, entities, media: (media || []).filter(m => !m.private) });
   },
   bundle() { download(`${PROJECT}-bundle.json`, JSON.stringify(this.bundleData(), null, 1)); },
   shotList() {

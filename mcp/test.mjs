@@ -5,7 +5,8 @@
 // a Chromium are available; otherwise an SSE client stands in for the page), spawns mcp/server.mjs over stdio with the
 // official SDK client and exercises: tools/list, song_get, timeline_query, note_add + note_resolve, request_create +
 // request_update (the approval and cap rules, done -> cost + media), snapshot_save + snapshot_restore, ui_focus, the guided
-// flow (stages_get / stage_update, lyrics_* on a derived and on a new lyrics-only project, song_attach),
+// flow (stages_get / stage_update, lyrics_* on a derived and on a new lyrics-only project, song_attach; stage 2: intake_*,
+// script_get / scenes_update (derived from script.json, versions, snap, restore, diff, status rules), scene notes, sketches),
 // resources, the director-session prompt, the guard rules (edit voids approval, director-only approvals, media kind,
 // CSRF / Host / token checks, path traversal and the PRIVATE rule) and the offline (files only) mode. The temp folder
 // is removed at the end, whatever happens; data/demo must be byte-identical afterwards.
@@ -19,6 +20,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { tinyPngB64 } from '../tools/tiny-png.mjs';
 
 const WB = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const PROJECT = 'demo', PORT = Number(process.env.TEST_PORT || 8146), URL_ = `http://localhost:${PORT}`;
@@ -105,7 +107,8 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const tools = (await mcp.listTools()).tools.map(t => t.name);
   const EXPECT = ['status', 'projects', 'snapshot_save', 'snapshot_list', 'snapshot_restore', 'song_get', 'timeline_query', 'shots_list', 'shot_get', 'shot_update', 'entities_list', 'entity_get', 'entity_upsert',
     'media_list', 'media_add', 'notes_list', 'note_add', 'note_resolve', 'approvals_get', 'approve', 'request_changes', 'requests_list', 'request_create', 'request_update', 'costs_get', 'ui_focus',
-    'stages_get', 'stage_update', 'lyrics_get', 'lyrics_update', 'lyrics_versions', 'lyrics_note_add', 'lyrics_note_resolve', 'song_attach'];
+    'stages_get', 'stage_update', 'lyrics_get', 'lyrics_update', 'lyrics_versions', 'lyrics_note_add', 'lyrics_note_resolve', 'song_attach',
+    'script_get', 'scenes_update', 'scene_note_add', 'scene_note_resolve', 'intake_get', 'intake_answer', 'sketch_save', 'sketch_get', 'sketch_list'];
   check('tools/list has every tool', EXPECT.every(t => tools.includes(t)), { count: tools.length, missing: EXPECT.filter(t => !tools.includes(t)) });
   const schemaOk = (await mcp.listTools()).tools.every(t => t.description?.length > 40 && t.inputSchema?.type === 'object');
   check('every tool has a description and a JSON schema', schemaOk);
@@ -300,6 +303,75 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   check('director-session briefs the stages and the lyrics', /Stages: lyrics needs_you/.test(pr.messages[0].content.text) && /lyrics_get/.test(pr.messages[0].content.text), pr.messages[0].content.text.split('\n')[1]);
 }
 
+// 11c. stage 2 (the script draft): intake, scenes as versions, scene notes, sketches; on the demo (script.json derived)
+{
+  const g0 = await call(mcp, 'script_get');
+  check('script_get on a project without scenes.json: v1 derived from script.json (stages -> scenes, lines -> beats), full coverage, nothing written',
+    g0.derived === true && g0.current === 'v1' && g0.scenes?.length === 3 && g0.scenes[1].title === 'The wall' && g0.scenes[1].beats.length === 7 && g0.scenes[1].lines.length === 7 && g0.coverage === 1 && !g0.gaps.length && !fs.existsSync(path.join(D, 'scenes.json')),
+    { derived: g0.derived, scenes: g0.scenes?.map(s => [s.id, s.t0, s.t1, s.beats.length]), coverage: g0.coverage });
+  const ig = await call(mcp, 'intake_get');
+  const ia = await call(mcp, 'intake_answer', { answers: { mood: 'mcp: bright and playful', kind: 'concept' }, by: 'director' });
+  const iq = await call(mcp, 'intake_answer', { key: 'who', asked_in_chat: true });
+  const ib = await call(mcp, 'intake_answer', { key: 'nope', text: 'x' });
+  const ig2 = await call(mcp, 'intake_get');
+  const pageIntake = await pageHas((_, s) => s ? s.files.includes('scenes.json') : window.WB.store.scenes?.intake?.mood?.text === 'mcp: bright and playful');
+  check('intake_get / intake_answer: 9 questions, answers stamped via agent, asked in chat, unknown key refused, the page sees it',
+    ig.questions?.length === 9 && ig.unanswered?.length === 9 && ia.updated?.length === 2 && iq.updated?.[0] === 'who' && /400|Invalid enum/.test(ib.error || '') && ig2.unanswered.length === 7
+    && ig2.questions.find(q => q.id === 'mood').via === 'agent' && ig2.questions.find(q => q.id === 'mood').by === 'director' && !!ig2.questions.find(q => q.id === 'who').asked_in_chat && pageIntake,
+    { unanswered: ig2.unanswered, bad: ib.error, pageIntake });
+  // remove a scene -> a gap; fill it (snapped to lines); the ok status is refused; a needs_you is fine
+  const u1 = await call(mcp, 'scenes_update', { remove: ['sc03'], message: 'mcp: drop the outro' });
+  const g1 = await call(mcp, 'script_get');
+  const u2 = await call(mcp, 'scenes_update', { upsert: [{ t0: '0:18.03', t1: 19950, title: 'mcp outro', text: 'back to the screen', beats: [{ t: 18600, text: 'cut to black' }] }], snap: 'lines', message: 'mcp: fill the gap' });
+  const g2 = await call(mcp, 'script_get');
+  const sc4 = g2.scenes?.find(s => s.title === 'mcp outro');
+  const okRef = await call(mcp, 'scenes_update', { status: { sc01: 'ok' } });
+  const nyou = await call(mcp, 'scenes_update', { status: { sc02: 'needs_you' } });
+  const bad = await call(mcp, 'scenes_update', { upsert: [{ id: 'sc02', t1: 9000 }] });
+  const same = await call(mcp, 'scenes_update', { scenes: g2.scenes.map(({ id, t0, t1, title, text, beats, sketches }) => ({ id, t0, t1, title, text, beats, sketches })) });
+  check('scenes_update: every write a new version; remove -> a gap listed; a new scene snapped to lines (ids never reused); ok refused; needs_you set; beats outside refused; an unchanged list makes none',
+    u1.version === 'v2' && g1.gaps?.[0]?.t0 === 18000 && g1.gaps[0].lines[0].id === 'outro/0' && u2.version === 'v3' && !u2.gaps.length && sc4?.id === 'sc04' && sc4.t0 === 18000 && sc4.t1 === 20000 && sc4.line_ids[0] === 'outro/0'
+    && /403/.test(okRef.error || '') && nyou.status?.sc02 === 'needs_you' && g2.scenes.find(s => s.id === 'sc02').status === 'draft' && /400/.test(bad.error || '') && same.unchanged === true,
+    { u1, gap: g1.gaps?.[0], u2: u2.version, sc4: sc4 && [sc4.id, sc4.t0, sc4.t1], ok: okRef.error, bad: bad.error, same });
+  const rs = await call(mcp, 'scenes_update', { restore: 'v1' });
+  const df = await call(mcp, 'script_get', { diff: ['v1', 'v3'] });
+  const g3 = await call(mcp, 'script_get');
+  check('scenes_update restore = a new version copied from the old one; script_get diff lists the scene changes and a word diff',
+    rs.version === 'v4' && g3.current === 'v4' && g3.versions.at(-1).from === 'v1' && g3.scenes.length === 3 && JSON.stringify(df.scenes) === JSON.stringify({ added: ['sc04'], removed: ['sc03'], changed: [] }) && /\{\+mcp\+\}/.test(df.diff) && g3.scenes.find(s => s.id === 'sc02').status === 'needs_you',
+    { rs, scenes: df.scenes, current: g3.current });
+  // scene notes: on a scene, a reply, resolve; an ask from the page shows in asks_for_agent
+  const n1 = await call(mcp, 'scene_note_add', { scene: 'sc02', text: 'mcp: cut on the downbeat?' });
+  const r1 = await call(mcp, 'scene_note_add', { reply_to: n1.id, text: 'mcp: a reply' });
+  const nb = await call(mcp, 'scene_note_add', { scene: 'nope', text: 'x' });
+  const cur = JSON.parse(fs.readFileSync(path.join(D, 'scenes.json'), 'utf8'));
+  cur.notes.push({ id: 'sn90', scene: null, text: 'fill the gaps please', to: 'agent', kind: 'fill_gaps', gaps: [[0, 1000]], status: 'open', replies: [] });
+  const ps = await post(`/api/save/scenes.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur });
+  const asks = (await call(mcp, 'script_get')).asks_for_agent;
+  const rv = await call(mcp, 'scene_note_resolve', { id: 'sn90', reply: 'mcp: done' });
+  check('scene notes: via agent, thread reply, unknown scene refused; a page ask (via page) is in asks_for_agent; resolve with a reply',
+    n1.via === 'agent' && n1.scene === 'sc02' && r1.reply?.id === `${n1.id}.1` && /404/.test(nb.error || '') && ps.status === 200 && asks.some(a => a.id === 'sn90' && a.kind === 'fill_gaps') && rv.status === 'resolved' && rv.replies.length === 1
+    && JSON.parse(fs.readFileSync(path.join(D, 'scenes.json'), 'utf8')).notes.find(n => n.id === 'sn90').via === 'page',
+    { n1: n1.id, asks: asks.map(a => a.id), rv: rv.status });
+  // sketches: save (PNG + mask, pins), get (image paths + pins), list, use in a scene; bad PNG / bad id refused
+  const sk = { w: 64, h: 36, paper: '#ffffff', strokes: [{ t: 'line', c: '#111111', size: 3, o: 1, x0: 2, y0: 2, x1: 60, y1: 30 }], mask: [{ t: 'paint', size: 8, pts: [[10, 10, 1]] }], pins: [{ n: 1, x: 20, y: 12, text: 'necklace, silver, thin' }] };
+  const sv = await call(mcp, 'sketch_save', { id: 'mcp-sk1', sketch: sk, png: tinyPngB64(64, 36), mask: tinyPngB64(64, 36, [0, 0, 0]), links: { scenes: ['sc02'] } });
+  const sget = await call(mcp, 'sketch_get', { id: 'mcp-sk1' });
+  const sbad = await call(mcp, 'sketch_save', { id: 'mcp-sk2', sketch: sk, png: Buffer.from('GIF89a not a png at all, really not').toString('base64') });
+  const sid = await call(mcp, 'sketch_save', { id: '../evil', sketch: sk, png: tinyPngB64() });
+  const used = await call(mcp, 'scenes_update', { upsert: [{ id: 'sc02', sketches: ['mcp-sk1'] }], message: 'mcp: sketch on the wall' });
+  const sl = await call(mcp, 'sketch_list', { scene: 'sc02' });
+  const g4 = await call(mcp, 'script_get');
+  const media = S.read(PROJECT, 'media.json').items.find(m => m.id === 'sketch-mcp-sk1');
+  check('sketch_save / sketch_get / sketch_list: files written (json, png, mask), media kind sketch with links, pins and absolute paths back; used by a scene; a non-PNG and a bad id refused',
+    sv.png === 'sketches/mcp-sk1.png' && sv.mask === 'sketches/mcp-sk1.mask.png' && fs.existsSync(path.join(D, 'sketches/mcp-sk1.json')) && fs.existsSync(path.join(D, 'sketches/mcp-sk1.mask.png'))
+    && sget.pins?.[0]?.text === 'necklace, silver, thin' && fs.existsSync(sget.files?.png || '') && sget.via === 'agent' && media?.kind === 'sketch' && media.scenes.includes('sc02') && media.mask === 'sketches/mcp-sk1.mask.png'
+    && /400/.test(sbad.error || '') && /400/.test(sid.error || '') && !fs.existsSync(path.join(DATA, 'evil.json')) && !used.warnings && sl.length === 1 && sl[0].scenes.includes('sc02')
+    && g4.scenes.find(s => s.id === 'sc02').sketches[0].pins[0].n === 1,
+    { sv, pins: sget.pins, bad: sbad.error, id: sid.error, used, list: sl.map(x => x.id) });
+  const st2 = await call(mcp, 'stages_get');
+  check('stages_get: the script stage counts scenes, intake and gaps', st2.facts?.scenes === 3 && st2.facts.intakeOpen === 7 && st2.stages.find(x => x.id === 'script').blockers_all.some(b => /intake/.test(b)), { facts: st2.facts });
+}
+
 // 12. offline: the server is unreachable -> the same tools work on the files; ui_focus explains
 {
   const off = await connect({ WORKBENCH_URL: 'http://localhost:9' });
@@ -307,8 +379,10 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const tq = await call(off, 'timeline_query', { t0: 4000, t1: 8000 });
   const ui = await call(off, 'ui_focus', { t: 1000 });
   const sg = await call(off, 'stages_get'), lu = await call(off, 'lyrics_update', { project: 'mcp-lyrics', text: '[Verse 1]\noffline line', message: 'offline' });
-  check('offline mode: files directly (stages, lyrics too), ui_focus refuses politely', st.mode === 'files' && tq.shots?.[0]?.id === 's2-wall' && /not running/.test(ui.error || '') && sg.stages?.length === 7 && lu.version === 'v4',
-    { mode: st.mode, shots: tq.shots?.map(s => s.id), ui: ui.error, stages: sg.stages?.length, lyrics: lu.version || lu.error });
+  const so = await call(off, 'scenes_update', { upsert: [{ id: 'sc01', title: 'offline title' }], message: 'offline' }), sko = await call(off, 'sketch_get', { id: 'mcp-sk1' });
+  check('offline mode: files directly (stages, lyrics, scenes, sketches too), ui_focus refuses politely', st.mode === 'files' && tq.shots?.[0]?.id === 's2-wall' && /not running/.test(ui.error || '') && sg.stages?.length === 7 && lu.version === 'v4'
+    && /^v\d+$/.test(so.version || '') && sko.pins?.length === 1,
+    { mode: st.mode, shots: tq.shots?.map(s => s.id), ui: ui.error, stages: sg.stages?.length, lyrics: lu.version || lu.error, scenes: so.version || so.error });
   await off.close();
 }
 

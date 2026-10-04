@@ -1,11 +1,12 @@
 // Stage workspace (page "stage", opened from the stage rail): a 20 px bar with the stage, its status and the director's
 // status buttons (only here and on the rail can a stage be marked done), then the stage's own workspace. Stage 1
-// (lyrics) is tabs/lyrics.js; the later stages show what they will hold and where their data lives today.
+// (lyrics) is tabs/lyrics.js, stage 2 (script) tabs/script.js; the later stages show what they will hold and where
+// their data lives today.
 import { store, esc } from '../js/store.js';
 import { STAGES, STATUS_LABEL, stageById } from '../js/flow.js';
 
+const MODULES = { lyrics: () => import('./lyrics.js'), script: () => import('./script.js') };
 const LATER = {
-  script: ['Timeline > script column (script.json) holds the current script lines.', 'timeline'],
   breakdown: ['Assets lists what exists today: characters, locations, props.', 'characters'],
   characters: ['Assets > Characters: identity sheets and looks.', 'characters'],
   scenery: ['Assets > Locations and Props.', 'locations'],
@@ -37,7 +38,7 @@ export default {
       shown = id;
       if (!hosts[id]) {
         const h = hosts[id] = { el: document.createElement('div'), mod: null }; h.el.className = 'sghost'; h.el.dataset.stage = id; body.appendChild(h.el);
-        if (id === 'lyrics') { h.mod = (await import('./lyrics.js')).default; h.mod.mount(h.el, ctx); }
+        if (MODULES[id]) { h.mod = (await MODULES[id]()).default; h.mod.mount(h.el, ctx); }
         else {
           const d = stageById(id), [where, view] = LATER[id];
           h.el.innerHTML = `<div class="pane sglater"><h4>${d.n} · ${esc(d.title)}</h4><p>${esc(d.does)}.</p><p class="dim">This workspace comes in a later phase of the guided flow. Today: ${esc(where)} <a data-view="${view}">open</a></p>
@@ -53,7 +54,7 @@ export default {
     });
     body.addEventListener('click', (e) => { const a = e.target.closest('.sglater [data-view]'); if (a) window.WB.app.show(a.dataset.view); });
     document.addEventListener('wb:stage', () => { if (window.WB.app.active() === 'stage') showStage(); });
-    store.on((w) => { if (['stages', 'lyrics', 'all'].includes(w) && window.WB.app.active() === 'stage') renderBar(); });
+    store.on((w) => { if (['stages', 'lyrics', 'scenes', 'all'].includes(w) && window.WB.app.active() === 'stage') renderBar(); });
     this._show = showStage;
   },
   show() { return this._show?.(); },

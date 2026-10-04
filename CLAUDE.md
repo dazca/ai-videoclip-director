@@ -31,12 +31,13 @@ outside the project folder, extra PRIVATE path rule. Env vars win: `WB_PROJECT`,
 | `lib/store.mjs` | Node data layer shared by the server and the MCP server: config, projects, snapshots, and every agent op (`ops.*`) |
 | `mcp/server.mjs`, `mcp/test.mjs` | MCP server (stdio) and its end-to-end test |
 | `index.html`, `app.js`, `app.css` | the page shell |
-| `core/` | command registry + keymap, menus, palette, undo history, selection, projects/exports, preview dock, default commands, `rail.js` (stage rail + stage commands), `wizard.js` (new-project wizard) |
-| `js/` | store (data + live reload), timeline (the warp), columns, player, verify hooks, `flow.js` (the guided flow: stages + lyrics model, shared with `lib/store.mjs`) |
-| `tabs/` | one module per view; `tabs/registry.js` lists pages and sub-views; `stage.js` (stage workspaces), `lyrics.js` (stage 1) |
-| `docs/SPEC_v3_GUIDED.md` | the guided creation flow (seven stages); phase 1 = stage rail, wizard, lyrics stage |
+| `core/` | command registry + keymap, menus, palette, undo history, selection, projects/exports, preview dock, default commands, `rail.js` (stage rail + stage commands), `wizard.js` (new-project wizard), `sketch/` (the sketch tool: `mountSketch` / `openSketch`, API in its header) |
+| `js/` | store (data + live reload), timeline (the warp), columns, player, verify hooks, `flow.js` (the guided flow: stages + lyrics model) and `scenes.js` (stage 2: scenes, intake, gaps, snapping), both shared with `lib/store.mjs` |
+| `tabs/` | one module per view; `tabs/registry.js` lists pages and sub-views; `stage.js` (stage workspaces), `lyrics.js` (stage 1), `script.js` (stage 2) |
+| `docs/SPEC_v3_GUIDED.md` | the guided creation flow (seven stages); phase 1 = stage rail, wizard, lyrics stage; phase 2 = the script stage + sketch files |
+| `catalog/` | the free starter catalogue (CC0 / public-domain bases: bodies, poses, face angles, garments, locations, props; `catalog.json`, `LICENSES.md`), served read-only for stage 4 |
 | `importers/` | `new_project.mjs` (song + lyrics -> project), `azemar_*` (the owner's production, kept as a worked example) |
-| `tools/` | `verify.mjs` (UI suite), `make_demo.mjs`, `chrome.mjs` |
+| `tools/` | `verify.mjs` (UI suite), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `make_demo.mjs`, `chrome.mjs` |
 | `exporters/hyperframes-html/` | HTML package of a HyperFrames composition: `export.mjs`, `verify.mjs`, `serve.mjs` (see Export) |
 | `data/<project>/` | one folder per project; only `data/_template/` and `data/demo/` are in git |
 
@@ -65,6 +66,17 @@ relative to the media base; any other path is relative to the project folder. Fu
   word], quote, text, by, via, to?: "agent", status, replies[]}]`. Line ids are stable across versions and equal the
   `song.json` line ids; the server re-syncs `song.json` lines whenever `current` changes (timings kept for lines that
   still exist, new ones estimated). Missing = v1 derived from `song.json`. Shapes and logic: `js/flow.js`.
+- `scenes.json` (shared, `{rev}`): stage 2, the script draft. `current`, `versions[{id "v3", created, by, via, message,
+  from?, scenes[{id "sc03", t0, t1, title, text, line_ids[], beats[{id "b1", t, text}], sketches[ids]}]}]` (immutable;
+  a save appends), `states{<scene id>: {status: draft|needs_you|ok, by, via, at}}` (outside the versions; `ok` only from
+  the page), `notes[{id "sn01", scene|null, beat?, text, by, via, to?: "agent", kind?: request|fill_gaps, gaps?[[t0,
+  t1]], status, version, replies[]}]`, `intake{mood|kind|who|where|era|refs|must|mustnot|budget: {text, by, via, at,
+  asked?}}`. Scenes are bound to song time (t0 < t1 ms; `line_ids` = the song lines starting inside). Missing = v1
+  derived from `script.json` (its `stages` become scenes, its `lines` their beats); `script.json` itself is never
+  rewritten and its readers (the timeline script column, `timeline_query`) keep working. Logic: `js/scenes.js`.
+- `sketches/<id>.json|.png|.mask.png`: sketches (vector strokes + pins + metadata, the flattened image, the edit mask),
+  written by `sketch_save` and registered in `media.json` (kind `sketch`, links `scenes` / `entities` / `shots`);
+  under `private/sketches/` when drawn over a private underlay. Not snapshotted (the script versions point at them).
 - `.snapshots/<stamp>-<slug>/`: durable snapshots of the small JSON files.
 
 Editing by hand: read the file, change it, **bump `rev`** on the shared files, write it whole via temp file + rename.
@@ -104,7 +116,10 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 
 4. **Stages are the director's to close.** Mark your progress with `stage_update` (in_progress, needs_you + a note,
    blockers); `done` is refused, and a done stage cannot be moved by an agent. Lyrics: propose in notes
    (`lyrics_note_add`) or save a new version (`lyrics_update`, never destructive: every version stays); answer the
-   director's asks (`lyrics_get` `asks_for_agent`) with a reply and resolve them when done.
+   director's asks (`lyrics_get` `asks_for_agent`) with a reply and resolve them when done. Script: record intake
+   answers only in the director's words (`intake_answer`, `asked_in_chat` when you asked); write scenes with
+   `scenes_update` (a new version each time; `ok` on a scene is the director's); "fill the gaps" asks
+   (`script_get` `asks_for_agent`, kind `fill_gaps`) mean: cover every listed range with scenes, then resolve.
 5. **Snapshot before big edits** (`snapshot_save`); a restore snapshots the current state first, so it is undoable.
 6. Register every new file (`media_add`, or automatically on `request_update` done) so it shows up in the page.
 
@@ -118,7 +133,8 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 
   injects it into `index.html` / `dock.html` as `<meta name="wb-token">` (read by `core/token.js`); the page and the
   MCP server pick it up automatically. Set `WB_TOKEN` to fix it for scripts.
 - Only the page's own files are served from the workbench folder (an allow-list: `index.html`, `dock.html`, `app.js`,
-  `app.css`, `README.md`, `core/`, `js/`, `tabs/`; case-insensitive). The page shell carries a Content-Security-Policy
+  `app.css`, `README.md`, `core/`, `core/sketch/`, `js/`, `tabs/`, and the free starter catalogue `catalog/` (images,
+  `catalog.json`, `LICENSES.md`); case-insensitive). The page shell carries a Content-Security-Policy
   with `script-src 'self'` (no inline scripts, no eval; media may also be `https:` / `data:` / `blob:`); every other
   file gets a sandboxing CSP and `nosniff`, so an HTML/SVG file in a project cannot run script in the workbench origin.
   An invalid `?project=` is redirected to the default project.
@@ -145,6 +161,14 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 
   an existing note; new versions / notes / replies from the page are stamped `by: "director", via: "page"`; the
   tools stamp `via: "agent"`; a malformed `lyrics.json` is refused (400). `song_attach` takes audio files only and
   refuses PRIVATE paths.
+- Stage 2 (script): a page save of `scenes.json` cannot rewrite a saved version nor the author of an existing note,
+  status or intake answer; new versions, notes, replies, changed scene statuses and answers are stamped
+  `by: "director", via: "page"`; a malformed file is refused (400). Only the page marks a scene `ok` (`scenes_update`
+  refuses it; an agent's snapshot restore brings a lost `ok` back as `needs_you`). `sketch_save` takes ids
+  `^[a-z0-9][a-z0-9_-]{0,63}$` only (no path can leave `sketches/`), real PNGs only (signature + IHDR, image and mask),
+  and bodies up to 25 MB (every other request: 5 MB; over the limit: 413); it keeps the token / Origin / Host checks.
+  A sketch drawn over a PRIVATE underlay is written under `private/sketches/` and flagged private in `media.json`
+  (local only, never exported). Its `via` (page / agent) is provenance, not a permission.
 - Entity thumbnails and copies made from private media stay private (`thumbs/priv_*`, `private/<kind>/`).
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.
@@ -167,6 +191,10 @@ initial project. Tools:
 | `lyrics_get`, `lyrics_update`, `lyrics_versions` | stage 1: the poem (line ids, timings, notes, asks for the agent); a new version (text / sections / restore); list + word diff |
 | `lyrics_note_add`, `lyrics_note_resolve` | notes on a line or a word range, thread replies, resolve |
 | `song_attach` | add / replace the song file: peaks, energy, grid, duration; lines re-timed |
+| `intake_get`, `intake_answer` | stage 2: the intake questions (mood, kind, who, where, era, refs, must, must-not, budget) and answers; mark asked in chat |
+| `script_get`, `scenes_update` | stage 2: scenes (time range, lines, title, text, beats, sketches with image paths + pins, status), gaps, coverage, asks for the agent, versions + diff; a new version (full list / upsert + remove / restore; snap to lines, bars, sections; statuses draft / needs_you) |
+| `scene_note_add`, `scene_note_resolve` | notes on a scene or a beat, thread replies, resolve |
+| `sketch_save`, `sketch_get`, `sketch_list` | sketch files: save (JSON + base64 PNG + mask), get the PNG / mask paths (absolute too) and the numbered pins, list (by scene) |
 | `snapshot_save`, `snapshot_list`, `snapshot_restore` | durable checkpoints |
 | `song_get` | sections, lyric lines with word timings, events, grid |
 | `timeline_query` | everything between t0 and t1 across all columns |
@@ -188,12 +216,16 @@ Resources: `workbench://docs/readme`, `workbench://docs/claude` (this file), `wo
   run })` in `core/defaults.js` (or a tab module). It appears in the palette (Ctrl+K), the cheat sheet (?) and Settings >
   keybindings automatically; keys are rebindable and stored per project.
 - **A menu entry**: `WB.menus.contribute(context, [commandId | {label, submenu} | '-'])`; contexts `timeline`, `ruler`,
-  `lyric`, `section`, `shot`, `clip`, `cast`, `note`, `header`, `entity`, `empty`, `global`, `columns`,
+  `lyric`, `section`, `shot`, `clip`, `cast`, `note`, `header`, `entity`, `empty`, `global`, `columns`, `stage`, `scene`,
   `menubar:<File|Edit|View|Timeline|Generate|Window|Help>`. Elements with `data-sel="kind:id"` are selectable.
 - **A view**: `tabs/<name>.js` exporting `{ mount(el, ctx), show?(ctx) }` plus one line in `tabs/registry.js`, as a
   sub-view `{id, title, load, count?}` under Assets or Review (or `WB.app.registerSub(pageId, sub)` at runtime).
   Re-render on `store.on(what => ...)` (`'all'` after a full reload, else the field name: `notes`, `requests`, ...).
 - **A column**: one object in `js/columns.js` (`kind: 'text'` drive/follow or `'lane'` canvas).
+- **A stage workspace**: a module in `tabs/` loaded from `MODULES` in `tabs/stage.js` and imported by `core/rail.js`
+  (so its commands exist before it is opened); offer `WB.stageActions[<stage>] = {canSave, save, canNote, note}` and
+  the rail's `stage.save` (Ctrl+Enter) / `stage.note` (Alt+N) reach it. A sketch anywhere: `mountSketch(el, {sketch?,
+  id, resolve: mediaUrl, save})` from `core/sketch/sketch.js`, saving through `POST /api/op/sketch_save`.
 - **An agent op / MCP tool**: a function in `ops` in `lib/store.mjs` (it is then also `POST /api/op/<name>`), and a
   `registerTool` in `mcp/server.mjs` with a zod schema and a description an agent can follow; cover it in `mcp/test.mjs`.
 - **Tests**: `npm run test:mcp` and `npm run verify` must pass (the verify suite runs on the demo; the owner's extra

@@ -26,6 +26,7 @@ fs.writeFileSync(path.join(TMP, 'config.json'), JSON.stringify({ media_roots: ['
 Object.assign(process.env, { WORKBENCH_DATA: DATA, WORKBENCH_MEDIA_BASE: MB, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: P });
 for (const k of ['WB_TOKEN', 'WB_HOST', 'WB_AGENT_APPROVALS', 'WB_ALLOW_REMOTE_OPS']) delete process.env[k];
 const S = await import('../lib/store.mjs');
+const { tinyPngB64 } = await import('./tiny-png.mjs');
 
 let failed = 0, n = 0;
 const check = (name, ok, detail) => { n++; if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail !== undefined ? ' ' + JSON.stringify(detail).slice(0, 300) : ''}`); };
@@ -200,6 +201,59 @@ try {
   check('flow: an agent restore brings no done stage back; the agent cannot move a done stage; song_attach refuses non-audio and PRIVATE paths', stR.status === 'needs_you' && agentMove.status === 409 && [sp1, sp2, sp3].every(x => x.status === 400),
     { restored: stR.status, agentMove: agentMove.status, attach: [sp1.status, sp2.status, sp3.status] });
 
+  // ---------------------------------------------------------------- stage 2: sketch files (ids, PNG check, body limit, token), page saves of scenes.json
+  const SK = { w: 32, h: 18, strokes: [], mask: [], pins: [{ n: 1, x: 3, y: 3, text: 'sec' }] };
+  const trav = {};
+  for (const id of ['../evil', '..\\evil', 'a/b', 'A1', '.hidden', 'x'.repeat(65), 'ok:stream', '']) trav[id || '(empty)'] = (await op('sketch_save', { id, sketch: SK, png: tinyPngB64() })).status;
+  const outside = ['evil.json', 'evil.png'].some(f => fs.existsSync(path.join(DATA, f)) || fs.existsSync(path.join(D, f)) || fs.existsSync(path.join(TMP, f)));
+  const badPng = { gif: (await op('sketch_save', { id: 'sec1', sketch: SK, png: Buffer.from('GIF89a' + 'x'.repeat(40)).toString('base64') })).status,
+    html: (await op('sketch_save', { id: 'sec1', sketch: SK, png: Buffer.from('<svg onload=alert(1)>' + 'x'.repeat(30)).toString('base64') })).status,
+    junk: (await op('sketch_save', { id: 'sec1', sketch: SK, png: '%%%not base64%%%' })).status,
+    mask: (await op('sketch_save', { id: 'sec1', sketch: SK, png: tinyPngB64(), mask: Buffer.from('not a png, not at all, no').toString('base64') })).status,
+    noSketch: (await op('sketch_save', { id: 'sec1', png: tinyPngB64() })).status };
+  check('sketch_save: ids that could leave sketches/ refused (.., \\, /, upper case, dot, too long, :), nothing written outside', Object.values(trav).every(x => x === 400) && !outside, trav);
+  check('sketch_save: only real PNGs (signature + IHDR) for the image and the mask, a sketch JSON required; nothing written', Object.values(badPng).every(x => x === 400) && !fs.existsSync(path.join(D, 'sketches/sec1.json')), badPng);
+  const big = 'A'.repeat(26e6);
+  const over = await fetch(`${A.base}/api/op/sketch_save?project=${P}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-wb-token': A.token }, body: JSON.stringify({ id: 'secbig', sketch: SK, png: big }) }).then(r => r.status).catch(e => 'reset: ' + (e.cause?.code || e.message));
+  const over5 = await fetch(`${A.base}/api/op/note_add?project=${P}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-wb-token': A.token }, body: JSON.stringify({ t: 1, text: 'x'.repeat(6e6) }) }).then(r => r.status).catch(e => 'reset: ' + (e.cause?.code || e.message));
+  const mid = await op('sketch_save', { id: 'secmid', sketch: SK, png: 'data:image/png;base64,' + tinyPngB64(16, 9) + '', mask: null });   // a data: URL is fine
+  const noTokSk = await post(`/api/op/sketch_save?project=${P}`, { id: 'secnotok', sketch: SK, png: tinyPngB64() }, { 'x-wb-token': '' });
+  const foreignSk = await post(`/api/op/sketch_save?project=${P}`, { id: 'secforeign', sketch: SK, png: tinyPngB64() }, { origin: 'https://evil.example' });
+  const alive = (await op('costs_get', {})).status;
+  check('sketch_save body limit: 26 MB refused (413), other ops keep 5 MB, the server stays up; no token / a foreign Origin refused',
+    (over === 413 || /^reset/.test(String(over))) && (over5 === 413 || /^reset/.test(String(over5))) && mid.status === 200 && noTokSk.status === 403 && foreignSk.status === 403 && alive === 200
+    && !fs.existsSync(path.join(D, 'sketches/secbig.json')) && !fs.existsSync(path.join(D, 'sketches/secnotok.json')) && !fs.existsSync(path.join(D, 'sketches/secforeign.json')),
+    { over, over5, mid: mid.status, noTok: noTokSk.status, foreign: foreignSk.status, alive });
+  // a sketch over a PRIVATE underlay is private: under private/sketches/, flagged in media.json, never public
+  const pv = (await op('sketch_save', { id: 'secpriv', sketch: { ...SK, underlay: { src: 'roots/private/face.png', opacity: 1 } }, png: tinyPngB64() })).body;
+  const pvm = readP('media.json').items.find(m => m.id === 'sketch-secpriv');
+  const pvAgent = (await op('sketch_get', { id: 'secpriv' })).body;
+  check('a sketch over a PRIVATE underlay is stored under private/sketches/ and flagged private (no public thumbnail); via is never "page" from a tool', pv?.png === 'private/sketches/secpriv.png' && S.isPrivate(pv.png) && pvm?.private === true && pvm.thumb === null && pvAgent.private === true && pvAgent.via === 'agent',
+    { pv, media: pvm && { path: pvm.path, private: pvm.private, thumb: pvm.thumb } });
+  // scenes.json from the page: saved versions and authors kept, statuses / answers stamped, malformed refused; agent rules
+  await op('scenes_update', { upsert: [{ id: 'sc01', title: 'sec: agent title' }], message: 'sec' });   // v2 (v1 derived from script.json)
+  const sn = (await op('scene_note_add', { scene: 'sc01', text: 'sec: agent note' })).body;
+  await op('intake_answer', { key: 'mood', text: 'sec: agent answer' });
+  const okAgent = await op('scenes_update', { status: { sc01: 'ok' } });
+  const sp = await pageSave('scenes.json', (d) => { d.versions[0].scenes[0].title = 'FORGED'; const a = d.notes.find(x => x.id === sn.id); a.by = 'director'; a.via = 'page';
+    d.notes.push({ id: 'sn99', scene: null, text: 'sec: page note claiming the agent', by: 'agent', via: 'agent', status: 'open', replies: [] });
+    d.states.sc01 = { status: 'ok', by: 'agent', via: 'agent' }; d.intake.mood.via = 'page'; d.intake.mood.by = 'director'; d.intake.where = { text: 'sec: page answer', by: 'agent', via: 'agent' }; });
+  const SCN = readP('scenes.json');
+  const badScenes = await post(`/api/save/scenes.json?project=${P}`, { base_rev: SCN.rev, data: { versions: [{ id: 'v1', scenes: [{ id: '../x', t0: 5, t1: 1 }] }] } });
+  check('scenes.json: an agent cannot mark a scene ok; a page save cannot rewrite a saved version or an author, is stamped director/page (status, answer, new note); a malformed file is refused',
+    okAgent.status === 403 && sp.status === 200 && SCN.versions[0].scenes[0].title !== 'FORGED' && SCN.notes.find(x => x.id === sn.id)?.via === 'agent' && SCN.notes.find(x => x.id === 'sn99')?.via === 'page'
+    && SCN.states.sc01?.status === 'ok' && SCN.states.sc01.via === 'page' && SCN.intake.mood.via === 'agent' && SCN.intake.where.via === 'page' && SCN.intake.where.by === 'director' && badScenes.status === 400,
+    { okAgent: okAgent.status, v1: SCN.versions[0].scenes[0].title, note: SCN.notes.find(x => x.id === sn.id)?.via, pageNote: SCN.notes.find(x => x.id === 'sn99')?.via, state: SCN.states.sc01, mood: SCN.intake.mood, where: SCN.intake.where, bad: badScenes.status });
+  const snapK = (await post(`/api/snapshot?project=${P}`, { message: 'sec: sc01 ok' })).body;
+  await pageSave('scenes.json', (d) => { d.states.sc01 = { status: 'draft' }; });   // the director took the ok back
+  await post(`/api/restore?project=${P}`, { snapshot: snapK.id, by: 'agent' });
+  check('an agent restore brings no scene ok back (needs_you); sketch files survive a restore', readP('scenes.json').states.sc01?.status === 'needs_you' && fs.existsSync(path.join(D, 'sketches/secmid.png')), readP('scenes.json').states.sc01);
+  const stat2 = { sketchJs: await st('/core/sketch/sketch.js'), sketchCss: await st('/core/sketch/sketch.css'), cat: await st('/catalog/catalog.json'), catLic: await st('/catalog/LICENSES.md'),
+    catImg: await st('/catalog/' + (fs.readdirSync(path.join(WB, 'catalog/body'))[0] ? 'body/' + fs.readdirSync(path.join(WB, 'catalog/body'))[0] : 'x.jpg')),
+    dev: await st('/tools/sketch-dev.html'), catUp: await st('/catalog/%2E%2E/package.json'), deep: await st('/core/sketch/x/../../../lib/store.mjs'), skJson: await st(`/data/${P}/sketches/secmid.json`) };
+  check('static allow-list: the sketch tool and the catalogue are served, tools/ and escapes are not', stat2.sketchJs === 200 && stat2.sketchCss === 200 && stat2.cat === 200 && stat2.catLic === 200 && stat2.catImg === 200 && stat2.dev === 403
+    && [stat2.catUp, stat2.deep].every(x => x === 400 || x === 403) && stat2.skJson === 200, stat2);
+
   // ---------------------------------------------------------------- F09: the EDL extractor's server (source check: it needs the owner's render page)
   const edl = fs.readFileSync(path.join(WB, 'importers/azemar_extract_edl.mjs'), 'utf8');
   check('F09 EDL extractor server: 127.0.0.1, decode in try/catch, confined to ROOT', /listen\(\d+, '127\.0\.0\.1'/.test(edl) && /try \{ p = inside\(ROOT,/.test(edl) && /if \(!p\) \{ r\.writeHead\(403\)/.test(edl));
@@ -231,6 +285,17 @@ try {
     await pg.evaluate(() => document.querySelector('.lytabs [data-side=versions]')?.click()); await wait(300);
     await pg.evaluate(() => window.WB.stages.open('script')); await wait(500);
     check('F02 stored payloads in lyrics (lines, section tags, notes, version messages) and stages (notes, blockers) render as text', await pg.evaluate(() => window.__z === undefined && !document.querySelector('.lyws img, .sgbar img, #rail img')));
+    const X = (n) => `<img src=x onerror="window.__s=${n}">`;
+    await op('scenes_update', { upsert: [{ id: 'sc02', title: X(1), text: X(2), beats: [{ t: 5000, text: X(3) }] }], message: X(4) });
+    await op('scene_note_add', { scene: 'sc02', text: X(5), by: X(6) });
+    await op('intake_answer', { key: 'refs', text: X(7), by: X(8), asked_in_chat: true });
+    await pg.goto(`${A.base}/?project=${P}`, { waitUntil: 'domcontentloaded' });
+    await pg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 });
+    await pg.evaluate(() => window.WB.stages.open('script')); await wait(800);
+    await pg.evaluate(() => { window.WB.script.focus('sc02'); }); await wait(300);
+    for (const side of ['notes', 'versions', 'intake']) { await pg.evaluate((s) => document.querySelector(`.scws .lytabs [data-side=${s}]`)?.click(), side); await wait(200); }
+    await pg.evaluate(() => window.WB.app.show('timeline')); await wait(800);
+    check('F02 stored payloads in the script (scene titles, text, beats, notes, intake, version messages, the timeline scenes column) render as text', await pg.evaluate(() => window.__s === undefined && !document.querySelector('.scws img:not([src*="sketches/"]), .col-scenes img')));
     const tokenOk = await pg.evaluate(async () => (await fetch('/api/op/costs_get?project=demo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status);
     const dock = await browser.newPage(); dock.on('console', m => { if (/Content Security Policy|Refused to/i.test(m.text())) violations.push('dock: ' + m.text()); });
     await dock.goto(`${A.base}/dock.html?project=${P}`, { waitUntil: 'domcontentloaded' }); await wait(1500);
