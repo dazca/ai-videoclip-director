@@ -73,15 +73,21 @@ export async function verifyRunner({ browser, OUT }) {
       q0.btns.every(b => b.join(',') === 'Approve,Reject') && q0.cycle === 0 && q0.ta === 1 && q0.thumbs >= 3 && /Run all approved \(0\)/.test(q0.runAll) && q0.dis && /2 selected · \$0\.24/.test(selTxt), { q0, selTxt });
 
     // 3. approve: one by its button, two by the selection; reject one
+    // wait on real conditions, not on time (under full-suite load the page's saves land late): each approval is on file stamped
+    // via page before the next act, and the row's Run button exists before anything clicks it
+    const viaOf = (x) => reqOf(x.id)?.log?.filter(l => l.status === 'approved').at(-1)?.via;
+    const approvedByPage = (xs) => xs.every(x => reqOf(x.id)?.status === 'approved' && viaOf(x) === 'page');
     await click(`${row(A.id)} [data-x=approve]`);
+    await fileUntil(() => approvedByPage([A]), 30000);
+    await until((ids) => ids.every(id => !!document.querySelector(`.queue tr[data-id="${id}"] [data-x=pick]`)?.checked) && !!document.querySelector('.queue [data-q=approvesel]'), [B.id, C.id], 15000);
     await click('.queue [data-q=approvesel]');
-    await fileUntil(() => [A, B, C].every(x => reqOf(x.id).status === 'approved'));
-    await until((id) => !!document.querySelector(`.queue tr[data-id="${id}"] [data-x=reject]`), C.id);
+    await fileUntil(() => approvedByPage([A, B, C]), 30000);
+    await until((id) => !!document.querySelector(`.queue tr[data-id="${id}"] [data-x=reject]`), C.id, 30000);
     await click(`${row(C.id)} [data-x=reject]`);
-    await fileUntil(() => reqOf(C.id).status === 'rejected');
-    await until((ids) => /Run all approved \(2\) · \$0\.36/.test(document.querySelector('.queue [data-q=runall]')?.textContent || '') && !!document.querySelector(`.queue tr[data-id="${ids[0]}"] [data-x=run]`), [A.id]);
+    await fileUntil(() => reqOf(C.id)?.status === 'rejected', 30000);
+    await until((ids) => /Run all approved \(2\) · \$0\.36/.test(document.querySelector('.queue [data-q=runall]')?.textContent || '') && !!document.querySelector(`.queue tr[data-id="${ids[0]}"] [data-x=run]`), [A.id], 30000);
     const q1 = await pg.evaluate((ids) => ({ runA: document.querySelector(`.queue tr[data-id="${ids[0]}"] [data-x=run]`)?.textContent, runAll: document.querySelector('.queue [data-q=runall]')?.textContent, rejected: document.querySelector(`.queue tr[data-id="${ids[2]}"] .chip`)?.textContent }), [A.id, B.id, C.id]);
-    const via = [A, B, C].map(x => reqOf(x.id).log.filter(l => l.status === 'approved').at(-1)?.via);
+    const via = [A, B, C].map(viaOf);
     await shot('v12_queue_approved');
     check('Approve (button) and Approve selected stamp the director\'s approval (via page); Reject; approved rows show "Run · $0.24"; "Run all approved (2) · $0.36"',
       via.every(v => v === 'page') && reqOf(C.id).status === 'rejected' && /Run · \$0\.24/.test(q1.runA || '') && /Run all approved \(2\) · \$0\.36/.test(q1.runAll || '') && q1.rejected === 'rejected', { via, q1 });

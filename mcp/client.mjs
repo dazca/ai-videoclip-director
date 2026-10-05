@@ -18,7 +18,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // the SDK from the workbench's own node_modules (pathToFileURL: Windows paths are not import specifiers)
-const sdk = (p) => import(pathToFileURL(path.join(HERE, '..', 'node_modules', '@modelcontextprotocol', 'sdk', 'dist', 'esm', ...p.split('/'))).href);
+// (an npm / npx install hoists the SDK next to the package: then the bare specifier, which resolves from this file's folder upwards)
+const sdk = (p) => { const f = path.join(HERE, '..', 'node_modules', '@modelcontextprotocol', 'sdk', 'dist', 'esm', ...p.split('/')); return fs.existsSync(f) ? import(pathToFileURL(f).href) : import(`@modelcontextprotocol/sdk/${p}`); };
 const { Client } = await sdk('client/index.js');
 const { StdioClientTransport } = await sdk('client/stdio.js');
 

@@ -18,7 +18,11 @@ the file itself.
 ## Start of a session
 
 1. `status`: is the server up (live page) or are you on files only? Which project? How many pages are open?
-   Not up and the director wants to watch: ask them to run `npm start` in the workbench folder.
+   Not up and the director wants to watch: ask them to run `npm start` in the workbench folder (or `npx ai-videoclip-director`
+   without a clone). Connected through the helper (`ai-videoclip-director mcp`), the MCP process serves the page itself when no
+   workbench was running: give the director the URL from `status` (`server.url`). A new director: point them at Help › Welcome…
+   (the three ways to start, in English, Catalan or Spanish) and Help › System check… (ffmpeg, the fal key, you).
+   Pairing a hosted page (`ai-videoclip-director pair`) is the director's, in their terminal: never ask for the code or a token.
 2. `projects` (action list / open) if the project is not the right one.
 3. `stages_get`: where the project stands in the guided flow (seven stages, the next one, what blocks it). Then
    `song_get` (words:false for a quick read), `shots_list`, `notes_get` (every stage's open notes), `approvals_get` state=changes,

@@ -22,6 +22,9 @@ import '../tabs/storyboard.js';   // and the storyboard stage
 import { STAGES, STATUS_LABEL, SHOWN_LABEL, stagesView, projectFacts, stageById, stageTip } from '../js/flow.js';
 import { openCounts } from '../js/notes.js';
 import * as RV from '../js/revisions.js';
+import { t } from './i18n.js';
+const stName = (s) => t('stage.' + s.id, null, s.title);   // G8
+const shownName = (k) => t('shown.' + k, null, SHOWN_LABEL[k] || k);
 
 const WB = () => window.WB;
 const facts = () => projectFacts({ song: store.song, script: store.script, shots: store.shots, entities: store.entities, lyrics: store.lyrics, scenes: store.scenes, breakdown: store.breakdown, storyboard: store.board, approvals: store.approvals, notes: store.notes });
@@ -62,15 +65,15 @@ function roundHtml() {
   if (!store.notes) return '';
   const s = rounds.state(), chip = s.last ? `<a class="rvc" data-rv="compare" title="${esc(`${s.last.id}: ${s.last.summary}\n${s.count} revision${s.count > 1 ? 's' : ''} · click: compare revisions`)}">${esc(s.last.id)}</a>` : '';
   if (s.phase === 'collecting') {
-    return `<span class="rnd" data-phase="collecting" title="${esc(`Round ${s.n}: your open notes (the ones you wrote, in any stage) collect here; the agent's notes are not sent.\nThe top bar counts all open notes, the agent's too.\nSend round to Claude: every open note of yours goes to the agent as one ask.`)}"><b>Round ${s.n}</b> · your open notes: ${s.open}`
-      + `<button class="rbtn" data-rv="send"${s.open ? '' : ' disabled'}>Send round to Claude</button>${chip}</span>`;
+    return `<span class="rnd" data-phase="collecting" title="${esc(`Round ${s.n}: your open notes (the ones you wrote, in any stage) collect here; the agent's notes are not sent.\nThe top bar counts all open notes, the agent's too.\nSend round to Claude: every open note of yours goes to the agent as one ask.`)}"><b>${esc(t('rail.round', { n: s.n }))}</b> · ${esc(t('rail.yourOpen', { n: s.open }))}`
+      + `<button class="rbtn" data-rv="send"${s.open ? '' : ' disabled'}>${esc(t('rail.send'))}</button>${chip}</span>`;
   }
   const p = s.progress, done = p.absorbed + p.replied + p.dismissed, pct = p.total ? Math.round(100 * done / p.total) : 100;
   const bar = `<i class="rpb" title="${esc(RV.progressText(p))}"><u style="width:${pct}%"></u></i>`;
-  const lbl = s.phase === 'sent' ? 'Claude working' : 'Claude finished';
-  return `<span class="rnd" data-phase="${s.phase}" title="${esc(`Round ${s.n} sent ${String(s.live.sent_at).replace('T', ' ')}${s.live.summary ? `\nClaude: ${s.live.summary}` : ''}\nClose revision: snapshot the project as ${s.next} (compare and restore it later)`)}"><b>Round ${s.n}</b> · ${lbl} ${bar}`
+  const lbl = s.phase === 'sent' ? t('rail.working') : t('rail.finished');
+  return `<span class="rnd" data-phase="${s.phase}" title="${esc(`Round ${s.n} sent ${String(s.live.sent_at).replace('T', ' ')}${s.live.summary ? `\nClaude: ${s.live.summary}` : ''}\nClose revision: snapshot the project as ${s.next} (compare and restore it later)`)}"><b>${esc(t('rail.round', { n: s.n }))}</b> · ${esc(lbl)} ${bar}`
     + `<span class="rpg"><em class="ab">${p.absorbed}</em> absorbed · <em class="rp">${p.replied}</em> replied · <em class="lf">${p.left}</em> left</span>`
-    + `<button class="rbtn${s.phase === 'sent' ? ' sec' : ''}" data-rv="close">Close revision ${esc(s.next)}</button>${chip}</span>`;
+    + `<button class="rbtn${s.phase === 'sent' ? ' sec' : ''}" data-rv="close">${esc(t('rail.close', { id: s.next }))}</button>${chip}</span>`;
 }
 
 let el = null;
@@ -78,8 +81,8 @@ function render() {
   if (!el || !store.stages) return;
   const v = view(), cur = WB()?.app?.active() === 'stage' ? current() : null;
   const next = v.next, oc = openCounts(store.notes);
-  el.innerHTML = v.stages.map(s => { const k = oc.stages[s.id] || 0; return `<a data-stage="${s.id}" data-shown="${s.shown}" class="st-${s.shown}${s.id === cur ? ' on' : ''}" title="${esc(`${stageTip(s)}${k ? `\n${k} open note${k > 1 ? 's' : ''}` : ''}\n${stageById(s.id).does}\nAlt+Shift+${s.n} · right-click: status`)}"><i></i>${s.n} ${esc(s.title)}${s.shown === 'changed' ? '<b class="stw">⚠</b>' : ''}${k ? `<b class="rnc" title="${k} open note${k > 1 ? 's' : ''}">${k}</b>` : ''}</a>`; }).join('')
-    + `<span class="next" data-stage="${esc(next?.id || '')}" title="${esc(next ? `next: ${next.title}${next.blockers.length ? '\n· ' + next.blockers.join('\n· ') : ''}` : 'every stage is done')}">${next ? `next: <b>${esc(next.title)}</b> · ${esc(SHOWN_LABEL[next.shown] || next.shown || '')}` : 'all stages done'}</span>`
+  el.innerHTML = v.stages.map(s => { const k = oc.stages[s.id] || 0; return `<a data-stage="${s.id}" data-shown="${s.shown}" class="st-${s.shown}${s.id === cur ? ' on' : ''}" title="${esc(`${stageTip(s)}${k ? `\n${k} open note${k > 1 ? 's' : ''}` : ''}\n${stageById(s.id).does}\nAlt+Shift+${s.n} · right-click: status`)}"><i></i>${s.n} ${esc(stName(s))}${s.shown === 'changed' ? '<b class="stw">⚠</b>' : ''}${k ? `<b class="rnc" title="${k} open note${k > 1 ? 's' : ''}">${k}</b>` : ''}</a>`; }).join('')
+    + `<span class="next" data-stage="${esc(next?.id || '')}" title="${esc(next ? `next: ${next.title}${next.blockers.length ? '\n· ' + next.blockers.join('\n· ') : ''}` : 'every stage is done')}">${next ? `${esc(t('rail.next'))} <b>${esc(stName(next))}</b> · ${esc(shownName(next.shown))}` : esc(t('rail.allDone'))}</span>`
     + roundHtml();
 }
 export function mountRail() {

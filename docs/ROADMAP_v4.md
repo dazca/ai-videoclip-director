@@ -653,3 +653,11 @@ Rules for the loop:
   words in Costs / Takes / the event dialogs, "xp-desktop" offered only where used, "+ chapter" instead of a "no chapter" dropdown, the
   chapters column's hint, "1 look", "No song time", two-decimal estimates, the lock bar's links to the exports); verify v30,
   tools/security-package.mjs.
+- 2026-10-05: done: G7 the npm helper and pairing, local side (`bin/cli.mjs`: `npx ai-videoclip-director [serve|mcp|connect|pair]
+  [--data] [--port]`; `mcp` serves the page from the same process when no workbench answers; the data folder outside the package
+  cache, its first run with the template + demo, the URL and the Connect command; one-time pairing codes (single use, 10 min, 5 wrong =
+  all void), an Origin-bound scoped token (director / read; never private files), Settings › Paired pages + Revoke, CORS + Private
+  Network Access only for paired Origins, Safari guidance in README; checked with `npm pack` + `npx <tarball>`; not published) and G8
+  (the first-run onboarding: song / lyrics only / the demo, Connect Claude, where the data lives, the system check; `core/i18n.js` with
+  English, Catalan and Spanish for the onboarding and the main chrome, Settings › language; error states: server down, stale code, no
+  ffmpeg, no fal key (Help › System check…), a project that cannot load); verify v31, tools/security-pairing.mjs, test:mcp section 31.

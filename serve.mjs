@@ -41,10 +41,18 @@
 // POST /api/snapshot                     {message}  -> copies the small JSON files to data/<p>/.snapshots/<ts>-<slug>/
 // POST /api/restore                      {snapshot} -> snapshots the current state first ("auto"), then restores
 // POST /api/reveal                       {path}     -> opens the file manager at a media file (local only)
+// POST /api/onboarding                   {done: true} (the local page only): the first-run onboarding was seen (G8; removes <data>/.wb-first-run)
+// G7 pairing (lib/pairing.mjs): a page on ANOTHER origin (the future hosted app) talking to this helper:
+// POST /api/pair                         {code} from the page's Origin, no token: the terminal's one-time code -> {token, id, origin, scope}
+//                                        (CORS for that Origin only; the code is single-use, expires, 5 wrong codes void them all)
+// POST /api/pairings                     {action: list | revoke, id?} (the LOCAL page only: Settings › Paired pages)
+// x-wb-pair-token on any request         the paired page: bound to its Origin (another Origin or none: 403); scope "director" = the
+//                                        page's acts (never private files, pairing management or Reveal), "read" = GET only.
+//                                        CORS + Access-Control-Allow-Private-Network (Chrome PNA / LNA preflights) for paired Origins only.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { pipeline } from 'node:stream';
 import os from 'node:os';
 import crypto from 'node:crypto';
@@ -56,6 +64,7 @@ import { checkBoard } from './js/storyboard.js';
 import { cleanChapters } from './js/chapters.js';
 import { checkNotes } from './js/notes.js';
 import * as BT from './js/batches.js';
+import * as PR from './lib/pairing.mjs';
 
 const { CFG, DATA_ROOT, WB_DIR: WB } = S;
 const ARGS = process.argv.slice(2);
@@ -83,6 +92,12 @@ const CODE = S.codeState(), STARTED = new Date().toISOString().slice(0, 19);
 const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(WB, 'package.json'), 'utf8')).version; } catch (e) { return null; } })();   // About shows it
 // F10: the git commit this folder is at (short hash, "-dirty" with local changes), when git and a checkout are there; About shows it
 const COMMIT = (() => { try { return execFileSync('git', ['describe', '--always', '--dirty', '--abbrev=7'], { cwd: WB, timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).toString().trim() || null; } catch (e) { return null; } })();
+// G8: what the onboarding / the error states need to know: ffmpeg and ffprobe on PATH (once, at start), a first run (the helper
+// writes <data>/.wb-first-run when it makes the data folder; it holds until the director dismisses the onboarding or makes a project)
+const onPath = (bin) => { try { return spawnSync(bin, ['-version'], { stdio: 'ignore', timeout: 5000, windowsHide: true }).status === 0; } catch (e) { return false; } };
+const TOOLS = { ffmpeg: onPath('ffmpeg'), ffprobe: onPath('ffprobe') };
+const FIRST_RUN = path.join(DATA_ROOT, '.wb-first-run');
+const firstRun = () => fs.existsSync(FIRST_RUN) && !S.projectIds().some(id => id !== 'demo' && !id.startsWith('_') && fs.existsSync(path.join(DATA_ROOT, id, 'song.json')));
 // F9: the last write an agent made through this server (Help › Connect Claude… shows it; never the token)
 let LAST_AGENT = null;
 function codeStatus() {
@@ -429,9 +444,10 @@ function stampPage(name, data, cur, fromPage = true) {
   }
   return data;
 }
+const cors = (o) => ({ 'access-control-allow-origin': o, vary: 'Origin', 'access-control-expose-headers': 'x-wb-code, x-wb-client' });
 const json = (res, code, v) => { res.writeHead(code, { 'content-type': 'application/json', 'x-wb-code': CODE.hash }); res.end(JSON.stringify(v)); };
 
-http.createServer(async (req, res) => {
+const server = http.createServer(async (req, res) => {
   res.setHeader('x-content-type-options', 'nosniff');
   try {
     if (!hostOk(req.headers.host)) return json(res, 403, { error: `unknown Host header (open http://localhost:${PORT}/)` });
@@ -440,12 +456,28 @@ http.createServer(async (req, res) => {
     const project = url.searchParams.get('project') || DEFAULT;
     // also no ":" (NTFS streams: private::$INDEX_ALLOCATION/x, x.jpg::$DATA) and no "~<digit>" (8.3 short names: SNAPSH~1)
     if (/[\\\0:]|~\d/.test(p) || p.split('/').some(s => s === '..' || s === '.')) return json(res, 400, { error: 'bad path' });
+    // G7: a CORS preflight (a paired hosted page; or /api/pair from any https page): answered only for /api/pair and for Origins
+    // that hold a pairing (a preflight carries no token), with Private Network Access / Local Network Access allowed
+    if (req.method === 'OPTIONS') {
+      const o = PR.cleanOrigin(req.headers.origin);
+      if (!o || !(p === '/api/pair' || PR.pairedOrigins(DATA_ROOT).has(o))) { res.writeHead(403); return res.end(); }
+      res.writeHead(204, { ...cors(o), 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'content-type, x-wb-pair-token', 'access-control-max-age': '600',
+        ...(req.headers['access-control-request-private-network'] === 'true' ? { 'access-control-allow-private-network': 'true' } : {}) });
+      return res.end();
+    }
+    // a paired page's token: valid and from its own Origin, else 403 (never falls back to anything else)
+    let paired = null;
+    if (req.headers['x-wb-pair-token'] != null) {
+      const c = PR.check(DATA_ROOT, String(req.headers['x-wb-pair-token']), req.headers.origin);
+      if (!c.ok) return json(res, 403, { error: c.why });
+      paired = c.pairing; for (const [k, v] of Object.entries(cors(paired.origin))) res.setHeader(k, v);
+    }
     if (p === '/api/events') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
       res.write(': hi\n\n'); const c = { res, project: url.searchParams.get('project') || null }; clients.add(c); req.on('close', () => clients.delete(c)); flushPendingUi(c); return;
     }
     if (p === '/api/config') return json(res, 200, { default_project: DEFAULT, media_roots: CFG.mediaRoots, media_roots_ignored: CFG.mediaRootsIgnored || [], private_re: CFG.privateSrc });
-    if (p === '/api/status') return json(res, 200, { ok: true, app: 'director-workbench', version: VERSION, commit: COMMIT, code: codeStatus(), default_project: DEFAULT, pages: clients.size, pages_by_project: [...clients].reduce((o, c) => (o[c.project || '*'] = (o[c.project || '*'] || 0) + 1, o), {}), ...(isLocal(req) ? { data_dir: DATA_ROOT } : {}) });   // I5: the absolute data path only to this machine
+    if (p === '/api/status') return json(res, 200, { ok: true, app: 'director-workbench', version: VERSION, commit: COMMIT, code: codeStatus(), default_project: DEFAULT, tools: TOOLS, first_run: firstRun(), pages: clients.size, pages_by_project: [...clients].reduce((o, c) => (o[c.project || '*'] = (o[c.project || '*'] || 0) + 1, o), {}), ...(isLocal(req) ? { data_dir: DATA_ROOT } : {}) });   // I5: the absolute data path only to this machine
     // F9 (Help › Connect Claude…): how to connect a Claude Code chat: the paths and the connection state, local only. The agent
     // token's FILE is named, its value never leaves the server here (screenshots, exports)
     if (p === '/api/connect') {
@@ -458,15 +490,27 @@ http.createServer(async (req, res) => {
     if (p === '/api/snapshots' && req.method === 'GET') return json(res, 200, S.listSnapshots(project));
     if (p.startsWith('/api/') && req.method === 'POST') {
       // CSRF: JSON only (a cross-site form or no-preflight fetch cannot send it), no foreign Origin, the per-run token
-      if (req.headers.origin && !originOk(req.headers.origin)) return json(res, 403, { error: 'foreign Origin' });
       if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) return json(res, 415, { error: 'content-type must be application/json' });
-      if (!tokenOk(req.headers['x-wb-token']) && !agentTokenOk(req.headers['x-wb-agent-token'])) return json(res, 403, { error: 'missing or wrong token: the page sends x-wb-token (reload the page); agents send x-wb-agent-token from <data folder>/.wb-agent-token (the MCP server reads it)' });
+      // G7: a hosted page redeems the terminal's code: no token yet, its own (https) Origin; the answer is readable by that Origin only
+      if (p === '/api/pair' && !paired) {
+        const o = PR.cleanOrigin(req.headers.origin);
+        if (!o || originOk(req.headers.origin)) return json(res, 403, { error: 'pairing is for a page on another origin (https://…); this page is already the local one' });
+        for (const [k, v] of Object.entries(cors(o))) res.setHeader(k, v);
+        const b = JSON.parse((await readBody(req, 4096)) || '{}');
+        try { return json(res, 200, PR.redeem(DATA_ROOT, b?.code, o, { label: b?.label })); } catch (e) { return json(res, e.code || 400, { error: e.message }); }
+      }
+      if (req.headers.origin && !originOk(req.headers.origin) && !paired) return json(res, 403, { error: 'foreign Origin' });
+      if (paired && paired.scope !== 'director') return json(res, 403, { error: `this pairing (${paired.origin}) is read only` });
+      if (paired && ['/api/pair', '/api/pairings', '/api/reveal', '/api/onboarding'].includes(p)) return json(res, 403, { error: 'the local page only (not a paired page)' });
+      if (!paired && !tokenOk(req.headers['x-wb-token']) && !agentTokenOk(req.headers['x-wb-agent-token'])) return json(res, 403, { error: 'missing or wrong token: the page sends x-wb-token (reload the page); agents send x-wb-agent-token from <data folder>/.wb-agent-token (the MCP server reads it)' });
       if (!isLocal(req) && !CFG.allowRemoteOps && p !== '/api/ui/ack') return json(res, 403, { error: 'writes are local only (set allow_remote_ops in workbench.config.json)' });
       let raw; try { raw = await readBody(req, bodyLimit(p)); } catch (e) { if (e.code === 413) res.setHeader('connection', 'close'); throw e; }
       const body = raw ? JSON.parse(raw) : {};
       if (!body || typeof body !== 'object' || Array.isArray(body)) return json(res, 400, { error: 'body must be a JSON object' });
       // who writes (S9): the page (the director) or an agent; every stamp, page-only act and lock check follows it
-      const fromPage = isPage(req);
+      // a paired page (scope director, its own Origin, a browser's Sec-Fetch-Site, no agent token) is the director like the local page
+      const fromPage = paired ? !agentTokenOk(req.headers['x-wb-agent-token']) && ['cross-site', 'same-site'].includes(req.headers['sec-fetch-site']) : isPage(req);
+      if (paired && body.include_private) return json(res, 403, { error: 'private media stay on the local page (a paired page never gets them)' });
       res.setHeader('x-wb-client', fromPage ? 'page' : 'agent');
       if (!fromPage) LAST_AGENT = { what: p.startsWith('/api/op/') ? p.slice(8) : p.slice(5), project, at: new Date().toISOString().slice(0, 19) };
       // a project locked for render (Final stage, page only) refuses every write that is not the page's own: 409 + why
@@ -489,6 +533,12 @@ http.createServer(async (req, res) => {
         const { data, cur } = r;
         S.afterPageSave(project, name, data, cur);   // lyrics.json: the song's lines follow the current version
         return json(res, 200, { rev: data.rev });
+      }
+      if (p === '/api/onboarding') { if (!fromPage) return json(res, 403, { error: 'the page only' }); if (body.done) fs.rmSync(FIRST_RUN, { force: true }); return json(res, 200, { first_run: firstRun() }); }
+      if (p === '/api/pairings') {
+        if (!fromPage || !isLocal(req)) return json(res, 403, { error: 'pairings are managed from the local page (Settings › Paired pages) or the terminal' });
+        if (body.action === 'revoke') { try { PR.revoke(DATA_ROOT, String(body.id || '')); } catch (e) { return json(res, e.code || 400, { error: e.message }); } }
+        return json(res, 200, PR.list(DATA_ROOT));
       }
       if (p === '/api/ui/ack') { const a = acks.get(body.id); if (a) { a.n++; if (a.n >= a.pages) a.done(); } return json(res, 200, { ok: true }); }
       if (p === '/api/ui') { S.projDir(project); return json(res, 200, await pushUi(project, body)); }
@@ -568,7 +618,7 @@ http.createServer(async (req, res) => {
     }
     // every check below runs on the path normalised relative to its root, case-insensitively (Windows/macOS file
     // systems ignore case, so /TOOLS/ and /Data/ are the same folders as /tools/ and /data/)
-    const priv = (rel, projects) => !isLocal(req) && (S.isPrivate(rel) || S.isFlaggedPrivate(rel, projects));
+    const priv = (rel, projects) => (!isLocal(req) || !!paired) && (S.isPrivate(rel) || S.isFlaggedPrivate(rel, projects));
     if (p.startsWith('/media/')) {
       const f = S.mediaRootFile(p.slice(7)); if (!f) { res.writeHead(403); return res.end('not a media root'); }
       if (priv(S.relTo(CFG.mediaBase, f), S.projectIds())) { res.writeHead(403); return res.end('private: local only'); }
@@ -589,7 +639,7 @@ http.createServer(async (req, res) => {
       if ((S.WRITABLE.has(m[2]) || m[2] === 'revisions.json' || m[2] === 'proposals.json' || m[2] === 'takes.json' || m[2] === 'surfaces.json' || m[2] === 'checks.json' || m[2] === 'events.json' || m[2] === 'renders.json') && !fs.existsSync(f)) return json(res, 200, null);
       // a remote (LAN) client reads the project's JSON without private paths or items flagged private (media.json,
       // entities with private refs and iteration nodes, requests built on private photos)
-      if (!isLocal(req) && /\.json$/i.test(f) && fs.existsSync(f)) {
+      if ((!isLocal(req) || paired) && /\.json$/i.test(f) && fs.existsSync(f)) {
         const j = S.readJSON(f, null); if (j == null) { res.writeHead(404); return res.end(); }
         res.writeHead(200, { 'content-type': MIME['.json'], 'cache-control': 'no-cache', 'content-security-policy': CSP_FILE }); return res.end(JSON.stringify(S.scrubPrivate(j, [m[1]])));
       }
@@ -601,4 +651,12 @@ http.createServer(async (req, res) => {
     }
     sendFile(req, res, f);
   } catch (e) { const code = e.code >= 400 && e.code < 600 ? e.code : e instanceof SyntaxError || e instanceof URIError ? 400 : 500; json(res, code, { error: String(e.message || e), ...(Array.isArray(e.held) ? { held: e.held } : {}) }); }
-}).listen(PORT, HOST, () => console.log(`workbench: http://localhost:${PORT}/  (listening on ${HOST}; default project ${DEFAULT}, data ${DATA_ROOT}${CFG.file ? ', config ' + path.basename(CFG.file) : ''})`));
+});
+// G7: the helper (bin/cli.mjs, WB_HELPER=1) imports this file and awaits `ready` (a port in use: it falls back); run alone, a
+// listen error ends the process with the reason
+export const ready = new Promise((ok, bad) => {
+  server.once('error', bad);
+  server.listen(PORT, HOST, () => { console.log(`workbench: http://localhost:${PORT}/  (listening on ${HOST}; default project ${DEFAULT}, data ${DATA_ROOT}${CFG.file ? ', config ' + path.basename(CFG.file) : ''})`); ok({ port: PORT, url: `http://localhost:${PORT}`, data: DATA_ROOT }); });
+});
+export { server };
+if (!process.env.WB_HELPER) ready.catch((e) => { console.error(`workbench: cannot listen on ${HOST}:${PORT}: ${e.code === 'EADDRINUSE' ? 'the port is in use (another workbench? pass another port)' : e.message}`); process.exit(1); });

@@ -1,11 +1,12 @@
 // A small modal dialog (Help › Connect Claude…, Help › About): a title bar with ×, a body of HTML, Esc / a click outside
 // closes it. One at a time.   const d = openDialog({id, title, html, wide?}); d.el, d.body, d.close()
+import { t } from './i18n.js';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 let open = null;
 export function openDialog({ id, title, html, wide = false }) {
   open?.close();
   const back = document.createElement('div'); back.className = 'wbdlgb';
-  back.innerHTML = `<div class="wbdlg${wide ? ' wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}" data-dlg="${esc(id)}" tabindex="-1"><div class="wbdlgh"><b>${esc(title)}</b><span class="sp"></span><a data-dlgx="1" title="close (Esc)">×</a></div><div class="wbdlgc">${html}</div></div>`;
+  back.innerHTML = `<div class="wbdlg${wide ? ' wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}" data-dlg="${esc(id)}" tabindex="-1"><div class="wbdlgh"><b>${esc(title)}</b><span class="sp"></span><a data-dlgx="1" title="${esc(t('dlg.close'))}">×</a></div><div class="wbdlgc">${html}</div></div>`;
   const el = back.firstElementChild;
   const close = () => { back.remove(); removeEventListener('keydown', key, true); if (open?.el === el) open = null; };
   const key = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
@@ -18,7 +19,7 @@ export function openDialog({ id, title, html, wide = false }) {
 }
 // a confirm that shows its whole explanation (the palette's one-line confirm cuts long texts): resolves true / false.
 //   await confirmDialog({id, title, html, ok: 'Make public', cancel: 'Cancel'})
-export function confirmDialog({ id = 'confirm', title, html, ok = 'OK', cancel = 'Cancel' }) {
+export function confirmDialog({ id = 'confirm', title, html, ok = t('dlg.ok'), cancel = t('dlg.cancel') }) {
   return new Promise((done) => {
     let answered = false;
     const d = openDialog({ id, title, html: `${html}<div class="wbdlgf"><span class="sp"></span><button data-cf="no">${esc(cancel)}</button><button data-cf="yes" class="pri">${esc(ok)}</button></div>` });
