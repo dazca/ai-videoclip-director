@@ -14,7 +14,7 @@
   "scripts": {
     "start": "node serve.mjs",
     "mcp": "node mcp/server.mjs",
-    "verify": "node tools/verify.mjs --project demo",
+    "verify": "node tools/verify.mjs --project demo && node tools/verify-stages.mjs",
     "test:mcp": "node mcp/test.mjs",
     "new-project": "node importers/new_project.mjs",
     "demo": "node tools/make_demo.mjs",

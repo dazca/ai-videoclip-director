@@ -107,8 +107,8 @@ export class AssetWorkspace {
     await this.act('base', { base: { text: d.text, refs: d.refs } });
     delete this.drafts[e.id]; toast(`${e.name}: base saved (${d.refs.length} refs)`);
   }
-  // the link a page request carries: `asset` (and `char` for a character, the stage-4 name)
-  link(e, l) { return e.kind === 'character' ? { char: l, asset: { type: 'character', ...l } } : { asset: { type: e.kind, ...l } }; }
+  // the link a page request carries: `asset` {type, id, tree, from, kind, ...} (the old `char` name is no longer written)
+  link(e, l) { return { asset: { type: e.kind, ...l } }; }
   async requestRoot() {
     const e = this.ent(), d = this.draft(e), T = this.T;
     if (!d.refs.length && !d.text.trim()) return toast(`pick a base first: a catalogue image, an Openverse image, photos, a sketch, or a description`);
@@ -132,6 +132,26 @@ export class AssetWorkspace {
   }
   async unlock(tree = this.tree) { if (!(await ui.confirm(`Unlock ${A.isRoot(tree) ? 'the ' + this.T.rootWord : 'this ' + this.T.vWord} so it can change again?`))) return; await this.act('unlock', { tree }); toast('unlocked'); }
   setVariant(vid) { this.tab = this.U.vTab; this.vid = vid; prefs.set(this.pf + 'Tab', this.tab); }
+  // the agent's proposals (base_propose, node_import_propose): one click accepts, the director's act
+  async acceptBase() { const e = this.ent(); await this.act('base_accept'); delete this.drafts[e.id]; toast(`${e.name}: the proposed base is the base now`); }
+  async dismissBase() { await this.act('base_dismiss'); toast('base proposal dismissed'); }
+  async acceptImport(id) { const r = await this.act('import_accept', { proposal: id }); this.sel = r.node; this.mode = 'view'; toast(`imported as ${r.node} (head of ${r.tree}): no request, nothing paid`); }
+  async dismissImport(id) { await this.act('import_dismiss', { proposal: id }); toast(`proposal ${id} dismissed`); }
+  // import any registered image as a node of the open tree (a legacy look, an output made outside the queue)
+  async importImage(tree = this.tree) {
+    const e = this.ent(); if (!e) return;
+    const it = this.iter(e), T = this.T;
+    if (A.treeState(it, tree).approved) return toast('this tree is approved (locked): unlock it first');
+    if (!A.isRoot(tree) && !A.approvedNode(it, T.root)) return toast(`approve the ${T.rootWord} first (or import an image as it): a ${T.vWord} starts from it`);
+    const used = new Set(it.nodes.filter(n => n.tree === tree).map(n => n.image.toLowerCase()));
+    const imgs = store.media.filter(m => /\.(png|jpe?g|webp|gif)$/i.test(m.path) && !used.has(String(m.path).toLowerCase()) && m.kind !== 'sketch' && m.kind !== 'ref');
+    const mine = (m) => (m.entities || []).includes(e.id);
+    const items = [...imgs.filter(mine), ...imgs.filter(m => !mine(m))].map(m => ({ label: `${mine(m) ? '● ' : ''}${m.label || m.id}`, detail: [m.kind, m.job ? 'job ' + m.job : '', m.private ? 'private' : '', m.path].filter(Boolean).join(' · '), value: m.id }));
+    if (!items.length) return toast('no registered images: the agent registers files with media_add');
+    const id = await ui.pick({ title: `Import an image as a node of ${tree} (${e.name}): no request, nothing paid`, items }); if (!id) return;
+    const r = await this.act('import', { tree, media: id }); this.sel = r.node; this.mode = 'view';
+    toast(`${id} imported as ${r.node}: the head of ${tree}${r.provenance?.cost ? ` (cost on record: $${Number(r.provenance.cost.usd).toFixed(2)}, ${r.provenance.cost.source})` : ''}`);
+  }
   async newVariant() {
     const e = this.ent(); if (!e) return;
     if (e.kind !== 'character') { this.setVariant(this.vid); this.vf = { axes: {}, name: '', notes: '' }; this.sel = null; this.render(); this.$('.asvf')?.scrollIntoView({ block: 'nearest' }); return; }
@@ -275,7 +295,7 @@ export class AssetWorkspace {
     const row = (r) => {
       if (!r.e) return `<div class="chrow ghost" data-item="${esc(r.item.id)}" title="a breakdown ${esc(r.item.kind)}, not an entity yet: Breakdown > Create entity"><i class="chdot s-none"></i><span class="chnm">${esc(r.item.name)}</span><span class="chst">not an entity</span><a data-a="toitem" data-i="${esc(r.item.id)}">make…</a><div class="chsc">${r.scenes.map(chip).join('')}</div></div>`;
       const st = A.assetStatus(r.e, store.requests, r.e.kind);
-      return `<div class="chrow${r.e.id === this.cur ? ' on' : ''}" data-ent="${esc(r.e.id)}"${r.e.kind === 'character' ? ` data-char="${esc(r.e.id)}"` : ''}><i class="chdot s-${st.key}" title="${esc(st.label)}"></i><span class="chnm">${esc(r.e.name || r.e.id)}</span><span class="chst s-${st.key}">${esc(st.label)}</span>${st.waiting ? `<span class="lynb" title="${st.waiting} new node(s): keep / branch / revert">${st.waiting}</span>` : ''}${st.open ? `<span class="chq" title="${st.open} open request(s): draft, approved or running">${st.open} req</span>` : ''}<div class="chsc">${r.scenes.map(chip).join('') || '<span class="dim">no scenes</span>'}</div></div>`;
+      return `<div class="chrow${r.e.id === this.cur ? ' on' : ''}" data-ent="${esc(r.e.id)}"${r.e.kind === 'character' ? ` data-char="${esc(r.e.id)}"` : ''}><i class="chdot s-${st.key}" title="${esc(st.label)}"></i><span class="chnm">${esc(r.e.name || r.e.id)}</span><span class="chst s-${st.key}">${esc(st.label)}</span>${st.waiting ? `<span class="lynb" title="${st.waiting} new node(s): keep / branch / revert">${st.waiting}</span>` : ''}${st.open ? `<span class="chq" title="${st.open} open request(s): draft, approved or running">${st.open} req</span>` : ''}${(() => { const it = A.normIter(r.e.iter), k = (it.base_proposal ? 1 : 0) + (it.proposals || []).filter(x => x.status === 'open').length; return k ? `<span class="chq chpq" title="the agent proposes ${k} thing(s): accept or dismiss">${k} prop</span>` : ''; })()}<div class="chsc">${r.scenes.map(chip).join('') || '<span class="dim">no scenes</span>'}</div></div>`;
     };
     let h = '';
     for (const t of this.types) {
@@ -313,8 +333,23 @@ export class AssetWorkspace {
   rootHtml(e) {
     const T = this.T, it = this.iter(e), nodes = A.treeNodes(it, T.root);
     const reqs = this.reqs(e).filter(r => r.char.tree === T.root);
-    return (nodes.length ? `<details class="chbasefold"${this.showBase ? ' open' : ''}><summary>base: ${(e.base?.refs || []).length} refs${e.base?.text ? ' · ' + esc(e.base.text.slice(0, 80)) : ''} <span class="dim">(click to change; a new ${esc(T.sheetWord)} starts a new root)</span></summary>${this.baseHtml(e)}</details>` : this.baseHtml(e))
+    return this.proposalHtml(e, it, T.root) + (nodes.length ? `<details class="chbasefold"${this.showBase ? ' open' : ''}><summary>base: ${(e.base?.refs || []).length} refs${e.base?.text ? ' · ' + esc(e.base.text.slice(0, 80)) : ''} <span class="dim">(click to change; a new ${esc(T.sheetWord)} starts a new root)</span></summary>${this.baseHtml(e)}</details>` : this.baseHtml(e))
       + this.reqsHtml(reqs) + this.treeHtml(it, T.root) + this.nodeHtml(e, it);
+  }
+  // the agent's base proposal (root tab) and its import proposals for this tree: accept / dismiss in one click
+  proposalHtml(e, it, tree) {
+    let h = '';
+    const bp = A.isRoot(tree) ? it.base_proposal : null;
+    if (bp) h += `<div class="chprop base"><div class="chprh"><b>The agent proposes a base</b><span class="dim">${esc(bp.by || 'agent')} · ${when(bp.at)}${e.base ? ' · replaces the current base' : ''}</span><span class="sp"></span><button data-a="bpaccept" class="pri" title="it becomes the base (your act; the agent cannot set it)">Accept base</button><button data-a="bpdismiss">Dismiss</button></div>`
+      + (bp.text ? `<div class="chprt">“${esc(bp.text)}”</div>` : '') + ((bp.refs || []).length ? `<div class="chpicked">${bp.refs.map(r => `<span class="chref" title="${esc([r.title, r.source, r.path].filter(Boolean).join(' · '))}">${lock(r.path, r.private)}<img src="${esc(imgUrl(r.path))}" alt=""><span><b>${esc(r.source)}</b></span></span>`).join('')}</div>` : '')
+      + (bp.why ? `<div class="dim chprw">why: ${esc(bp.why)}</div>` : '') + '</div>';
+    for (const pr of (Array.isArray(it.proposals) ? it.proposals : []).filter(x => x.status === 'open' && x.tree === tree)) {
+      const c = pr.provenance?.cost, blocked = !A.isRoot(tree) && !A.approvedNode(it, this.T.root);
+      h += `<div class="chprop imp" data-prop="${esc(pr.id)}">${lock(pr.path, pr.private)}<img src="${esc(imgUrl(pr.path))}" alt=""><div class="chprb"><div class="chprh"><b>The agent proposes ${esc(pr.media)} as a node of ${esc(tree)}</b><span class="dim">${esc(pr.id)} · ${when(pr.at)}</span></div>`
+        + `<div class="chprt">${esc(pr.why || '')}</div><div class="dim">imported, no request: ${[pr.provenance?.job ? 'job ' + esc(pr.provenance.job) : '', pr.provenance?.request ? 'request ' + esc(pr.provenance.request) : '', c ? `cost on record ${usd(c.usd)} (${esc(c.source)}${c.via ? ' via ' + esc(c.via) : ''})` : 'no cost row found'].filter(Boolean).join(' · ')}</div>`
+        + `<div class="chprf"><button data-a="ipaccept" data-p="${esc(pr.id)}" class="pri"${blocked ? ' disabled' : ''} title="${blocked ? esc('approve the ' + this.T.rootWord + ' first') : 'make it a node (the head of this tree); your act'}">Accept as node</button><button data-a="ipdismiss" data-p="${esc(pr.id)}">Dismiss</button>${blocked ? `<span class="dim">approve the ${esc(this.T.rootWord)} first</span>` : ''}</div></div></div>`;
+    }
+    return h;
   }
   baseHtml(e) {
     const T = this.T, d = this.draft(e), srcs = [['catalog', 'Catalogue'], ['openverse', 'Openverse'], ['text', 'Describe'], ['photos', 'Photos'], ['sketch', 'Sketch']];
@@ -357,33 +392,36 @@ export class AssetWorkspace {
         : ['approved', 'queued'].includes(r.status) ? '<span class="dim">waiting for the agent to run it (MCP)</span>' : r.status === 'running' ? '<span class="dim">running…</span>'
         : r.status === 'done' ? (nodes.length ? `<span>→ ${nodes.map(n => `<a data-node="${esc(n.id)}">${esc(n.id)}</a>`).join(' ')}</span>` : '<span class="dim">done · the agent registers the output</span>') : `<span class="dim">${esc(r.why || '')}</span>`;
       const vid = A.treeVariant(r.char.tree), vname = r.look?.name || r.variant?.name || vid;
-      return `<div class="chreq s-${esc(r.status)}" data-r="${esc(r.id)}"><b>${esc(r.kind)}</b><span class="dim">${esc(r.id)}${r.char.from ? ' · from ' + esc(r.char.from) : ''}</span><span class="chsteps">${r.status === 'rejected' ? '<span class="chstep cur rej">rejected</span>' : steps}</span><span class="chreqt" title="${esc(r.prompt)}">${esc(r.char.text || (vid && r.char.kind !== 'edit' ? `${T.vWord} sheet “${vname}” from ${r.char.from}` : r.prompt))}</span>${r.char.pins?.length ? `<span class="dim">${r.char.pins.length} pin${r.char.pins.length > 1 ? 's' : ''}</span>` : ''}${r.char.mask ? '<span class="dim">mask</span>' : ''}<span class="dim">${usd(r.est_cost)}${r.actual_cost_usd != null ? ' / ' + usd(r.actual_cost_usd) : ''}</span>${act}</div>`;
+      const warns = (r.warnings || []).length ? `<div class="chreqw">${r.warnings.map(w => `<span>⚠ ${esc(w)}</span>`).join('')}</div>` : '';
+      return `<div class="chreq s-${esc(r.status)}${warns ? ' warn' : ''}" data-r="${esc(r.id)}"><b>${esc(r.kind)}</b><span class="dim">${esc(r.id)}${r.char.from ? ' · from ' + esc(r.char.from) : ''}</span><span class="chsteps">${r.status === 'rejected' ? '<span class="chstep cur rej">rejected</span>' : steps}</span><span class="chreqt" title="${esc(r.prompt)}">${esc(r.char.text || (vid && r.char.kind !== 'edit' ? `${T.vWord} sheet “${vname}” from ${r.char.from}` : r.prompt))}</span>${r.char.pins?.length ? `<span class="dim">${r.char.pins.length} pin${r.char.pins.length > 1 ? 's' : ''}</span>` : ''}${r.char.mask ? '<span class="dim">mask</span>' : ''}<span class="dim">${usd(r.est_cost)}${r.actual_cost_usd != null ? ' / ' + usd(r.actual_cost_usd) : ''}</span>${act}${warns}</div>`;
     });
     return `<div class="chreqs"><div class="chsh">requests <span class="dim">request → approve (you) → the agent runs it → a new node</span></div>${rows.join('')}</div>`;
   }
   nodeWord(n) { return { identity: 'identity sheet', sheet: 'identity sheet', base: this.T.sheetWord, look: 'look sheet', variant: 'variant sheet' }[n.kind] || ''; }
   treeHtml(it, tree) {
     const strips = A.branches(it, tree), st = A.treeState(it, tree), T = this.T;
-    if (!strips.length) return `<div class="chtree empty"><span class="dim">no ${A.isRoot(tree) ? T.sheetWord : T.vWord + ' sheet'} yet${this.reqs().some(r => r.char.tree === tree && A.OPEN_REQ.includes(r.status)) ? ': requested' : ''}</span></div>`;
+    const imp = A.treeState(it, tree).approved ? '' : `<button data-a="importimg" data-tree="${esc(tree)}" title="make any registered image (a legacy look, an output made outside the queue) a node of this tree: no request, nothing paid">Import an image…</button>`;
+    if (!strips.length) return `<div class="chtree empty"><span class="dim">no ${A.isRoot(tree) ? T.sheetWord : T.vWord + ' sheet'} yet${this.reqs().some(r => r.char.tree === tree && A.OPEN_REQ.includes(r.status)) ? ': requested' : ''}</span>${imp}</div>`;
     const open = this.reqs().filter(r => r.char.tree === tree && A.OPEN_REQ.includes(r.status));
     const card = (n) => {
       const cls = [n.id === st.head ? 'head' : '', n.id === st.approved ? 'appr' : '', A.pending(it, n) ? 'new' : '', n.choice === 'reverted' ? 'rev' : '', n.choice === 'branch' ? 'br' : '', n.id === this.sel ? 'on' : ''].filter(Boolean).join(' ');
       const ghosts = open.filter(r => r.char.from === n.id).map(r => `<span class="chghost" title="${esc(r.char.text || r.prompt)}">${esc(r.status)}</span>`).join('');
-      return `<div class="chnode ${cls}" data-node="${esc(n.id)}" title="${esc(`${n.id}${n.edit?.text ? ': ' + n.edit.text : ''}\n${n.choice || (A.pending(it, n) ? 'new: keep, branch or revert' : '')}${n.id === st.head ? '\nhead' : ''}${n.id === st.approved ? '\napproved' : ''}`)}">${lock(n.image, n.private)}<img src="${esc(imgUrl(n.image))}" alt="" loading="lazy"><span class="chnl"><b>${esc(n.id)}</b>${n.id === st.approved ? '<i class="ok">✓</i>' : n.id === st.head ? '<i class="hd">●</i>' : A.pending(it, n) ? '<i class="nw">new</i>' : ''}${n.edit?.pins?.length ? `<i class="pn">${n.edit.pins.length}📌</i>` : ''}</span><span class="chne">${esc(n.edit?.text || this.nodeWord(n))}</span>${ghosts}</div>`;
+      return `<div class="chnode ${cls}" data-node="${esc(n.id)}" title="${esc(`${n.id}${n.edit?.text ? ': ' + n.edit.text : ''}\n${n.choice || (A.pending(it, n) ? 'new: keep, branch or revert' : '')}${n.id === st.head ? '\nhead' : ''}${n.id === st.approved ? '\napproved' : ''}`)}">${lock(n.image, n.private)}<img src="${esc(imgUrl(n.image))}" alt="" loading="lazy"><span class="chnl"><b>${esc(n.id)}</b>${n.id === st.approved ? '<i class="ok">✓</i>' : n.id === st.head ? '<i class="hd">●</i>' : A.pending(it, n) ? '<i class="nw">new</i>' : ''}${n.edit?.pins?.length ? `<i class="pn">${n.edit.pins.length}📌</i>` : ''}${n.origin === 'imported' ? '<i class="im" title="imported: an existing image, no request">⇩</i>' : ''}</span><span class="chne">${esc(n.edit?.text || this.nodeWord(n))}</span>${ghosts}</div>`;
     };
-    return `<div class="chtree"><div class="chsh">tree <span class="dim">${nn(A.treeNodes(it, tree).length, 'node')} · ${strips.length} branch${strips.length > 1 ? 'es' : ''} · ● head ✓ approved · click a node</span></div>`
+    return `<div class="chtree"><div class="chsh">tree <span class="dim">${nn(A.treeNodes(it, tree).length, 'node')} · ${strips.length} branch${strips.length > 1 ? 'es' : ''} · ● head ✓ approved · ⇩ imported · click a node</span>${imp}</div>`
       + strips.map((s, i) => `<div class="chstrip"><span class="chfork">${s.fork ? `↳ ${esc(s.fork)}` : i ? 'root' : 'main'}</span>${s.nodes.map(card).join('<i class="charr">›</i>')}</div>`).join('') + '</div>';
   }
   nodeHtml(e, it) {
     const n = A.nodeById(it, this.sel); if (!n) return '';
     const parent = A.nodeById(it, n.parent) || A.nodeById(it, n.from_identity), st = A.treeState(it, n.tree), locked = !!st.approved;
     const isPending = A.pending(it, n), word = A.isRoot(n.tree) ? this.T.rootWord : this.T.vWord;
-    const head = `<div class="chnh"><b>${esc(n.id)}</b><span class="dim">${esc(n.kind)} · ${n.via === 'agent' ? 'agent' : esc(n.by || '')} · ${when(n.at)} · ${esc(n.request || '')}</span>${n.id === st.head ? '<span class="chok">head</span>' : ''}${n.choice ? `<span class="dim">${esc(n.choice)}</span>` : ''}<span class="sp"></span>`
+    const head = `<div class="chnh"><b>${esc(n.id)}</b><span class="dim">${esc(n.kind)} · ${n.via === 'agent' ? 'agent' : esc(n.by || '')} · ${when(n.at)} · ${esc(n.request || (n.origin === 'imported' ? 'imported' : ''))}</span>${n.id === st.head ? '<span class="chok">head</span>' : ''}${n.choice ? `<span class="dim">${esc(n.choice)}</span>` : ''}<span class="sp"></span>`
       + (parent ? `<button data-a="cmp" class="${this.mode === 'compare' ? 'on' : ''}" title="side by side with ${esc(parent.id)}">Compare with ${esc(parent.id)}</button>` : '')
       + (!locked ? `<button data-a="edit" class="${this.mode === 'edit' ? 'on' : ''}" title="text + a sketch over this image + an optional mask + pins → a draft request">Edit from ${esc(n.id)}</button>` : '')
       + (!locked && n.id !== st.head && !isPending ? `<button data-a="tohead" title="continue from this node (revert to it)">Make head</button>` : '')
       + (!locked && n.id === st.head && A.treeNodes(it, n.tree).length ? `<button data-a="approve" class="pri">Approve ${word}</button>` : '')
       + `<button data-a="nnote" title="a note on this node">✉</button><b class="sctool" data-a="nclose" title="close (Esc)">▴</b></div>`;
+    const pv = n.provenance, prov = n.origin === 'imported' ? `<div class="chnedit"><span class="dim">imported (no request):</span> ${esc(pv?.media || '')} <span class="dim">${esc(pv?.path || '')}</span>${pv?.job ? ` · job ${esc(pv.job)}` : ''}${pv?.request ? ` · request ${esc(pv.request)}` : ''} · ${pv?.cost ? `cost on record ${usd(pv.cost.usd)} (${esc(pv.cost.source)}${pv.cost.via ? ' via ' + esc(pv.cost.via) : ''})` : 'no cost row'}${n.proposal ? ` · proposed by ${esc(n.proposed_by || 'agent')} (${esc(n.proposal)})` : ''}${n.note ? ` · ${esc(n.note)}` : ''}</div>` : '';
     const edit = n.edit && (n.edit.text || n.edit.pins?.length || n.edit.png || n.edit.mask) ? `<div class="chnedit"><span class="dim">edit:</span> ${esc(n.edit.text || '(sketch only)')}${(n.edit.pins || []).map(p => `<span class="chpin"><b>${p.n}</b>${esc(p.text)}</span>`).join('')}${n.edit.png ? ` <a href="${esc(imgUrl(n.edit.png))}" target="_blank" rel="noopener">sketch</a>` : ''}${n.edit.mask ? ` <a href="${esc(imgUrl(n.edit.mask))}" target="_blank" rel="noopener">mask</a>` : ''}${n.note ? `<span class="dim"> · agent: ${esc(n.note)}</span>` : ''}</div>` : '';
     let main = '';
     if (this.mode === 'edit' && this.sk?.node === n.id) {
@@ -394,7 +432,7 @@ export class AssetWorkspace {
     } else if ((this.mode === 'compare' || isPending) && parent) {
       main = this.compareHtml(parent, n, isPending && !locked);
     } else main = `<div class="chbig">${lock(n.image, n.private)}<img src="${esc(imgUrl(n.image))}" alt=""></div>`;
-    return `<div class="chnp" data-node="${esc(n.id)}">${head}${edit}${main}</div>`;
+    return `<div class="chnp" data-node="${esc(n.id)}">${head}${prov}${edit}${main}</div>`;
   }
   compareHtml(a, b, choose) {
     const md = this.ab, img = (n) => `<img src="${esc(imgUrl(n.image))}" alt="">`;
@@ -415,7 +453,7 @@ export class AssetWorkspace {
       const t = A.variantTree(e.kind, l.id), h = A.headNode(it, t), ap = A.treeState(it, t).approved, sc = uses.filter(u => u.variant === l.id).map(u => u.scene);
       const sub = isC ? esc((l.garments || []).join(', ')) : l.name === A.axesName(l.axes) ? '' : Object.entries(l.axes || {}).map(([k, v]) => `<i class="asax-${esc(k)}" title="${esc(A.AXES[k]?.label || k)}">${esc(v)}</i>`).join('');
       const from = l.from === 'breakdown' || l.breakdown ? 'from the breakdown' : l.from === 'agent' ? 'proposed by the agent' : '';
-      return `<div class="chlook${l.id === this.vid ? ' on' : ''}" data-look="${esc(l.id)}">${h ? `${lock(h.image, h.private)}<img src="${esc(imgUrl(h.image))}" alt="">` : (l.images || [])[0] ? `<img src="${esc(imgUrl(l.images[0]))}" alt="">` : '<div class="chnoimg">no sheet yet</div>'}<span class="chln"><b>${esc(l.name || l.id)}</b> <span class="bdst s-${l.status === 'approved' ? 'ok' : l.status === 'review' ? 'review' : 'draft'}"><i></i>${esc(l.status || 'draft')}</span></span><span class="dim chlg">${[sub, from].filter(Boolean).join(' · ')}</span><span class="dim">${nn(A.treeNodes(it, t).length, 'node')}${ap ? ' · ✓' : ''}${sc.length ? ` · ${sc.map(s => esc(s.replace(/^sc/, '#'))).join(' ')}` : ''}</span></div>`;
+      return `<div class="chlook${l.id === this.vid ? ' on' : ''}" data-look="${esc(l.id)}">${h ? `${lock(h.image, h.private)}<img src="${esc(imgUrl(h.image))}" alt="">` : (l.images || [])[0] ? `<img src="${esc(imgUrl(l.images[0]))}" alt="">` : '<div class="chnoimg">no sheet yet</div>'}<span class="chln"><b>${esc(l.name || l.id)}</b> <span class="bdst s-${l.status === 'approved' ? 'ok' : l.status === 'review' ? 'review' : 'draft'}"><i></i>${esc(l.status || 'draft')}</span></span><span class="dim chlg">${[sub, from].filter(Boolean).join(' · ')}</span><span class="dim">${nn(A.treeNodes(it, t).length, 'node')}${ap ? ' · ✓' : ''}${(it.proposals || []).some(x => x.status === 'open' && x.tree === t) ? ' · <b class="chpq">proposal</b>' : ''}${sc.length ? ` · ${sc.map(s => esc(s.replace(/^sc/, '#'))).join(' ')}` : ''}</span></div>`;
     };
     let ghosts = '';
     if (isC) {
@@ -431,7 +469,7 @@ export class AssetWorkspace {
       const t = A.variantTree(e.kind, l.id), est = A.estimate(T.gen.variant, { type: e.kind }), nodes = A.treeNodes(it, t), reqs = this.reqs(e).filter(r => r.char.tree === t);
       const info = isC ? esc((l.garments || []).join(', ')) : esc(A.axesText(l.axes) || '');
       h += `<div class="chsh lookh"><b>${esc(l.name)}</b><span class="dim">${info}${l.notes ? ' · ' + esc(l.notes) : ''}${!isC && l.scenes?.length ? ' · proposed for ' + esc(l.scenes.join(' ')) : ''}</span>${!nodes.length ? `<button data-a="reqlook" class="pri"${rn ? '' : ' disabled'} title="${esc(`a DRAFT request from the approved ${T.rootWord}: ${est.tool}, ${est.why}`)}">Request ${T.vWord} sheet · est ${usd(est.usd)}</button>` : ''}</div>`;
-      h += this.reqsHtml(reqs) + this.treeHtml(it, t) + this.nodeHtml(e, it);
+      h += this.proposalHtml(e, it, t) + this.reqsHtml(reqs) + this.treeHtml(it, t) + this.nodeHtml(e, it);
     }
     return h;
   }
@@ -502,6 +540,11 @@ export class AssetWorkspace {
       if (a === 'ppath') return this.addPhotoPath(this.$('.chppath')?.value);
       if (a === 'skbase') return this.openSketch('base');
       if (a === 'skclose') return this.closeSketch();
+      if (a === 'bpaccept') return this.acceptBase();
+      if (a === 'bpdismiss') return this.dismissBase();
+      if (a === 'ipaccept') return this.acceptImport(t.dataset.p);
+      if (a === 'ipdismiss') return this.dismissImport(t.dataset.p);
+      if (a === 'importimg') return this.importImage(t.dataset.tree);
       if (a === 'reqok') return this.approveReq(t.dataset.r);
       if (a === 'reqno') return this.rejectReq(t.dataset.r);
       if (a === 'reqedit') return this.requestEdit();

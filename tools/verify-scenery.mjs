@@ -106,7 +106,7 @@ export async function verifyScenery({ browser, BASE, DATA, OUT, post, writeHeade
   const E1 = await fileUntil('entities/locations/the-pier.json', (j) => j.base?.refs?.length === 1);
   check('location base: the catalogue opens on the location kind; a catalogue plate + a description; "Request base plate" saves the base (page) and makes a draft request (kind location-plate, asset {type location, tree base}, no char link, est $0.08, an establishing-plate prompt)',
     catKind === 'location' && E1?.base?.via === 'page' && E1.base.refs[0].path === 'catalog/location/lakeside.jpg' && /wooden pier/.test(E1.base.text) && R1?.status === 'draft' && R1.kind === 'location-plate'
-    && R1.asset.type === 'location' && R1.asset.tree === 'base' && R1.asset.kind === 'base' && !R1.char && R1.est_cost === 0.08 && /Establishing plate/.test(R1.prompt) && R1.target === 'location:the-pier',
+    && R1.asset.type === 'location' && R1.asset.tree === 'base' && R1.asset.kind === 'base' && !R1.char && R1.est_cost === 0.12 && /Establishing plate/.test(R1.prompt) && R1.target === 'location:the-pier',
     { catKind, base: E1?.base && { via: E1.base.via, refs: E1.base.refs.map(r => r.path) }, req: R1 && { kind: R1.kind, asset: R1.asset, est: R1.est_cost } });
 
   // 3. approve (page) -> the agent runs it -> n01; an edit with a pin -> n02 kept; approve the base (page)
@@ -214,14 +214,15 @@ export async function verifyScenery({ browser, BASE, DATA, OUT, post, writeHeade
     && ag.scenes.find(s => s.scene === 'sc03')?.variant === 'reverse-night-rain' && ag.scenes.find(s => s.scene === 'sc03').image === G('pier_night_rain.jpg') && ag.scenes.find(s => s.scene === 'sc02')?.variant === null && agUse.status === 403,
     { before, after, uses: E6b?.uses, agUse: agUse.status });
 
-  // 7. the stage rail: scenery in progress; the characters stage still works on the same code path
+  // 7. the stage rail: scenery in progress (the rail shows the status computed from the content, ROADMAP_v4 F1: in
+  // progress or needs you while assets lack an approved base); the characters stage still works on the same code path
   const rail = await pg.evaluate(() => document.querySelector('#rail [data-stage=scenery]')?.className);
   await combo(['Alt', 'Shift'], 'Digit4'); await wait(500);
   const chars = await pg.evaluate(() => ({ stage: window.WB.stages.current(), rows: [...document.querySelectorAll('.sghost[data-stage=characters] .chrow')].map(r => r.dataset.char || null), tabs: [...document.querySelectorAll('.sghost[data-stage=characters] .chtabs [data-tab]')].map(t => t.dataset.tab), base: !!document.querySelector('.sghost[data-stage=characters] .chbf [data-a=reqid]'), label: document.querySelector('.sghost[data-stage=characters] .chbf [data-a=reqid]')?.textContent }));
   await shot('v8_characters_still');
   const ST = readJ('stages.json')?.stages?.find(s => s.id === 'scenery');
   check('the scenery stage is in progress (rail); the characters stage still opens on the shared workspace (Mara, Identity / Looks / Scenes / Notes, "Request identity sheet"); no request left the machine',
-    /st-in_progress/.test(rail || '') && ST?.status === 'in_progress' && chars.stage === 'characters' && chars.rows.includes('mara') && JSON.stringify(chars.tabs) === '["identity","looks","scenes","notes"]' && /Request identity sheet/.test(chars.label || '') && !outside.length,
+    /st-(in_progress|needs_you)/.test(rail || '') && ST?.status === 'in_progress' && chars.stage === 'characters' && chars.rows.includes('mara') && JSON.stringify(chars.tabs) === '["identity","looks","scenes","notes"]' && /Request identity sheet/.test(chars.label || '') && !outside.length,
     { rail, stage: ST?.status, chars, outside });
 
   await pg.close();

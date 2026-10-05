@@ -123,7 +123,7 @@ export const store = {
       const es = new EventSource(api('/api/events'));
       let pending = new Set(), timer = 0, opened = false;
       // after a reconnect (server restart) re-read everything: changes made while disconnected sent no event
-      es.onopen = () => { if (opened) this.reload(['song.json']); opened = true; };
+      es.onopen = () => { if (opened) { this.reload(['song.json']); document.dispatchEvent(new CustomEvent('wb:reconnect')); } opened = true; };
       es.onmessage = (ev) => {
         const { project, file, ui } = JSON.parse(ev.data);
         if (project !== PROJECT && project !== '*') return;

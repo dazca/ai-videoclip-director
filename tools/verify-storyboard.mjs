@@ -201,7 +201,7 @@ export async function verifyStoryboard({ browser, BASE, DATA, OUT, post, writeHe
   const AP = await fileUntil('approvals.json', (j) => j.items?.[`shot:${prop.shot}`]?.state === 'approved');
   await shot('v9_agent_request_approved');
   check('the agent: gaps_get proposes a still for a sc04 shot (refs = the approved pier base image, honest est); request_create makes a draft the card shows; its shots_update arrives live in the page; it cannot approve a shot (403), "review" is fine; the director approves the shot in the page (via page)',
-    prop?.requests?.[0]?.kind === 'shot-still' && prop.requests[0].refs.includes(G('pier_plate.jpg')) && prop.requests[0].est_cost === 0.08 && rr?.status === 'draft' && rr.target === `shot:${prop.shot}`
+    prop?.requests?.[0]?.kind === 'shot-still' && prop.requests[0].refs.includes(G('pier_plate.jpg')) && prop.requests[0].est_cost === 0.12 && rr?.status === 'draft' && rr.target === `shot:${prop.shot}`
     && /^v\d+$/.test(sb4?.version || '') && live && apA.status === 403 && rvA.status === 200 && AP?.items[`shot:${prop.shot}`].via === 'page' && gg.estimate.cap_usd === 5,
     { prop: prop && { shot: prop.shot, refs: prop.requests[0].refs, est: prop.requests[0].est_cost }, sb4, apA: apA.status, rvA: rvA.status });
 

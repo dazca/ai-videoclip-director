@@ -22,6 +22,7 @@
 import { currentScript, gaps as scriptGaps, span } from './scenes.js';
 import { currentBreakdown } from './breakdown.js';
 import * as A from './assets.js';
+import * as P from './prices.js';
 
 export const SHOT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 export const SCENE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
@@ -272,10 +273,11 @@ export function shotsFromBeats(scene, song, { assets = [], snap = 'beats', minMs
 }
 
 // ------------------------------------------------------------------ estimates (honest list prices; the agent corrects est_cost before approval)
-const KONTEXT_MULTI = 'fal-ai/flux-pro/kontext/max/multi', KLING = 'fal-ai/kling-video/v2.1/standard/image-to-video';
+// from the one price table (js/prices.js): a still = NB2 at 2K; a video = H3 Max image-to-video at 768p, per second
+// (getters: a promo price ends on its day even in a page or a server left running)
 export const SHOT_EST = {
-  still: { kind: 'shot-still', tool: KONTEXT_MULTI, usd: 0.08, why: 'one 16:9 frame from the approved sheets + the frame sketch, Kontext Max multi-image $0.08' },
-  video: { kind: 'shot-video', tool: KLING, usd_per_s: 0.05, min_s: 5, max_s: 10, why: 'image-to-video from the shot\'s approved still, Kling 2.1 Standard ~$0.05 a second (5 s minimum, 10 s a clip)' },
+  get still() { const e = P.estimateWith('still'); return { kind: 'shot-still', tool: e.tool, usd: e.usd, why: `one 16:9 frame from the approved sheets + the frame sketch: ${e.why}` }; },
+  get video() { const e = P.estimateWith('video', { seconds: 1 }); return { kind: 'shot-video', tool: e.tool, usd_per_s: e.usd, min_s: 5, max_s: 10, why: `image-to-video from the shot's approved still, ${e.why} (5 s minimum, 10 s a clip)` }; },
 };
 // what a shot costs to generate: a still (one frame) or a video (its start frame + image-to-video clips of up to 10 s)
 export function shotEstimate(shot, { haveStill = false } = {}) {

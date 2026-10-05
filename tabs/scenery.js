@@ -7,12 +7,13 @@
 // scenes that use it and the variant each one needs: the storyboard reads it) and Notes. The director's acts go through
 // POST /api/op/asset_act (page only). Formats: js/assets.js.
 import { AssetWorkspace, assetCommands } from './assetws.js';
+import { legacyPatch } from './charstage.js';   // "approved (legacy) · no base node" (ROADMAP_v4 F1)
 
 let S = null;
 assetCommands({ pre: 'scenery', group: 'Scenery', stage: 'scenery', get: () => S, what: 'location or prop', ids: { root: 'requestBase', approve: 'approveBase', newV: 'newVariant' }, root: 'base sheet', vWord: 'variant' });
 
 export default {
-  mount(el) { S = new AssetWorkspace(el, { types: ['location', 'prop'], stage: 'scenery', pref: 'sn' }); window.WB.scenery = { get ws() { return S; }, open: (id) => S.select(id), node: (id, mode) => S.openNode(id, mode), tab: (t) => S.setTab(t) }; },
+  mount(el) { S = new AssetWorkspace(el, { types: ['location', 'prop'], stage: 'scenery', pref: 'sn' }); legacyPatch(S); window.WB.scenery = { get ws() { return S; }, open: (id) => S.select(id), node: (id, mode) => S.openNode(id, mode), tab: (t) => S.setTab(t) }; },
   show() { if (S && !S.typing()) S.render(); },
   get ws() { return S; },
 };

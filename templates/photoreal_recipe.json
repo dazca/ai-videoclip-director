@@ -1,0 +1,398 @@
+{
+ "_header": "Photoreal prompt recipe: the default prompt template of the Director Workbench (request_create recipe, the Queue's request form). Why each block exists, the sources and what is verified: docs/PHOTOREAL.md. Copied from videoclip-research/photoreal_recipe.json (2026-10-04); edit here. Prices: js/prices.js is the workbench's price table (per_model.cost_* below is the research snapshot).",
+ "version": "2026-10-04",
+ "guide": "docs/PHOTOREAL.md",
+ "notes": "Default prompt template for photoreal generation requests. Join the still blocks in order with a single space. Placeholders are {curly}. Blocks marked required:false may be dropped when empty. Prices are fal list prices read 2026-10-04.",
+ "still": {
+  "join": " ",
+  "target_words": [
+   60,
+   160
+  ],
+  "blocks": [
+   {
+    "id": "refs",
+    "required": false,
+    "use_when": "any request with reference images (edit endpoints)",
+    "template": "Image {n_face} is a close-up of {name}'s face, Image {n_body} is her full body{extra_refs}. Create a new photograph of the same woman as Image {n_face}.",
+    "example": "Image 1 is a close-up of her face, Image 2 is her full body, Image 3 is the hair clip, Image 4 is the office. Create a new photograph of the same woman as Image 1."
+   },
+   {
+    "id": "identity_lock",
+    "required": false,
+    "use_when": "a real person or approved character is in frame",
+    "template": "Keep her face exactly as in Image {n_face}: bone structure, eye shape, eyebrows, nose, lips, skin tone, {marks}, hairline and body proportions. Do not beautify, slim or de-age her.",
+    "example": "Keep her face exactly as in Image 1: bone structure, eye shape, eyebrows, nose, lips, skin tone, the mole on her left cheek, hairline and body proportions. Do not beautify, slim or de-age her."
+   },
+   {
+    "id": "subject_wardrobe",
+    "required": true,
+    "template": "{framing} of {subject}, wearing {wardrobe_with_materials}{props}.",
+    "rules": [
+     "name materials (matte cotton, wool, enamel, brushed metal)",
+     "give exact colours or hex for props",
+     "state prop size and position"
+    ],
+    "example": "Full-body photograph of her, wearing a black long-sleeved cotton shirt-dress under a cream cotton pinafore, slightly creased at the waist, and a small orange (#F26B1D) starburst enamel hair clip above her left temple."
+   },
+   {
+    "id": "action",
+    "required": true,
+    "template": "{pose_and_expression}.",
+    "rules": [
+     "slightly unposed",
+     "asymmetric stance",
+     "gaze off-axis unless a portrait"
+    ],
+    "example": "She stands relaxed with her weight on one leg, one hand loosely at her side, looking just past the camera with a calm, tired expression."
+   },
+   {
+    "id": "location",
+    "required": true,
+    "template": "Location: {real_place} with {mundane_details}.",
+    "rules": [
+     "a specific real-world place",
+     "list 3-5 ordinary objects and some wear"
+    ],
+    "example": "Location: an empty open-plan office at dawn, grey carpet tiles, rows of desks with monitors switched off, a chair pushed out, cable trays under the windows."
+   },
+   {
+    "id": "light",
+    "required": true,
+    "template": "Light: {key_source} from {direction}, {colour_temp}, {hardness}; {secondary}; {practicals}. The same light falls on her and the room, with matching shadows and a soft contact shadow at her feet.",
+    "rules": [
+     "describe sources physically",
+     "one coherent light world",
+     "avoid 'cinematic lighting'"
+    ],
+    "example": "Light: cool blue pre-dawn daylight through the windows camera-left, soft and low; a thin warm orange sunrise glow on the horizon rims her hair; ceiling lights off, the right side of the room falls into shadow. The same light falls on her and the room, with matching shadows and a soft contact shadow at her feet."
+   },
+   {
+    "id": "camera",
+    "required": true,
+    "template": "Shot on {body}, {focal}mm lens at f/{aperture}, {distance}, {height}{exposure}.",
+    "defaults": {
+     "full_body": "full-frame camera, 35mm, f/2.8, about 4 m away, chest height",
+     "medium": "full-frame camera, 50mm, f/2.8, about 2 m away, eye level",
+     "close_up": "full-frame camera, 85mm, f/2, about 1.2 m away, eye level"
+    },
+    "example": "Shot on a full-frame camera, 35mm lens at f/2.8, about 4 m away at chest height, 1/60 s, ISO 1600."
+   },
+   {
+    "id": "texture",
+    "required": true,
+    "template": "Visible skin texture with pores, fine lines and slight natural redness, {hair_detail}, {fabric_detail}.",
+    "example": "Visible skin texture with pores, fine lines and slight natural redness, a few flyaway hairs, visible cotton weave and small creases in the fabric."
+   },
+   {
+    "id": "medium",
+    "required": true,
+    "template": "Unretouched documentary photograph, {grade}, fine {grain_source}.",
+    "options_grade": [
+     "natural colour and accurate white balance",
+     "Kodak Portra 400 colour",
+     "Cinestill 800T colour with halation around lights (night)",
+     "phone camera colour, 24mm main camera"
+    ],
+    "example": "Unretouched documentary photograph, natural colour, fine high-ISO sensor noise in the shadows."
+   }
+  ],
+  "full_example": "Full-body photograph of a woman in her thirties with shoulder-length dark brown hair, wearing a grey wool coat over a black turtleneck. She leans against a tiled wall, weight on one leg, looking down at her phone. Location: a Barcelona metro platform late at night, scuffed tiles, a bench, a timetable screen, a yellow safety line. Light: cold overhead fluorescent tubes, slightly greenish, hard shadows under her brows and chin, a warm sign glow from the right. The same light falls on her and the platform. Shot on a full-frame camera, 35mm lens at f/2.8, about 4 m away, ISO 3200. Visible skin texture with pores and slight redness, flyaway hairs, wool pilling. Unretouched documentary photograph, natural colour, fine sensor noise."
+ },
+ "edit": {
+  "principles": [
+   "one change per edit call",
+   "name every reference and its job",
+   "state what stays identical",
+   "describe people by description, not pronoun, on Flux Kontext",
+   "prefer 'change X to Y' over 'transform'",
+   "re-attach the original identity refs every 5-8 edits; never edit an edit more than ~8 times",
+   "use a mask endpoint (fal-ai/flux-pro/v1/fill) when face pixels must not change"
+  ],
+  "templates": {
+   "add_prop": "Using Image 1, add {prop} {position}. {prop_details}. Light it with the same {light} as her hair and face, with a small matching shadow. Keep her face, hair, pose, clothes, background and framing exactly the same.",
+   "change_wardrobe": "Using Image 1, change only her {garment} to {new_garment_with_material}, fitted naturally to her body and pose with realistic folds. Keep her face, hairstyle, skin, body proportions, pose, background and lighting exactly the same.",
+   "prop_from_ref": "Image 1 is the woman, Image 2 is the {prop}. Put the {prop} from Image 2 {position}, copying its exact shape and colour at about {size}. Keep everything else in Image 1 exactly the same.",
+   "sketch_guided": "Replace the {colour} scribble in Image 1 with {object}, real material and correct scale, lit by the scene's light. Keep everything else exactly the same.",
+   "relight": "Keep the subject, pose and framing exactly. Relight the scene as {source} from {direction}, {colour_temp}; add {shadow} on the {side} side of her face; match the background to the same light.",
+   "place_in_location": "Image 1 is the woman, Image 2 is the location. Photograph the same woman as Image 1 {pose} in the place shown in Image 2, at correct scale, lit by Image 2's light ({light}), with contact shadows on the floor. Keep her face, hair and body exactly as in Image 1.",
+   "skin_cleanup": "Retouch lightly: reduce temporary blemishes and shine only. Keep pores, moles, freckles, asymmetry and natural texture. Do not change face shape, eye size, nose or jaw."
+  },
+  "identity_lock_phrases": [
+   "Same woman as Image 1.",
+   "Keep her facial features exactly the same as Image 1.",
+   "Do not beautify, slim, de-age or change her face shape."
+  ]
+ },
+ "video": {
+  "rules": [
+   "animate approved stills only",
+   "describe motion, not what the image already shows",
+   "5-6 s default; 10-15 s only with timed beats",
+   "one camera move per shot",
+   "face medium-size or larger when identity matters",
+   "avoid fast head turns, profile turns, hands crossing the face"
+  ],
+  "template": "{subject_motion}. Camera: {camera_move}. {ambient_motion}. Handheld documentary footage, natural motion blur, fine film grain, real skin texture, stable face and identity throughout.",
+  "timed_template": "[0-{t1}s] {beat1}. [{t1}-{t2}s] {beat2}. Camera: {camera_move}. Handheld documentary footage, natural motion blur, fine film grain, stable face.",
+  "camera_moves": [
+   "static locked-off camera",
+   "slow push-in",
+   "slow pull-back",
+   "gentle handheld drift",
+   "slow pan left",
+   "slow pan right",
+   "slow tracking shot alongside her"
+  ],
+  "example": "She lifts her head and glances toward the window, takes a slow breath, a strand of hair moves. Camera: slow push-in. Dawn light slowly warms on the carpet. Handheld documentary footage, natural motion blur, fine film grain, real skin texture, stable face and identity throughout.",
+  "negative_prompt": "morphing face, changing identity, plastic skin, smooth skin, warped hands, extra fingers, flicker, cartoon, CGI, 3D render, text, watermark",
+  "duration_s": {
+   "default": 5,
+   "max_with_face": 6,
+   "max_with_beats": 15
+  },
+  "end_frame": "Make the end frame by editing the start frame (same light, lens, location, wardrobe); change only pose, expression or camera position. For loops set end = start.",
+  "motion_control": {
+   "reference_video": "3-30 s, single continuous shot, one person, no cuts, no camera move, steady moderate motion, similar framing to the still",
+   "image": "whole body and head visible, unoccluded, >5% of frame, same framing as the video",
+   "character_orientation": {
+    "video": "up to 30 s, supports face element",
+    "image": "up to 10 s, allows prompted camera moves"
+   },
+   "prompt": "Describe background and atmosphere only, e.g. 'empty office at dawn, cool window light, slow dust in the air'."
+  }
+ },
+ "avoid": {
+  "quality_spam": [
+   "8k",
+   "4k",
+   "ultra HD",
+   "masterpiece",
+   "best quality",
+   "ultra-detailed",
+   "hyperrealistic",
+   "award-winning",
+   "trending on artstation"
+  ],
+  "beauty": [
+   "beautiful",
+   "gorgeous",
+   "perfect",
+   "flawless",
+   "porcelain",
+   "glass skin",
+   "smooth skin",
+   "airbrushed",
+   "symmetrical face",
+   "supermodel"
+  ],
+  "render_look": [
+   "HDR",
+   "octane",
+   "unreal engine",
+   "3D render",
+   "CGI",
+   "digital art",
+   "concept art",
+   "glossy",
+   "vibrant colors",
+   "cinematic lighting",
+   "studio lighting (unless real studio)"
+  ],
+  "two_d": [
+   "illustration",
+   "anime",
+   "cartoon",
+   "painterly",
+   "stylized",
+   "vector",
+   "cel shaded"
+  ],
+  "edit_risk": [
+   "transform her into",
+   "this person",
+   "make her look better"
+  ],
+  "replace_with": {
+   "cinematic lighting": "name the source, direction and colour temperature",
+   "no blur": "sharp focus throughout",
+   "professional photo": "camera body + focal length + aperture",
+   "beautiful": "describe a specific real feature"
+  }
+ },
+ "post": [
+  {
+   "step": "upscale",
+   "how": "faithful upscaler (SeedVR2 or Topaz-style); avoid creative/hallucinating upscalers on faces"
+  },
+  {
+   "step": "colour",
+   "how": "match white balance and contrast across shots of the same scene",
+   "endpoint": "fal-ai/post-processing (color correction)"
+  },
+  {
+   "step": "lens",
+   "how": "vignette strength low; chromatic aberration 0.5-1 px; optional slight barrel (parabolize)",
+   "endpoint": "fal-ai/post-processing"
+  },
+  {
+   "step": "sharpen",
+   "how": "only if needed, CAS at low strength; never on top of an AI upscale",
+   "endpoint": "fal-ai/post-processing"
+  },
+  {
+   "step": "grain",
+   "how": "last; uniform fine grain matched to stated ISO/stock (kodak/fuji/analog style)",
+   "endpoint": "fal-ai/post-processing",
+   "cost_usd": 0.001
+  },
+  {
+   "step": "export",
+   "how": "JPEG quality ~90 for stills; for video apply the same grain/CA to every clip in the edit"
+  },
+  {
+   "step": "qa",
+   "how": "face-embedding cosine vs real reference photos; reject below threshold"
+  }
+ ],
+ "per_model": {
+  "nano_banana_2": {
+   "endpoint": "fal-ai/nano-banana-2/edit",
+   "cost_usd": {
+    "0.5K": 0.06,
+    "1K": 0.08,
+    "2K": 0.12,
+    "4K": 0.16,
+    "thinking_high_extra": 0.002
+   },
+   "max_refs": 14,
+   "notes": "Default for identity stills and edits. Full-sentence prompts; no negative field, use positive phrasing. Use seed for reproducibility, thinking_level 'high' for complex multi-ref edits. Re-anchor refs every 5-8 edits.",
+   "verified": true
+  },
+  "seedream_5_pro_edit": {
+   "endpoint": "fal-ai/bytedance/seedream/v5/... (id unverified)",
+   "cost_usd": {
+    "<=1536px": 0.0675,
+    "<=2048px": 0.135,
+    "per_extra_ref": 0.0045
+   },
+   "max_refs": 10,
+   "notes": "Cinematic/dramatic realism, sketch-guided edits. Push imperfection words harder (skin is smoother than Seedream 4.5). No seed: not reproducible.",
+   "verified": false
+  },
+  "flux_2_pro_edit": {
+   "endpoint": "fal-ai/flux-2-pro/edit",
+   "cost_usd": {
+    "first_mp": 0.03,
+    "per_extra_mp_in_or_out": 0.015
+   },
+   "max_refs": 8,
+   "notes": "Subject+Action+Style+Context, front-load key words, 30-80 words. No negative prompts. Hex colours bound to objects. Can use LoRA via FLUX.2 routes.",
+   "verified": true
+  },
+  "flux_kontext_max_multi": {
+   "endpoint": "fal-ai/flux-pro/kontext/max/multi",
+   "cost_usd": {
+    "per_image": 0.08
+   },
+   "notes": "Surgical single edits. Describe the person, don't use pronouns; 'change X to Y' rather than 'transform'. Skin tends to look cleaner/AI; add texture words.",
+   "verified": true
+  },
+  "qwen_image_edit_2511": {
+   "endpoint": "fal-ai/qwen-image-edit-2511",
+   "cost_usd": {
+    "per_mp": 0.03
+   },
+   "notes": "Cheap local edits; vague edits can re-cast the face. LoRA trainer on fal ~$4/1000 steps.",
+   "verified": false
+  },
+  "minimax_h3_max_i2v": {
+   "endpoint": "minimax/h3-max/image-to-video",
+   "cost_usd_per_s": {
+    "480p": 0.05,
+    "768p": 0.08,
+    "1080p": 0.16,
+    "promo_until_2026-10-15": {
+     "480p": 0.03,
+     "768p": 0.048,
+     "1080p": 0.096
+    }
+   },
+   "duration_s": [
+    5,
+    15
+   ],
+   "notes": "Default I2V. Describe motion only; timed beats [0-3s]; give each reference a job; first+last frame endpoint available.",
+   "verified": true
+  },
+  "kling_v3_pro_i2v": {
+   "endpoint": "fal-ai/kling-video/v3/pro/image-to-video",
+   "cost_usd_per_s": {
+    "silent": 0.112,
+    "audio": 0.168,
+    "voice_control": 0.196
+   },
+   "duration_s": [
+    3,
+    15
+   ],
+   "params": [
+    "start_image_url",
+    "end_image_url",
+    "elements[frontal_image_url, reference_image_urls(1-3)] -> @Element1",
+    "negative_prompt",
+    "cfg_scale (default 0.5)",
+    "generate_audio"
+   ],
+   "notes": "Use elements for identity across angle changes; explicit shot type + one camera move; set generate_audio false when audio comes from the song.",
+   "verified": true
+  },
+  "kling_v3_motion_control": {
+   "endpoint": "fal-ai/kling-video/v3/pro/motion-control",
+   "cost_usd_per_s": {
+    "pro": 0.168,
+    "std_unverified": 0.126
+   },
+   "params": [
+    "image_url",
+    "video_url",
+    "character_orientation (image|video)",
+    "prompt",
+    "keep_original_sound",
+    "face element (video orientation only)"
+   ],
+   "notes": "Clean single-person phone clip, no cuts or camera moves; match framing between still and clip.",
+   "verified": true
+  }
+ },
+ "identity": {
+  "reference_pack": [
+   "face crop front >=1024px",
+   "three-quarter face",
+   "profile",
+   "full body neutral",
+   "optional smiling"
+  ],
+  "lock_phrase": "Same woman as Image 1. Keep her facial features exactly the same as Image 1.",
+  "drift_budget_edits": 8,
+  "trained_options": {
+   "phota_profile_on_fal": {
+    "cost_usd": 2.9,
+    "photos": "30-50",
+    "works_with": "NB2 / GPT Image route",
+    "per_image_usd": 0.09
+   },
+   "flux_lora_portrait_trainer": {
+    "cost_usd": 2.4,
+    "min_images": 10,
+    "works_with": "FLUX.1 LoRA endpoints only"
+   },
+   "flux_2_trainer": {
+    "cost_usd_per_1000_steps": 6.4,
+    "min_images": 10,
+    "works_with": "FLUX.2 LoRA endpoints only"
+   }
+  },
+  "recommendation": "No LoRA by default: LoRAs do not work with NB2, Seedream, Kling or H3. Use the reference pack + lock phrase + embedding QA; if identity still drifts, try a Phota profile ($2.90) before training a FLUX LoRA."
+ }
+}

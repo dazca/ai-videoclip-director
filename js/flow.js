@@ -5,7 +5,8 @@
 // stages.json  {rev, stages: [{id, status, done_by?, via?, updated?, blockers[], note?}]}
 //   id      lyrics | script | breakdown | characters | scenery | storyboard | final   (always all seven, in this order)
 //   status  empty | in_progress | needs_you | done      (only the page sets done: serve.mjs stamps done_by/via "page")
-//   A project without the file reads as derived: a stage whose files already hold content counts as done.
+//   A project without the file reads as derived: nothing is done; a stage whose files hold content is in progress.
+//   What the rail shows is computed from the content too: stagesView below (ROADMAP_v4 F1).
 // lyrics.json  {rev, current: "v3", seq, versions: [{id, n, created, by, via, message, from?, sections: [{id, label,
 //   lines: [{id, text, t?}]}]}], notes: [{id, line, w: [w0, w1] | null, quote, text, by, via, to?, kind?, status,
 //   at, version, replies: [{id, text, by, via, at}], resolved_by?, resolved_at?}]}
@@ -14,9 +15,10 @@
 //   ids. A project without the file reads as one version derived from song.json (ids = the song's line ids).
 // scenes.json (stage 2, the script draft): js/scenes.js. breakdown.json (stage 3): js/breakdown.js. storyboard.json
 // (stage 6): js/storyboard.js.
-import { currentScript, gaps as scriptGaps, intakeOpen } from './scenes.js';
+import { currentScript, gaps as scriptGaps, intakeOpen, INTAKE } from './scenes.js';
 import { currentBreakdown, PROMOTABLE } from './breakdown.js';
 import { currentBoard } from './storyboard.js';
+import * as A from './assets.js';
 
 export const STAGES = [
   { id: 'lyrics', title: 'Lyrics', n: 1, does: 'the poem: lines, sections, notes, versions; the song file when you have it' },
@@ -31,60 +33,178 @@ export const STAGE_STATUSES = ['empty', 'in_progress', 'needs_you', 'done'];
 export const STATUS_LABEL = { empty: 'empty', in_progress: 'in progress', needs_you: 'needs you', done: 'done' };
 export const stageById = (id) => STAGES.find(s => s.id === id);
 
-// what the project files already hold (the page passes its store, the server reads the files)
-export function projectFacts({ song, script, shots, entities, lyrics, scenes, breakdown, storyboard }) {
-  const ents = entities || [];
+// ------------------------------------------------------------------ stage status from content (ROADMAP_v4 F1)
+// Two things are kept apart:
+//   status   what stages.json stores: the director's mark (done, page only) or an agent's flag (empty / in_progress /
+//            needs_you). A project without stages.json, or a "done" that was derived (done_by "derived", written by
+//            older versions), is never done: it reads as in_progress when the files hold content.
+//   content  what the files hold, per stage: {status: empty | in_progress | needs_you | ready, blockers[], hints[],
+//            counts}. blockers stop "ready"; hints are advisory (no song file yet, entities from before the flow).
+//   shown    what the rail and the stage bar show: done only when the director marked it AND the content is still
+//            ready; a done whose content regressed shows "changed" (done ⚠ changed since) with the reason; a stage the
+//            director or an agent flagged needs_you stays needs_you; else the content status (ready = ready to mark done).
+export const SHOWN_LABEL = { empty: 'empty', in_progress: 'in progress', needs_you: 'needs you', ready: 'ready to mark done', done: 'done', changed: 'done ⚠ changed since' };
+const pl = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
+const LEGACY_STATES = ['approved', 'locked'];
+
+// One definition of "approved" for an asset (character, location, prop), shared by Assets and the stage workspaces:
+// approved = the root tree (identity / base) has an approved node. An approval from before the flow (approvals.json
+// "<kind>:<id>" approved / locked, or entity.status "approved") without that node is "approved (legacy)": shown as
+// such everywhere, and it does not satisfy stage 4 / 5.
+//   -> {key: approved | legacy | none, approved, legacy, nodes, node?, label, title}
+export function assetApproval(ent, approvals) {
+  const type = A.TYPE[ent?.kind] ? ent.kind : 'character', T = A.TYPE[type], it = A.normIter(ent?.iter);
+  const nodes = A.treeNodes(it, T.root).length, ap = A.approvedNode(it, T.root);
+  const st = approvals?.items?.[`${type}:${ent?.id}`]?.state;
+  const legacy = st ? LEGACY_STATES.includes(st) : ent?.status === 'approved';   // the Assets approval wins over the entity's own status
+  if (ap) return { key: 'approved', approved: true, legacy: false, nodes, node: ap.id, label: `${T.rootWord} approved`, title: `${T.rootWord} approved in stage ${T.stage === 'characters' ? 4 : 5} (node ${ap.id})` };
+  if (legacy) return { key: 'legacy', approved: false, legacy: true, nodes, label: nodes ? `approved (legacy) · ${T.rootWord} not approved` : `approved (legacy) · no ${T.rootWord} node`,
+    title: `approved before the guided flow (${st ? 'Assets approval: ' + st : 'entity status approved'}), but the ${T.rootWord} tree of stage ${T.stage === 'characters' ? 4 : 5} ${nodes ? `has ${pl(nodes, 'node')} and none is approved` : 'is empty'}: import an existing image as the ${T.rootWord} (no request, nothing paid), then approve it` };
+  const base = !!(ent?.base?.refs?.length || ent?.base?.text);
+  return { key: 'none', approved: false, legacy: false, nodes, label: nodes ? `${T.rootWord} · ${pl(nodes, 'node')}` : base ? 'base chosen' : 'needs a base', title: '' };
+}
+// the stage-4/5 facts of one asset entity
+function assetFact(e, approvals) {
+  const it = A.normIter(e?.iter), a = assetApproval(e, approvals);
+  return { id: e.id, kind: e.kind, name: e.name || e.id, approval: a.key, label: a.label,
+    waiting: it.nodes.filter(n => A.pending(it, n)).length, proposals: (it.base_proposal ? 1 : 0) + (it.proposals || []).filter(x => x?.status === 'open').length,
+    review: A.variants(e, e.kind).filter(v => v.status === 'review').length };
+}
+
+// what the project files already hold (the page passes its store, the server reads the files). `entities` are the full
+// entity files (the page) or only entities/index.json (then assetsKnown is false: the identity / base trees are unknown).
+export function projectFacts({ song, script, shots, entities, lyrics, scenes, breakdown, storyboard, approvals }) {
+  const ents = (entities || []).filter(e => e && typeof e === 'object');
   const bitems = (currentBreakdown(breakdown)?.items || []).filter(i => !i.dropped);
   const sv = currentScript(scenes), dur = song?.duration_ms || 0;
+  const bstate = (i) => breakdown?.states?.[i.id]?.status || 'draft';
+  const assetsKnown = !ents.length || ents.some(e => !e.path || 'iter' in e || 'looks' in e || 'variants' in e || 'base' in e);
+  const af = (kind) => assetsKnown ? ents.filter(e => e.kind === kind).map(e => assetFact(e, approvals)) : [];
   return {
     scenes: sv?.scenes?.length || 0, gapMs: sv ? scriptGaps(sv.scenes, dur).reduce((a, [x, y]) => a + y - x, 0) : dur,
-    intakeOpen: scenes ? intakeOpen(scenes).length : 0,
+    intakeOpen: scenes ? intakeOpen(scenes).length : 0, intakeAnswered: scenes ? INTAKE.length - intakeOpen(scenes).length : 0,
     sceneAsks: (scenes?.notes || []).filter(n => n.status === 'open' && n.to === 'agent').length,
+    scenesNeedYou: sv ? sv.scenes.filter(s => scenes?.states?.[s.id]?.status === 'needs_you').length : 0,
     lines: song?.lines?.length || 0, hasSong: !!song?.audio?.mix, timing: song?.timing || null,
     script: script?.lines?.length || 0, shots: shots?.length || 0,
     characters: ents.filter(e => e.kind === 'character').length, locations: ents.filter(e => e.kind === 'location').length,
     props: ents.filter(e => e.kind === 'prop').length,
     agentAsks: (lyrics?.notes || []).filter(n => n.status === 'open' && n.to === 'agent').length,
     items: bitems.length, itemsToPromote: bitems.filter(i => PROMOTABLE.includes(i.kind) && !breakdown?.states?.[i.id]?.entity_id).length,
+    itemsReview: bitems.filter(i => bstate(i) === 'review').length, itemsDraft: bitems.filter(i => bstate(i) === 'draft').length,
     sceneryToPromote: bitems.filter(i => (i.kind === 'location' || i.kind === 'prop') && !breakdown?.states?.[i.id]?.entity_id).length,
     breakdownAsks: (breakdown?.notes || []).filter(n => n.status === 'open' && n.to === 'agent').length,
+    // stages 4 and 5: per asset, where its identity / base stands (assetApproval)
+    assetsKnown, assets: { character: af('character'), location: af('location'), prop: af('prop') },
     // stage 6: the storyboard (a project without storyboard.json reads its shots from shots.json)
     ...(() => { const bs = currentBoard(storyboard)?.shots || [];
       return { boardShots: bs.length, scenesNoShots: sv && storyboard ? sv.scenes.filter(s => !bs.some(x => x.scene === s.id)).length : 0, shotsNoFrame: bs.filter(s => !s.sketch && !s.thumb).length,
         boardAsks: (storyboard?.notes || []).filter(n => n.status === 'open' && n.to === 'agent').length }; })(),
   };
 }
-// a project without stages.json: a stage counts as done when its files already hold content (existing productions)
-export function deriveStages(f) {
-  const has = { lyrics: f.lines > 0, script: f.script > 0 || f.scenes > 0, breakdown: (f.items || 0) + f.characters + f.locations + f.props > 0, characters: f.characters > 0,
-    scenery: f.locations + f.props > 0, storyboard: f.shots > 0 || (f.boardShots || 0) > 0, final: false };
-  return { rev: 0, derived: true, stages: STAGES.map(s => ({ id: s.id, status: has[s.id] ? 'done' : 'empty', ...(has[s.id] ? { done_by: 'derived' } : {}), blockers: [] })) };
+const asks = (n) => n ? [`${pl(n, 'open ask')} for the agent`] : [];
+// a stage's own content -> {status: empty | in_progress | needs_you | ready, blockers[] (stop ready), hints[], counts}
+function assetsContent(f, kinds, toPromote, word) {
+  const list = kinds.flatMap(k => f.assets?.[k] || []), n = kinds.reduce((a, k) => a + (f[k === 'character' ? 'characters' : k + 's'] || 0), 0);
+  const c = { assets: n, approved: list.filter(x => x.approval === 'approved').length, legacy: list.filter(x => x.approval === 'legacy').length,
+    needsBase: list.filter(x => x.approval === 'none' && x.label === 'needs a base').length, waiting: list.reduce((a, x) => a + x.waiting, 0),
+    proposals: list.reduce((a, x) => a + x.proposals, 0), review: list.reduce((a, x) => a + x.review, 0), toPromote };
+  if (!n && !toPromote) return { status: 'empty', blockers: [`no ${kinds.map(k => k === 'character' ? 'characters' : k + 's').join(' or ')} yet`], hints: [], counts: c };
+  const you = [], work = [], hints = [];
+  if (toPromote) you.push(`${pl(toPromote, 'breakdown item')} not yet entities`);
+  if (!f.assetsKnown) work.push(`${word} state unknown here (only the entity index was read)`);
+  for (const x of list) {
+    if (x.approval === 'legacy') you.push(`${x.name}: ${x.label}`);
+    else if (x.approval === 'none') (x.label === 'base chosen' && !x.waiting && !x.proposals ? work : you).push(`${x.name}: ${x.label}`);
+  }
+  if (c.waiting) you.push(`${pl(c.waiting, 'new node')} to keep / branch / revert`);
+  if (c.proposals) you.push(`${pl(c.proposals, 'agent proposal')} to accept or dismiss`);
+  if (c.review) you.push(`${pl(c.review, 'variant')} in review`);
+  return { status: you.length ? 'needs_you' : work.length ? 'in_progress' : 'ready', blockers: [...you, ...work], hints, counts: c };
 }
-// any stages.json (or none) -> all seven stages in order, unknown statuses read as empty
+export function stageContent(id, f) {
+  switch (id) {
+    case 'lyrics': {
+      const counts = { lines: f.lines || 0, asks: f.agentAsks || 0, song: !!f.hasSong };
+      if (!f.lines) return { status: 'empty', blockers: ['no lyrics yet'], hints: [], counts };
+      const b = asks(f.agentAsks);
+      return { status: b.length ? 'in_progress' : 'ready', blockers: b, hints: f.hasSong ? [] : ['no song file yet (timings estimated)'], counts };
+    }
+    case 'script': {
+      const gapS = f.scenes ? Math.round((f.gapMs || 0) / 1000) : 0;
+      const counts = { scenes: f.scenes || 0, intakeOpen: f.intakeOpen || 0, scenesNeedYou: f.scenesNeedYou || 0, unscriptedS: gapS, asks: f.sceneAsks || 0, legacyLines: f.script || 0 };
+      // nothing written yet (no scene, no legacy script, no intake answer): empty, whatever the open questions
+      if (!f.scenes && !f.script && !f.intakeAnswered) return { status: 'empty', blockers: ['no scenes yet', ...(f.intakeOpen ? [`${pl(f.intakeOpen, 'intake question')} open`] : [])], hints: [], counts };
+      const you = [...(f.intakeOpen ? [`${pl(f.intakeOpen, 'intake question')} open`] : []), ...(f.scenesNeedYou ? [`${pl(f.scenesNeedYou, 'scene')} flagged needs you`] : [])];
+      const work = [...(f.scenes ? (f.gapMs >= 1000 ? [`${gapS} s unscripted`] : []) : ['no scenes yet']), ...asks(f.sceneAsks)];
+      return { status: you.length ? 'needs_you' : work.length ? 'in_progress' : 'ready', blockers: [...you, ...work], hints: [], counts };
+    }
+    case 'breakdown': {
+      const ents = f.characters + f.locations + f.props;
+      const counts = { items: f.items || 0, review: f.itemsReview || 0, draft: f.itemsDraft || 0, asks: f.breakdownAsks || 0, entities: ents };
+      if (!f.items) return { status: 'empty', blockers: ['no items yet', ...asks(f.breakdownAsks)], hints: ents ? [`${pl(ents, 'entity', 'entities')} from before the flow (not a breakdown)`] : [], counts };
+      const you = [...(f.itemsReview ? [`${pl(f.itemsReview, 'item')} in review`] : []), ...(f.itemsDraft ? [`${pl(f.itemsDraft, 'item')} not ok yet`] : [])];
+      const work = asks(f.breakdownAsks);
+      return { status: you.length ? 'needs_you' : work.length ? 'in_progress' : 'ready', blockers: [...you, ...work], hints: [], counts };
+    }
+    case 'characters': return assetsContent(f, ['character'], f.itemsToPromote || 0, 'identity');
+    case 'scenery': return assetsContent(f, ['location', 'prop'], f.sceneryToPromote || 0, 'base');
+    case 'storyboard': {
+      const counts = { shots: f.boardShots || 0, legacyShots: f.shots || 0, scenesNoShots: f.scenesNoShots || 0, shotsNoFrame: f.shotsNoFrame || 0, asks: f.boardAsks || 0 };
+      if (!f.boardShots && !f.shots) return { status: 'empty', blockers: [f.scenesNoShots ? `${pl(f.scenesNoShots, 'scene')} without shots` : 'no shots yet'], hints: [], counts };
+      const work = [...(f.boardShots ? [] : ['no storyboard yet (shots.json only)']), ...(f.scenesNoShots ? [`${pl(f.scenesNoShots, 'scene')} without shots`] : []),
+        ...(f.shotsNoFrame ? [`${pl(f.shotsNoFrame, 'shot')} without a frame`] : []), ...asks(f.boardAsks)];
+      return { status: work.length ? 'in_progress' : 'ready', blockers: work, hints: [], counts };
+    }
+    default: return { status: 'empty', blockers: [], hints: [], counts: {} };
+  }
+}
+// a project without stages.json: nothing is done (only the director marks done); a stage with content is in progress
+export function deriveStages(f) {
+  return { rev: 0, derived: true, stages: STAGES.map(s => ({ id: s.id, status: s.id !== 'final' && stageContent(s.id, f || {}).status !== 'empty' ? 'in_progress' : 'empty', blockers: [] })) };
+}
+// any stages.json (or none) -> all seven stages in order, unknown statuses read as empty; a derived "done" is not done
 export function normStages(doc, facts) {
   if (!doc || !Array.isArray(doc.stages)) return deriveStages(facts || {});
   const by = new Map(doc.stages.filter(s => s && typeof s === 'object').map(s => [s.id, s]));
-  return { ...doc, stages: STAGES.map(s => { const x = by.get(s.id) || {}; return { ...x, id: s.id, status: STAGE_STATUSES.includes(x.status) ? x.status : 'empty', blockers: Array.isArray(x.blockers) ? x.blockers : [] }; }) };
+  return { ...doc, stages: STAGES.map(s => {
+    const x = { ...(by.get(s.id) || {}) };
+    if (x.status === 'done' && x.done_by === 'derived') { x.status = 'in_progress'; delete x.done_by; }
+    return { ...x, id: s.id, status: STAGE_STATUSES.includes(x.status) ? x.status : 'empty', blockers: Array.isArray(x.blockers) ? x.blockers : [] };
+  }) };
 }
-// what stands in the way of each stage (computed) plus what an agent wrote (stored blockers)
-export function autoBlockers(stages, f) {
-  const st = Object.fromEntries(stages.map(s => [s.id, s.status]));
-  const need = (id) => st[id] === 'done' ? [] : [`${stageById(id).title.toLowerCase()} not done`];
-  return {
-    lyrics: [...(f.lines ? [] : ['no lyrics yet']), ...(f.lines && !f.hasSong ? ['no song file yet (timings estimated)'] : []), ...(f.agentAsks ? [`${f.agentAsks} open ask${f.agentAsks > 1 ? 's' : ''} for the agent`] : [])],
-    script: [...need('lyrics'), ...(f.intakeOpen ? [`${f.intakeOpen} intake question${f.intakeOpen > 1 ? 's' : ''} open`] : []),
-      ...(f.scenes ? (f.gapMs >= 1000 ? [`${Math.round(f.gapMs / 1000)} s unscripted`] : []) : ['no scenes yet']),
-      ...(f.sceneAsks ? [`${f.sceneAsks} open ask${f.sceneAsks > 1 ? 's' : ''} for the agent`] : [])],
-    breakdown: [...need('script'), ...(f.items || f.characters + f.locations + f.props ? [] : ['no items yet']), ...(f.breakdownAsks ? [`${f.breakdownAsks} open ask${f.breakdownAsks > 1 ? 's' : ''} for the agent`] : [])],
-    characters: [...need('breakdown'), ...(f.itemsToPromote ? [`${f.itemsToPromote} breakdown item${f.itemsToPromote > 1 ? 's' : ''} not yet entities`] : [])], scenery: [...need('breakdown'), ...(f.sceneryToPromote ? [`${f.sceneryToPromote} location / prop item${f.sceneryToPromote > 1 ? 's' : ''} not yet entities`] : [])], storyboard: [...need('script'), ...(f.scenesNoShots ? [`${f.scenesNoShots} scene${f.scenesNoShots > 1 ? 's' : ''} without shots`] : []), ...(f.shotsNoFrame ? [`${f.shotsNoFrame} shot${f.shotsNoFrame > 1 ? 's' : ''} without a frame`] : []), ...(f.boardAsks ? [`${f.boardAsks} open ask${f.boardAsks > 1 ? 's' : ''} for the agent`] : [])],
-    final: stages.filter(s => s.id !== 'final' && s.status !== 'done').length ? [`${stages.filter(s => s.id !== 'final' && s.status !== 'done').length} stages not done`] : [],
-  };
+// stored status + content -> shown status (and the reason of a "changed")
+function shownOf(s, c) {
+  if (s.status === 'done') return c.status === 'ready' ? { shown: 'done' } : { shown: 'changed', changed: `${s.done_ok === false ? 'marked done while not ready' : 'changed since marked done'}: ${c.blockers.join('; ') || c.status}` };
+  if (s.status === 'needs_you') return { shown: 'needs_you' };
+  if (c.status === 'empty' && s.status === 'in_progress') return { shown: 'in_progress' };
+  return { shown: c.status };
 }
 export function stagesView(doc, facts) {
-  const n = normStages(doc, facts), auto = autoBlockers(n.stages, facts);
-  const stages = n.stages.map(s => ({ ...s, title: stageById(s.id).title, n: stageById(s.id).n, blockers_all: [...s.blockers, ...auto[s.id]] }));
-  const next = stages.find(s => s.status === 'needs_you') || stages.find(s => s.status !== 'done') || null;
-  return { rev: n.rev || 0, derived: !!n.derived, stages, next: next ? { id: next.id, title: next.title, status: next.status, blockers: next.blockers_all } : null };
+  const f = facts || {}, n = normStages(doc, f), out = [];
+  for (const s of n.stages) {
+    const d = stageById(s.id);
+    let c;
+    if (s.id === 'final') {
+      const open = out.filter(x => x.shown !== 'done');
+      c = { status: open.length ? (out.some(x => x.content.status !== 'empty') ? 'in_progress' : 'empty') : 'ready', blockers: open.length ? [`${pl(open.length, 'stage')} not done (${open.map(x => x.title.toLowerCase()).join(', ')})`] : [], hints: [], counts: { stagesNotDone: open.length } };
+    } else c = stageContent(s.id, f);
+    const up = { script: ['lyrics'], breakdown: ['script'], characters: ['breakdown'], scenery: ['breakdown'], storyboard: ['script'] }[s.id] || [];
+    const waits = up.filter(u => out.find(x => x.id === u)?.shown !== 'done').map(u => `${stageById(u).title.toLowerCase()} not done`);
+    const sh = shownOf(s, c);
+    out.push({ ...s, title: d.title, n: d.n, content: c, ...sh, shown_label: sh.shown === 'changed' && s.done_ok === false ? 'done ⚠ not ready' : SHOWN_LABEL[sh.shown],
+      blockers_all: [...s.blockers, ...waits, ...c.blockers, ...c.hints] });
+  }
+  const next = out.find(s => s.shown === 'needs_you' || s.shown === 'changed') || out.find(s => s.shown !== 'done') || null;
+  return { rev: n.rev || 0, derived: !!n.derived, stages: out, next: next ? { id: next.id, title: next.title, status: next.status, shown: next.shown, blockers: next.blockers_all } : null };
+}
+// the rail / stage-bar tooltip of a stage: status, why, what blocks it
+export function stageTip(s) {
+  const c = s.content || { blockers: [], hints: [], counts: {} };
+  const by = s.status === 'done' ? ` (marked by the ${s.done_by || 'director'}${s.updated ? ' ' + s.updated : ''})` : '';
+  const counts = Object.entries(c.counts || {}).filter(([, v]) => v && typeof v !== 'boolean').map(([k, v]) => `${k} ${v}`).join(' · ');
+  return [`${s.n} ${s.title}: ${s.shown_label}${by}`, ...(s.changed ? [`⚠ ${s.changed}`] : []), ...(counts ? [counts] : []),
+    ...(s.blockers_all.length ? ['blockers:', ...s.blockers_all.map(b => '· ' + b)] : ['nothing blocking'])].join('\n');
 }
 
 // ------------------------------------------------------------------ lyrics: text <-> structure

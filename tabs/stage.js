@@ -4,7 +4,7 @@
 // tabs/charstage.js, stage 5 (scenery) tabs/scenery.js (both on the generic tabs/assetws.js), stage 6 (storyboard)
 // tabs/storyboard.js; the last stage shows what it will hold and where its data lives today.
 import { store, esc } from '../js/store.js';
-import { STAGES, STATUS_LABEL, stageById } from '../js/flow.js';
+import { STAGES, STATUS_LABEL, stageById, stageTip } from '../js/flow.js';
 
 const MODULES = { lyrics: () => import('./lyrics.js'), script: () => import('./script.js'), breakdown: () => import('./breakdown.js'), characters: () => import('./charstage.js'), scenery: () => import('./scenery.js'), storyboard: () => import('./storyboard.js') };
 const LATER = {
@@ -20,10 +20,12 @@ export default {
     const renderBar = () => {
       const v = window.WB.stages.view(), id = window.WB.stages.current(), s = v.stages.find(x => x.id === id), d = stageById(id);
       const btn = (st, label, title) => s.status === st ? '' : `<button data-st="${st}" title="${esc(title)}">${label}</button>`;
-      bar.innerHTML = `<b>${d.n} · ${esc(d.title)}</b><span class="sgst st-${s.status}"><i></i>${STATUS_LABEL[s.status]}</span>`
-        + `${s.status === 'done' ? btn('in_progress', 'Reopen', 'back to in progress') : btn('done', 'Mark done', 'the director signs this stage off (agents cannot)')}`
+      // the status shown is computed from the content (js/flow.js stagesView), the buttons act on the stored mark
+      const ready = s.content?.status === 'ready';
+      bar.innerHTML = `<b>${d.n} · ${esc(d.title)}</b><span class="sgst st-${s.shown}" data-shown="${s.shown}" title="${esc(stageTip(s))}"><i></i>${esc(s.shown_label)}${s.shown !== s.status && s.status !== 'done' && s.status !== 'empty' ? ` <span class="dim">(marked ${STATUS_LABEL[s.status]})</span>` : ''}</span>`
+        + `${s.status === 'done' ? btn('in_progress', 'Reopen', s.changed ? `back to in progress (${s.changed})` : 'back to in progress') : btn('done', 'Mark done', ready ? 'the director signs this stage off (agents cannot)' : `the director signs this stage off (agents cannot). Not ready yet: ${s.content?.blockers.join('; ')}. Marked anyway, it shows done ⚠ until the content is ready`)}`
         + `${s.status !== 'done' ? btn('in_progress', 'In progress', '') + btn('needs_you', 'Needs you', 'flag it for later') : ''}`
-        + `<span class="dim sgbl" title="${esc(s.blockers_all.join('\n'))}">${s.blockers_all.length ? esc(s.blockers_all.join(' · ')) : 'nothing blocking'}</span>`
+        + `<span class="dim sgbl" title="${esc(stageTip(s))}">${s.changed ? `<b class="stw">⚠ ${esc(s.changed)}</b> · ` : ''}${s.blockers_all.length ? esc(s.blockers_all.join(' · ')) : 'nothing blocking'}</span>`
         + `${s.note ? `<span class="sgnote" title="${esc(`${s.updated_by || ''} ${s.updated || ''}`)}">${s.via === 'agent' ? 'agent: ' : ''}${esc(s.note)}</span>` : ''}`
         + `<span class="sgnav">${d.n > 1 ? `<a data-go="${STAGES[d.n - 2].id}">‹ ${esc(STAGES[d.n - 2].title)}</a>` : ''}${d.n < 7 ? `<a data-go="${STAGES[d.n].id}">${esc(STAGES[d.n].title)} ›</a>` : ''}</span>`;
     };
@@ -51,7 +53,7 @@ export default {
     });
     body.addEventListener('click', (e) => { const a = e.target.closest('.sglater [data-view]'); if (a) window.WB.app.show(a.dataset.view); });
     document.addEventListener('wb:stage', () => { if (window.WB.app.active() === 'stage') showStage(); });
-    store.on((w) => { if (['stages', 'lyrics', 'scenes', 'breakdown', 'board', 'all'].includes(w) && window.WB.app.active() === 'stage') renderBar(); });
+    store.on((w) => { if (['stages', 'lyrics', 'scenes', 'breakdown', 'board', 'entities', 'approvals', 'all'].includes(w) && window.WB.app.active() === 'stage') renderBar(); });
     this._show = showStage;
   },
   show() { return this._show?.(); },

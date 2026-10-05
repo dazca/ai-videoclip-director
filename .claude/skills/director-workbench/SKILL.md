@@ -63,8 +63,8 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
    Openverse images with licence / creator / URL, a description, private reference photos, sketches: open the ref
    `file`s to look), the **iteration trees** ("identity" and one "look:<id>" per costume), the requests with the edit
    text, the numbered **pins** ("necklace here, silver") and the sketch PNG / **mask** files, and what waits on whom
-   (`to_run`, `to_register`, `waiting_for_director`). Every generation is a `request_create` DRAFT with `char {id,
-   tree, from, kind: identity | edit | look}`, refs (for an edit: the node image, the sketch PNG, the mask), the tool and
+   (`to_run`, `to_register`, `waiting_for_director`). Every generation is a `request_create` DRAFT with `asset {type:
+   "character", id, tree, from, kind: identity | edit | look}` (`char` is deprecated), refs (for an edit: the node image, the sketch PNG, the mask), the tool and
    an honest `est_cost`; the director approves it in the page. Run only approved ones (`request_update` queued ->
    running -> done with outputs and the actual cost), then `character_iteration_add {id, request}`: the image becomes a
    node; the director compares it with its parent and keeps, branches or reverts it, and approves the identity / a look
@@ -98,7 +98,13 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
    the draft requests to propose (`shot-still` first, `shot-video` from its output; target `shot:<id>`; refs = the
    approved variant / look images + the frame sketch) with the total against the cap: propose the missing asset
    sheets first, keep the total under the cap (prefer stills when it is tight), and say so in the reply.
-6. **Generation requests**: `request_create` drafts with a concrete prompt, refs, tool and an honest `est_cost`.
+6. **Generation requests**: `request_create` drafts with a concrete prompt, refs, tool and an honest `est_cost` (list prices:
+   `js/prices.js`; for photoreal stills and video pass `recipe {model, wardrobe, action, place, light, ...}`: the prompt is
+   built from the photoreal blocks, the estimate from the price table; read the returned `warnings`). No base yet:
+   `base_propose`. An image that already exists (a legacy look, an output made outside the queue): `media_add` /
+   `media_update`, `cost_record {usd, via, job}` for its spend (never an approval), then `node_import_propose`.
+   To wait for the director, use `wait_for {request, until: ["approved", "rejected"], timeout_s}` instead of polling.
+   If `status` says the server is stale, ask for a restart.
    The director approves in Review > Queue (show it with `ui_focus` view "queue"). Only if the owner enabled
    `agent_approvals` may you pass `director_approved: true`, and only when they said so in the conversation.
 7. **Run** only approved requests: `request_update` queued -> running -> (call the provider) -> done with `outputs` and

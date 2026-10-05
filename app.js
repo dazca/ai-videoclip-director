@@ -16,6 +16,7 @@ import { sectionAt, shotAt, lineIndexAt } from './core/defaults.js';
 import './core/partb.js';
 import { mountRail } from './core/rail.js';
 import { wizard } from './core/wizard.js';
+import { watchCode } from './core/stale.js';
 
 const ctx = { store, timeline: null, goto: null };
 window.WB = Object.assign(window.WB || {}, { store, ctx, commands, keymap, menus, palette, ui, cheatsheet, history, selection, dock, projects, exporter, context,
@@ -222,6 +223,7 @@ addEventListener('keydown', (e) => {
   await show('timeline');
   if (want !== 'timeline' && (pageById(want) || subDef(want))) await show(want);
   store.listen();
+  watchCode();
   installVerify(ctx);
   projects.remember(); projects.refresh();
   if (prefs.get('dock', false)) dock.open();

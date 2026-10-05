@@ -124,12 +124,12 @@ export async function verifyCharacters({ browser, BASE, DATA, OUT, post, writeHe
 
   // 3. "Request identity sheet": the base is saved (page), a DRAFT request with refs, tool and an honest estimate
   await click('.chbf [data-a=reqid]');
-  await until(() => (window.WB.store.requests?.items || []).some(r => r.char?.id === 'mara'));
+  await until(() => (window.WB.store.requests?.items || []).some(r => r.asset?.id === 'mara'));
   const E1 = await fileUntil('entities/characters/mara.json', (j) => j.base?.refs?.length === 2);
-  const R1 = (await fileUntil('requests.json', (j) => j.items.some(r => r.char?.id === 'mara'))).items.find(r => r.char?.id === 'mara');
+  const R1 = (await fileUntil('requests.json', (j) => j.items.some(r => r.asset?.id === 'mara'))).items.find(r => r.asset?.id === 'mara');
   await wait(300); await shot('v7_identity_request');
-  check('Request identity sheet: the base is saved by the page (2 refs + the description); a draft request (kind identity-sheet, refs, tool, est_cost $0.08, char tree identity); nothing approved',
-    E1?.base?.via === 'page' && /scar on the chin/.test(E1.base.text) && R1?.status === 'draft' && R1.kind === 'identity-sheet' && R1.est_cost === 0.08 && /kontext/.test(R1.tool) && R1.refs.length === 2 && R1.char.tree === 'identity' && R1.char.from === null && /identity sheet/i.test(R1.prompt),
+  check('Request identity sheet: the base is saved by the page (2 refs + the description); a draft request (kind identity-sheet, refs, tool, est_cost $0.12 (NB2 2K, js/prices.js), asset tree identity); nothing approved',
+    E1?.base?.via === 'page' && /scar on the chin/.test(E1.base.text) && R1?.status === 'draft' && R1.kind === 'identity-sheet' && R1.est_cost === 0.12 && /nano-banana-2/.test(R1.tool) && R1.refs.length === 2 && R1.asset.tree === 'identity' && R1.asset.from === null && /identity sheet/i.test(R1.prompt),
     { base: E1?.base && { via: E1.base.via, refs: E1.base.refs.length }, req: R1 && { status: R1.status, kind: R1.kind, est: R1.est_cost, tool: R1.tool, refs: R1.refs } });
 
   // 4. the agent cannot run a draft; the director approves here; the agent runs it (placeholder output) and registers the node
@@ -165,11 +165,11 @@ export async function verifyCharacters({ browser, BASE, DATA, OUT, post, writeHe
   await wait(200); await shot('v7_edit_sketch_mask_pins');
   const skState = await pg.evaluate(`(() => { const s = ${api}.get(); return { strokes: s.strokes.length, mask: s.mask.length, pins: s.pins.length, underlay: s.underlay?.src }; })()`);
   await click('.chedside [data-a=reqedit]');
-  const R2 = (await fileUntil('requests.json', (j) => j.items.some(r => r.char?.from === 'n01' && r.char.kind === 'edit')))?.items.find(r => r.char?.from === 'n01');
+  const R2 = (await fileUntil('requests.json', (j) => j.items.some(r => r.asset?.from === 'n01' && r.asset.kind === 'edit')))?.items.find(r => r.asset?.from === 'n01');
   check('Edit from n01: the sketch tool opens over the image (underlay); a stroke, a mask and a pin; "Request edit" saves the sketch (PNG + mask) and makes a draft request with the text, the pins, the sketch and mask paths (masked inpaint estimate)',
-    skState.strokes >= 1 && skState.mask >= 1 && skState.pins === 1 && skState.underlay === G('mara_sheet.jpg') && R2?.status === 'draft' && R2.kind === 'character-edit' && R2.char.pins?.[0]?.text === 'necklace here, silver, thin'
-    && /necklace/.test(R2.char.text) && R2.char.png && R2.char.mask && fs.existsSync(path.join(ND, R2.char.png)) && fs.existsSync(path.join(ND, R2.char.mask)) && R2.est_cost === 0.05 && /fill/.test(R2.tool) && R2.refs[0] === G('mara_sheet.jpg'),
-    { skState, req: R2 && { char: R2.char, est: R2.est_cost, tool: R2.tool, refs: R2.refs } });
+    skState.strokes >= 1 && skState.mask >= 1 && skState.pins === 1 && skState.underlay === G('mara_sheet.jpg') && R2?.status === 'draft' && R2.kind === 'character-edit' && R2.asset.pins?.[0]?.text === 'necklace here, silver, thin'
+    && /necklace/.test(R2.asset.text) && R2.asset.png && R2.asset.mask && fs.existsSync(path.join(ND, R2.asset.png)) && fs.existsSync(path.join(ND, R2.asset.mask)) && R2.est_cost === 0.08 && /nano-banana-2/.test(R2.tool) && R2.refs[0] === G('mara_sheet.jpg'),
+    { skState, req: R2 && { asset: R2.asset, est: R2.est_cost, tool: R2.tool, refs: R2.refs } });
 
   // 6. approve -> the agent runs it -> n02 waits; the A/B compare (slider, toggle, side by side); Keep makes it the head
   await click(`.chreq[data-r="${R2.id}"] [data-a=reqok]`); await fileUntil('requests.json', (j) => j.items.find(r => r.id === R2.id)?.status === 'approved');
@@ -232,7 +232,7 @@ export async function verifyCharacters({ browser, BASE, DATA, OUT, post, writeHe
   const RL = (await op('request_create', { kind: 'character-edit', est_cost: 0.04, prompt: 'x', char: { id: 'mara', tree: 'identity', from: 'n02', kind: 'edit', text: 'x' } })).body;
   check('Approve identity (page): n02 approved and locked (no Edit, status "identity approved"); the agent cannot approve or choose (403) nor write the trees or approve a look through entity_upsert (ignored / 403)',
     agAct.status === 403 && agChoose.status === 403 && agUp.status === 403 && agUp2.status === 200 && agUp2.body?.warnings?.some(w => /iter ignored/.test(w)) && E4?.iter.trees.identity.approved === 'n02' && E4.iter.trees.identity.via === 'page'
-    && E4.role === 'the lead' && !E4.iter.trees.identity.approved_by?.includes('agent') && /approved/.test(locked.ok || '') && !locked.edit && /identity approved/.test(locked.row || '') && RL?.char?.tree === 'identity',
+    && E4.role === 'the lead' && !E4.iter.trees.identity.approved_by?.includes('agent') && /approved/.test(locked.ok || '') && !locked.edit && /identity approved/.test(locked.row || '') && RL?.asset?.tree === 'identity',
     { agAct: agAct.status, agChoose: agChoose.status, agUp: agUp.status, warn: agUp2.body?.warnings, identity: E4?.iter?.trees?.identity, locked });
 
   // 9. looks: the wardrobe item is a draft look; a look sheet from the approved identity; "+ New look"
@@ -240,7 +240,7 @@ export async function verifyCharacters({ browser, BASE, DATA, OUT, post, writeHe
   const lk0 = await pg.evaluate(() => [...document.querySelectorAll('.chlooks .chlook[data-look]')].map(l => l.dataset.look));
   await click(`.chlook[data-look="${p3.body.look_id}"]`);
   await click('.chsh [data-a=reqlook]');
-  const R5 = (await fileUntil('requests.json', (j) => j.items.some(r => r.char?.kind === 'look')))?.items.find(r => r.char?.kind === 'look');
+  const R5 = (await fileUntil('requests.json', (j) => j.items.some(r => r.asset?.kind === 'look')))?.items.find(r => r.asset?.kind === 'look');
   await click(`.chreq[data-r="${R5.id}"] [data-a=reqok]`); await fileUntil('requests.json', (j) => j.items.find(r => r.id === R5.id)?.status === 'approved');
   await run(R5.id, G('mara_raincoat.jpg')); const n5 = (await agent('character_iteration_add', { id: 'mara', request: R5.id })).body;
   await until(() => !!document.querySelector('.chws .chtree .chnode'));
@@ -252,9 +252,9 @@ export async function verifyCharacters({ browser, BASE, DATA, OUT, post, writeHe
   await shot('v7_looks');
   const E5 = ent('mara');
   check('looks: the breakdown wardrobe item is a draft look; "Request look sheet" starts from the approved identity (from n02, refs[0] its image); its node n05 roots the look tree; "+ New look" adds one (page); an agent\'s look is "review"',
-    lk0.includes(p3.body.look_id) && R5?.char.from === 'n02' && R5.char.tree === `look:${p3.body.look_id}` && R5.refs[0] === E4.iter.nodes.find(n => n.id === 'n02').image && n5?.node?.id === 'n05' && n5.node.from_identity === 'n02' && n5.head === 'n05'
+    lk0.includes(p3.body.look_id) && R5?.asset.from === 'n02' && R5.asset.tree === `look:${p3.body.look_id}` && R5.refs[0] === E4.iter.nodes.find(n => n.id === 'n02').image && n5?.node?.id === 'n05' && n5.node.from_identity === 'n02' && n5.head === 'n05'
     && E5.looks.find(l => l.id === 'pier-jacket')?.from === 'page' && E5.looks.find(l => l.id === 'pier-jacket').garments.includes('grey scarf') && agLook.body?.status === 'review' && E5.looks.find(l => l.id === 'morning-sweater')?.status === 'review',
-    { looks: E5.looks.map(l => [l.id, l.status, l.from]), R5: R5 && R5.char, n5: n5?.node && { id: n5.node.id, from: n5.node.from_identity } });
+    { looks: E5.looks.map(l => [l.id, l.status, l.from]), R5: R5 && R5.asset, n5: n5?.node && { id: n5.node.id, from: n5.node.from_identity } });
 
   // 10. a private photo base (Theo): upload -> private/refs/, flagged private; the identity node made from it is private;
   // nothing private in the export bundle
@@ -266,7 +266,7 @@ export async function verifyCharacters({ browser, BASE, DATA, OUT, post, writeHe
   await shot('v7_base_photos');
   const phRef = await pg.evaluate(() => window.WB.characters.ws.draft().refs.find(r => r.source === 'photo'));
   await click('.chbf [data-a=reqid]');
-  const R6 = (await fileUntil('requests.json', (j) => j.items.some(r => r.char?.id === 'theo')))?.items.find(r => r.char?.id === 'theo');
+  const R6 = (await fileUntil('requests.json', (j) => j.items.some(r => r.asset?.id === 'theo')))?.items.find(r => r.asset?.id === 'theo');
   await click(`.chreq[data-r="${R6.id}"] [data-a=reqok]`); await fileUntil('requests.json', (j) => j.items.find(r => r.id === R6.id)?.status === 'approved');
   await run(R6.id, G('theo_sheet.jpg')); const n6 = (await agent('character_iteration_add', { id: 'theo', request: R6.id })).body;
   await wait(800);

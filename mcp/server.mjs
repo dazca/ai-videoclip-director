@@ -11,6 +11,7 @@
 // WB_TOKEN (the server's write token; by default read from <meta name="wb-token"> in the server's /index.html).
 import fs from 'node:fs';
 import path from 'node:path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -20,6 +21,14 @@ const BASE_URL = (process.env.WORKBENCH_URL || 'http://localhost:8140').replace(
 const OFFLINE = process.env.WORKBENCH_OFFLINE === '1';
 const VERSION = JSON.parse(fs.readFileSync(path.join(S.WB_DIR, 'package.json'), 'utf8')).version;
 let current = process.env.WORKBENCH_PROJECT || null;
+// the code this MCP server loaded (its own staleness), and the code the running workbench server reports (status.code,
+// header x-wb-code on every /api response): when it differs from the files on disk, the server is stale
+const MCP_CODE = S.codeState({ mcp: true });
+// per tool call: warnings added to the result (a stale server, an op done offline)
+const callCtx = new AsyncLocalStorage();
+const warn = (msg) => { const w = callCtx.getStore()?.warnings; if (w && !w.includes(msg)) w.push(msg); };
+const STALE = (changed) => `the running workbench server (${BASE_URL}) runs older code than the files on disk${changed?.length ? ` (${changed.slice(0, 5).join(', ')}${changed.length > 5 ? ', …' : ''} changed)` : ''}: restart the server (node serve.mjs in the workbench folder), then reload the page`;
+function checkServerCode(hash) { if (hash && hash !== S.codeState().hash) warn(STALE(up?.code?.changed)); }
 
 // ------------------------------------------------------------------ transport to the workbench: HTTP when it runs, files otherwise
 let up = null, checkedAt = 0;
@@ -44,6 +53,7 @@ async function http(method, p, project, body, timeout = 15000) {
   const go = async (fresh) => fetch(u, { method, signal: AbortSignal.timeout(timeout),
     ...(body !== undefined ? { headers: { 'content-type': 'application/json', 'x-wb-token': await getToken(fresh) }, body: JSON.stringify(body) } : {}) });
   let r = await go(false), j = await r.json().catch(() => ({}));
+  checkServerCode(r.headers.get('x-wb-code'));
   if (r.status === 403 && body !== undefined && /x-wb-token/.test(j.error || '') && !process.env.WB_TOKEN) { r = await go(true); j = await r.json().catch(() => ({})); }   // the server restarted: new token
   if (!r.ok) throw new S.WbError(r.status, j.error || `HTTP ${r.status}`);
   return j;
@@ -52,12 +62,22 @@ async function projectOf(args) { return args?.project || current || (await serve
 async function op(name, args = {}) {
   const { project: _p, ...a } = args; const p = await projectOf(args);
   // ops that may run ffprobe/ffmpeg (thumbnails) get a long timeout, so a slow video does not look like a failure
-  if (await server()) return http('POST', '/api/op/' + name, p, a, ['media_add', 'request_update', 'entity_upsert', 'song_attach', 'sketch_save', 'character_iteration_add', 'asset_iteration_add', 'look_create', 'variant_create'].includes(name) ? 180000 : 15000);
+  if (await server()) {
+    try { return await http('POST', '/api/op/' + name, p, a, ['media_add', 'media_update', 'request_update', 'entity_upsert', 'song_attach', 'sketch_save', 'character_iteration_add', 'asset_iteration_add', 'look_create', 'variant_create'].includes(name) ? 180000 : 15000); }
+    catch (e) {
+      // the server runs older code that does not know this op: do it on the files directly (its file watcher still
+      // reloads the open pages) and say so
+      if (e.code === 404 && /^no such op/.test(e.message) && Object.hasOwn(S.ops, name)) { warn(`${STALE(up?.code?.changed)}. It does not know "${name}": done on the files directly (offline) instead`); return await S.ops[name](p, a); }
+      throw e;
+    }
+  }
   return await S.ops[name](p, a);
 }
-const ok = (v) => ({ content: [{ type: 'text', text: typeof v === 'string' ? v : JSON.stringify(v, null, 1) }] });
-const err = (e) => ({ isError: true, content: [{ type: 'text', text: `error${e.code ? ' ' + e.code : ''}: ${e.message || e}` }] });
-const wrap = (fn) => async (args) => { try { return ok(await fn(args || {})); } catch (e) { return err(e); } };
+const warnBlock = (w) => (w.length ? [{ type: 'text', text: 'warning: ' + w.join('\nwarning: ') }] : []);
+const ok = (v, w = []) => ({ content: [{ type: 'text', text: typeof v === 'string' ? v : JSON.stringify(v, null, 1) }, ...warnBlock(w)] });
+const err = (e, w = []) => ({ isError: true, content: [{ type: 'text', text: `error${e.code ? ' ' + e.code : ''}: ${e.message || e}` }, ...warnBlock(w)] });
+// every tool: its result, plus a "warning: ..." block when the server is stale or an op was done offline
+const wrap = (fn) => (args, extra) => callCtx.run({ warnings: [] }, async () => { const w = callCtx.getStore().warnings; try { return ok(await fn(args || {}, extra), w); } catch (e) { return err(e, w); } });
 
 // ------------------------------------------------------------------ schemas shared by many tools
 const project = z.string().optional().describe('Project id (a folder in data/). Default: the session\'s current project (see the `projects` tool, action "open"), else the server\'s default.');
@@ -75,12 +95,17 @@ const mcp = new McpServer({ name: 'director-workbench', version: VERSION }, {
 // ------------------------------------------------------------------ status and projects
 mcp.registerTool('status', {
   title: 'Workbench status',
-  description: 'Where the workbench is and what this session is pointed at: server up/down (URL), the current project, the default project, how many pages are open (who will see ui_focus), the data folder, and the cost summary of the current project. Call this first.',
+  description: 'Where the workbench is and what this session is pointed at: server up/down (URL), whether it runs the code on disk (server.code.stale: restart it), the current project, the default project, how many pages are open (who will see ui_focus), the data folder, and the cost summary of the current project. Call this first. Every tool adds a "warning:" block when the server is stale or an op had to be done on the files directly.',
   inputSchema: { project },
 }, wrap(async (a) => {
-  const s = await server(), p = await projectOf(a);
+  checkedAt = 0; const s = await server(), p = await projectOf(a);
   let costs = null; try { costs = await op('costs_get', { project: p }); } catch (e) { costs = { error: e.message }; }
-  return { server: s ? { url: BASE_URL, up: true, pages_open: s.pages, pages_by_project: s.pages_by_project } : { url: BASE_URL, up: false, note: 'not running: tools read/write the files directly; start it with `node serve.mjs` (or npm start) in the workbench folder to let the director watch live' },
+  const disk = S.codeState({ mcp: true }), mcpChanged = S.codeDiff(MCP_CODE, disk);
+  const sc = s?.code ? { hash: s.code.hash, started: s.code.started, disk: S.codeState().hash, stale: s.code.hash !== S.codeState().hash, changed: s.code.changed || [] } : s ? { hash: null, stale: true, note: 'the server reports no code version: it predates this check' } : null;
+  if (sc?.stale) warn(STALE(sc.changed));
+  if (mcpChanged.length) warn(`this MCP server loaded older code than the files on disk (${mcpChanged.slice(0, 5).join(', ')} changed): reconnect it (/mcp in Claude Code, or restart the session) to get the new tools`);
+  return { server: s ? { url: BASE_URL, up: true, pages_open: s.pages, pages_by_project: s.pages_by_project, code: sc, ...(sc?.stale ? { restart: 'restart the server: its code is older than the files on disk (node serve.mjs), then reload the page' } : {}) } : { url: BASE_URL, up: false, note: 'not running: tools read/write the files directly; start it with `node serve.mjs` (or npm start) in the workbench folder to let the director watch live' },
+    mcp: { code: MCP_CODE.hash, stale: mcpChanged.length > 0, ...(mcpChanged.length ? { changed: mcpChanged } : {}) },
     current_project: p, default_project: s?.default_project || S.CFG.defaultProject, data_dir: s?.data_dir || S.DATA_ROOT, mode: s ? 'http' : 'files', costs };
 }));
 
@@ -178,6 +203,13 @@ mcp.registerTool('media_add', {
     entities: z.array(z.string()).optional(), shots: z.array(z.string()).optional(), uses: z.array(z.string()).optional(), job: z.string().optional(), take: z.number().int().optional(),
     status: z.enum(['used', 'picked', 'unused']).optional(), cost_usd: z.number().optional(), private: z.boolean().optional(), copy: z.boolean().optional() },
 }, wrap((a) => op('media_add', a)));
+mcp.registerTool('media_update', {
+  title: 'Relabel / re-link a registered file',
+  description: 'Change a file already in the media index (media_add of an existing path returns "already indexed" and changes nothing): label, kind, the links (entities, shots, uses: each replaces the list), job / take (null clears), status used / picked / unused. private:true makes it private (local only, never exported; its public thumbnail is replaced by a private one); a private file never becomes public again (private:false is refused). Find it by id or path (media_list).',
+  inputSchema: { project, id: z.string().optional(), path: z.string().optional(), label: z.string().optional(), kind: z.string().regex(/^[a-z0-9_-]{1,32}$/).optional(),
+    entities: z.array(z.string()).optional(), shots: z.array(z.string()).optional(), uses: z.array(z.string()).optional(), job: z.string().nullable().optional(), take: z.number().int().nullable().optional(),
+    status: z.enum(['used', 'picked', 'unused']).optional(), private: z.boolean().optional().describe('true only: a private flag only moves toward more private.') },
+}, wrap((a) => op('media_update', a)));
 
 // ------------------------------------------------------------------ notes
 mcp.registerTool('notes_list', {
@@ -197,7 +229,7 @@ mcp.registerTool('note_resolve', {
 const stageId = z.enum(['lyrics', 'script', 'breakdown', 'characters', 'scenery', 'storyboard', 'final']);
 mcp.registerTool('stages_get', {
   title: 'Where the project stands in the guided flow',
-  description: 'The seven stages (lyrics, script, breakdown, characters, scenery, storyboard, final), each {status empty/in_progress/needs_you/done, done_by, updated, blockers (yours), blockers_all (yours + computed: what is missing)}, the next stage to work on, and facts (lines, song attached?, script lines, shots, entities, open asks for the agent). A project without stages.json reads as derived (stages with content count as done). Call it at the start of a session.',
+  description: 'The seven stages (lyrics, script, breakdown, characters, scenery, storyboard, final), each {status empty/in_progress/needs_you/done, done_by, updated, blockers (yours), blockers_all (yours + computed: what is missing)}, the next stage to work on, and facts (lines, song attached?, script lines, shots, entities, open asks for the agent). Each stage also has shown (empty / in_progress / needs_you / ready = ready for the director to mark done / done / changed = marked done but the content no longer satisfies it, reason in changed) and content {status, blockers, hints, counts}, computed from the files. A project without stages.json reads as derived (content = in_progress, never done). Call it at the start of a session.',
   inputSchema: { project },
 }, wrap((a) => op('stages_get', a)));
 mcp.registerTool('stage_update', {
@@ -367,6 +399,17 @@ mcp.registerTool('variant_create', {
     variant_id: z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/).optional(), description: z.string().optional(), scenes: z.array(z.string()).optional(), from_item: z.string().optional(),
     garments: z.array(z.string()).optional(), colors: z.array(z.string()).optional(), by },
 }, wrap((a) => op('variant_create', a)));
+const refItem = z.union([z.string(), z.object({ path: z.string(), source: z.enum(['catalog', 'openverse', 'photo', 'sketch', 'media']).optional(), title: z.string().optional() }).passthrough()]);
+mcp.registerTool('base_propose', {
+  title: 'Propose a base (what the first sheet starts from)',
+  description: 'The base of a character / location / prop (the description and the reference images its identity sheet / base plate starts from) is the director\'s. This writes a PROPOSAL they accept in one click in the page (Characters / Scenery stage, the identity / base tab: "Accept base"; it then becomes the base) or dismiss. text = the description (e.g. the identity text); refs = files already in the project or under a media root (media_list paths), catalog/... paths, or {path, source: catalog | openverse | photo | sketch | media}; a photo must already be private. One proposal per asset (a new one replaces it). You never set the base yourself. Show it with ui_focus view "stage".',
+  inputSchema: { project, type: assetType.optional().describe('Default: the entity\'s kind.'), id: charId, text: z.string().optional(), refs: z.array(refItem).optional(), why: z.string().optional().describe('Why this base (shown to the director).'), by },
+}, wrap((a) => op('base_propose', a)));
+mcp.registerTool('node_import_propose', {
+  title: 'Propose an existing image as a tree node',
+  description: 'For an image that already exists and is registered (media_list / media_add): a legacy approved look, an output generated outside the queue (falgen, before a request existed). Proposes it as a node of a tree (tree "identity" / "base" = the root, e.g. the identity head; "look:<id>" / "variant:<id>"); the director accepts it in the page (the node is made with origin "imported" and its provenance: media, job, request, cost row) or dismisses it. No request, nothing is spent or approved. A look / variant tree can be accepted only once the root is approved (propose the root import first). The spend of such outputs is recorded separately with cost_record (via, job), never as an approval. why = what the image is and where it came from.',
+  inputSchema: { project, type: assetType.optional(), id: charId, tree: assetTree.optional().describe('Default: the root tree.'), media: z.string().describe('A media id or path (media_list).'), why: z.string(), by },
+}, wrap((a) => op('node_import_propose', a)));
 
 // ------------------------------------------------------------------ stage 6: the storyboard (shots per scene) and the gaps
 const shotId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/).describe('Shot id (sh03; older shots.json ids like s2-wall stay).');
@@ -425,29 +468,75 @@ mcp.registerTool('requests_list', {
   inputSchema: { project, status: z.enum(['draft', 'approved', 'queued', 'running', 'done', 'rejected']).optional(), target: z.string().optional() },
 }, wrap((a) => op('requests_list', a)));
 mcp.registerTool('request_create', {
-  title: 'Propose a generation', description: 'Add a DRAFT request to the queue (it costs nothing yet). The director reviews it in Review > Queue and approves it; only then may it run. Give a concrete prompt, the reference files, the tool/model you would use and an honest est_cost in USD.',
+  title: 'Propose a generation', description: 'Add a DRAFT request to the queue (it costs nothing yet). The director reviews it in Review > Queue and approves it; only then may it run. Give a concrete prompt, the reference files, the tool/model you would use and an honest est_cost in USD (list prices: js/prices.js, CLAUDE.md "Prices"). recipe = the photoreal recipe (templates/photoreal_recipe.json, docs/PHOTOREAL.md): the prompt is built from blocks (references + identity lock, subject + wardrobe, action, place, light, camera, texture, medium, the avoid guard) for the model, est_cost and tool come from the price table when you leave them out; the blocks are stored with the request (recipe.blocks) and stay editable (request_update recipe). Returns the request with warnings[] (also shown on the request card): e.g. a look / variant sheet with from: null when no root (identity) is approved yet, unfilled recipe blocks, words from the avoid list.',
   inputSchema: { project, kind: z.string().describe('regenerate, new-costume, new-variant, generate, choose-take, set-in, edit-timing, swap-costume, section-variant, import…'),
-    target: z.string().optional().describe('Item key it is about, e.g. "use:G05@20158", "character:ada".'), prompt: z.string(), refs: z.array(z.string()).optional(),
-    est_cost: z.number().min(0).describe('Estimated USD.'), tool: z.string().optional().describe('Provider/model you would use.'), look: z.object({}).passthrough().optional(), by,
-    char: z.object({ id: charId, tree: treeId.optional(), from: z.string().nullable().optional().describe('The node the edit starts from (null = the identity sheet from the base).'),
+    target: z.string().optional().describe('Item key it is about, e.g. "use:G05@20158", "character:ada".'), prompt: z.string().optional().describe('The prompt (required unless recipe builds it).'), refs: z.array(z.string()).optional(),
+    est_cost: z.number().min(0).optional().describe('Estimated USD (required unless recipe: then from js/prices.js).'),
+    recipe: z.union([z.literal(true), z.object({ model: z.enum(['nb2', 'seedream5', 'h3max', 'kling3pro', 'klingmc']).optional().describe('nb2 (default) / seedream5 stills; h3max / kling3pro / klingmc video.'), framing: z.enum(['full_body', 'medium', 'close_up']).optional(),
+      subject: z.string().optional(), wardrobe: z.string().optional(), action: z.string().optional(), place: z.string().optional(), light: z.string().optional(), camera: z.string().optional(), texture: z.string().optional(), grade: z.string().optional(),
+      seconds: z.number().optional(), name: z.string().optional(), identity: z.boolean().optional().describe('Image 1 is the approved face / identity (default: detected from the asset link).'), blocks: z.record(z.string()).optional().describe('Edited block texts by block id (they win over the built ones).') })]).optional()
+      .describe('Build the prompt from the photoreal recipe (true = defaults).'), tool: z.string().optional().describe('Provider/model you would use.'), look: z.object({}).passthrough().optional(), by,
+    char: z.object({ id: charId, tree: treeId.optional(), from: z.string().nullable().optional().describe('DEPRECATED: use asset {type: "character", ...}. The node the edit starts from (null = the identity sheet from the base).'),
       kind: z.enum(['identity', 'edit', 'look']).optional(), text: z.string().optional(), sketch: z.string().optional().describe('Sketch id (sketch_save) drawn over the node image.'),
       png: z.string().optional(), mask: z.string().optional(), pins: z.array(z.object({ n: z.number().optional(), x: z.number(), y: z.number(), text: z.string() })).optional() }).optional()
-      .describe('Stage 4: the character tree this generation grows (character_iteration_add reads it back once the request is done).'),
+      .describe('DEPRECATED (accepted with a warning, stored as asset): use asset {type: "character", id, tree, from, kind}.'),
     asset: z.object({ type: assetType, id: charId, tree: assetTree.optional(), from: z.string().nullable().optional().describe('The node it starts from (null = the root sheet from the base; for a variant: the approved root node).'),
       kind: z.enum(['identity', 'base', 'edit', 'look', 'variant']).optional(), text: z.string().optional(), sketch: z.string().optional(), png: z.string().optional(), mask: z.string().optional(), pins: pinsSchema.optional() }).optional()
-      .describe('Stages 4 and 5: the asset tree this generation grows, any type (a location base plate, a prop sheet, a variant, an edit); asset_iteration_add reads it back. For a character `char` works too.') },
+      .describe('Stages 4 and 5: the asset tree this generation grows, any type (an identity sheet, a look, a location base plate, a prop sheet, a variant, an edit); asset_iteration_add reads it back. The canonical link (char is deprecated).') },
 }, wrap((a) => op('request_create', a)));
 mcp.registerTool('request_update', {
   title: 'Advance or edit a request',
   description: 'Move a request through draft -> approved -> queued -> running -> done (or rejected). Rules enforced: draft -> approved is the director decision: by default they approve in the page (Review > Queue; show it with ui_focus view "queue"), and director_approved:true from you counts only when the owner enabled agent_approvals; queued/running need a recorded director approval; queued/running are refused when spent + committed + this est_cost would exceed the cost cap; done needs outputs (paths of the generated files) and actual_cost_usd (what the provider charged): the cost is recorded in costs.json and the outputs are registered as media (thumbnails made). rejected needs why. Editing prompt/refs/est_cost of an approved request sends it back to draft (any other status in the same call is refused).',
   inputSchema: { project, id: z.string(), status: z.enum(['draft', 'approved', 'queued', 'running', 'done', 'rejected']).optional(), prompt: z.string().optional(), refs: z.array(z.string()).optional(),
     est_cost: z.number().min(0).optional(), outputs: z.array(z.string()).optional(), actual_cost_usd: z.number().min(0).optional(), why: z.string().optional(), tool: z.string().optional(),
-    director_approved: z.boolean().optional(), register_media: z.boolean().optional(), media_kind: z.string().regex(/^[a-z0-9_-]{1,32}$/).optional(), by },
+    director_approved: z.boolean().optional(), register_media: z.boolean().optional(), media_kind: z.string().regex(/^[a-z0-9_-]{1,32}$/).optional(),
+    recipe: z.object({ blocks: z.record(z.string()).optional() }).passthrough().optional().describe('A request made from the recipe: edited blocks {<block id>: text} and / or fields (subject, wardrobe, action, place, light, camera, texture, grade); the prompt is rebuilt (an edit: an approved request goes back to draft).'), by },
 }, wrap((a) => op('request_update', a)));
 mcp.registerTool('costs_get', {
-  title: 'Costs vs cap', description: 'Spending: cap_usd, spent_usd (recorded jobs), committed_usd (approved + queued + running estimates), drafts_usd, remaining_usd, other ledger rows, and the last 10 cost items. Check before proposing or running anything.',
+  title: 'Costs vs cap', description: 'Spending: one total (total_spent_usd) with per-source rows (sources: the workbench costs.json, plus, when project.json names a "falgen" folder, falgen ledger rows not already in costs.json and the part of its spent.json no ledger row itemises: deduplicated by job id), spent_usd (costs.json only), committed_usd (approved + queued + running estimates), drafts_usd, remaining_usd (cap - total - committed), falgen (the merge details, other ledger rows listed, not added), and the last 10 cost items. Check before proposing or running anything.',
   inputSchema: { project },
 }, wrap((a) => op('costs_get', a)));
+mcp.registerTool('cost_record', {
+  title: 'Record a cost spent outside the queue',
+  description: 'Record money already spent outside the request lifecycle (a runner like falgen, work done before a request existed, a provider console) in costs.json, with its provenance: via (falgen, retro, manual, …), job (the runner\'s job id), take, tool, date, note, request (a request it belongs to; not one already done). The same job (+ take) is recorded once. It is NEVER an approval: no request is approved or moved, and a request\'s own cost is recorded by request_update done. Runners can call it from a shell: node <workbench>/mcp/client.mjs cost_record \'{"usd":0.24,"via":"falgen","job":"HV1"}\'.',
+  inputSchema: { project, usd: z.number().min(0), via: z.string().regex(/^[a-z0-9_-]{1,32}$/), job: z.string().optional(), take: z.number().int().min(0).optional(), tool: z.string().optional(),
+    date: z.string().optional().describe('YYYY-MM-DD (default today).'), request: z.string().optional(), note: z.string().optional(), t: time.optional().describe('Where on the song it belongs (default: the request target, else 0).'), by },
+}, wrap((a) => op('cost_record', a)));
+mcp.registerTool('wait_for', {
+  title: 'Wait until a request, stage or note changes',
+  description: 'Block until the item changes, instead of polling: request = a request id (its status), stage = a stage id (its status), note = a timeline note id (its status; a reply counts as a change). until = the statuses to wait for (e.g. ["approved", "rejected"]); default: any change from the status it has now. Returns at once when it already is in until. Wakes on the server\'s change feed (SSE) when the server runs, else polls the files. timeout_s up to 1800 (default 600): then it returns {timed_out: true} with the current state. Sends progress notifications while waiting (clients that reset their timeout on progress keep waiting).',
+  inputSchema: { project, request: z.string().optional(), stage: stageId.optional(), note: z.string().optional(), until: z.array(z.string()).optional(), timeout_s: z.number().min(1).max(1800).optional() },
+}, wrap(async (a, extra) => {
+  const p = await projectOf(a), which = ['request', 'stage', 'note'].filter(k => a[k] != null);
+  if (which.length !== 1) throw new S.WbError(400, 'give exactly one of request, stage, note');
+  const kind = which[0], id = a[kind], timeout = Math.min(1800, Math.max(1, a.timeout_s ?? 600)) * 1000;
+  const look = async () => {
+    if (kind === 'request') { const r = (await op('requests_list', { project: p })).find(x => x.id === id); if (!r) throw new S.WbError(404, `no request "${id}"`); return { status: r.status, key: r.status, item: r }; }
+    if (kind === 'stage') { const st = (await op('stages_get', { project: p })).stages.find(x => x.id === id); if (!st) throw new S.WbError(404, `no stage "${id}"`); return { status: st.status, key: st.status, item: st }; }
+    const all = await op('notes_list', { project: p }), n = all.find(x => x.id === id); if (!n) throw new S.WbError(404, `no note "${id}"`);
+    const replies = all.filter(x => x.reply_to === id); return { status: n.status, key: `${n.status}/${replies.length}`, item: { ...n, replies } };
+  };
+  const t0 = Date.now(), first = await look(), until = a.until?.length ? a.until : null;
+  const done = (s) => (until ? until.includes(s.status) : s.key !== first.key);
+  if (until && done(first)) return { [kind]: id, status: first.status, changed: false, already: true, waited_s: 0, item: first.item };
+  // wake on the change feed when the server runs; poll the files (or the server) as a backstop
+  let wake = () => {}; const ctl = new AbortController(); let sse = false;
+  if (await server()) {
+    sse = true;
+    fetch(`${BASE_URL}/api/events?project=${encodeURIComponent(p)}`, { signal: ctl.signal }).then(async (r) => { const rd = r.body.getReader(); for (;;) { const x = await rd.read(); if (x.done) break; wake(); } }).catch(() => { sse = false; });
+  }
+  const token = extra?._meta?.progressToken; let lastProgress = Date.now();
+  try {
+    for (;;) {
+      const left = timeout - (Date.now() - t0);
+      if (left <= 0) { const s = await look(); return { [kind]: id, status: s.status, changed: s.key !== first.key, timed_out: true, waited_s: Math.round((Date.now() - t0) / 1000), item: s.item }; }
+      await new Promise(ok => { const t = setTimeout(ok, Math.min(left, sse ? 10000 : 2000)); wake = () => { clearTimeout(t); ok(); }; });
+      const s = await look();
+      if (done(s)) return { [kind]: id, from: first.status, status: s.status, changed: true, waited_s: Math.round((Date.now() - t0) / 1000), item: s.item };
+      if (token !== undefined && Date.now() - lastProgress > 15000) { lastProgress = Date.now(); extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: Math.round((Date.now() - t0) / 1000), total: Math.round(timeout / 1000), message: `waiting for ${kind} ${id} (${s.status})` } }).catch(() => {}); }
+    }
+  } finally { ctl.abort(); }
+}));
 
 // ------------------------------------------------------------------ the open page
 mcp.registerTool('ui_focus', {

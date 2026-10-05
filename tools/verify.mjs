@@ -12,7 +12,9 @@
 // same asset workspace (list, location base, edit, approve, variants from axes as trees, a prop state variant, the per-scene
 // variant picker, the characters stage still working), and (v9, tools/verify-storyboard.mjs) stage 6: the storyboard (shots from
 // beats, tiling, edits, frame sketches, copy / paste, a per-shot variant, the gaps and the estimate vs the cap, the asks, the
-// agent's side, the timeline shots column).
+// agent's side, the timeline shots column), and (v10, tools/verify-dogfood.mjs) the dogfood frictions: the agent's base proposal
+// and image-import proposals accepted in the page, request warnings, the merged cost ledger, the photoreal recipe in the
+// Queue's request form, the stale-code bar.
 //   node tools/verify.mjs [--project <id>] [outDir]     (default project: the server's default; npm run verify = demo)
 // Copies data/<project> (and data/_template) into a scratch data folder under the OS temp dir and starts serve.mjs
 // on free ports with WORKBENCH_DATA = that folder, so nothing under data/ is written and several runs (or a running
@@ -752,10 +754,13 @@ try {
   const agentDone = await post(`/api/op/stage_update?project=${NEW}`, { stage: 'script', status: 'done' }, BASE, H);
   const agentMove = await post(`/api/op/stage_update?project=${NEW}`, { stage: 'lyrics', status: 'in_progress' }, BASE, H);
   const agentOk = await post(`/api/op/stage_update?project=${NEW}`, { stage: 'script', status: 'needs_you', blockers: ['verify: intake answers missing'] }, BASE, H);
-  const railAfter = await until(() => document.querySelector('#rail a[data-stage=script]')?.classList.contains('st-needs_you') && document.querySelector('#rail a[data-stage=lyrics]')?.classList.contains('st-done'));
+  // ROADMAP_v4 F1: the ask for the agent is still open, so lyrics marked done reads "done ⚠ not ready" until the agent answers it
+  const notReady = await until(() => document.querySelector('#rail a[data-stage=lyrics]')?.classList.contains('st-changed') && /open ask/.test(document.querySelector('#rail a[data-stage=lyrics]')?.title || ''));
+  const resolved = await post(`/api/op/lyrics_note_resolve?project=${NEW}`, { id: ask.id, reply: 'verify agent: a bridge idea in the notes' }, BASE, H);
+  const railAfter = notReady && resolved.status === 200 && await until(() => document.querySelector('#rail a[data-stage=script]')?.classList.contains('st-needs_you') && document.querySelector('#rail a[data-stage=lyrics]')?.classList.contains('st-done'));
   await pg.screenshot({ path: path.join(OUT, 'v4_rail_after.png'), clip: { x: 0, y: 0, width: 1500, height: 60 } });
   check('stage status: the page marks done (director, via page); the agent cannot mark done or move a done stage; needs_you + blockers show on the rail',
-    lyr.status === 'done' && lyr.done_by === 'director' && lyr.via === 'page' && agentDone.status === 403 && agentMove.status === 409 && agentOk.status === 200 && railAfter,
+    lyr.status === 'done' && lyr.done_by === 'director' && lyr.via === 'page' && lyr.done_ok === false && agentDone.status === 403 && agentMove.status === 409 && agentOk.status === 200 && railAfter,
     { lyrics: lyr, agentDone: agentDone.status, agentMove: agentMove.status, agentOk: agentOk.status, railAfter });
   // 8. an empty project opens the wizard on its lyrics step ("Start" fills the open project, no new folder)
   const EMPTY = 'empty-verify';
@@ -1128,6 +1133,12 @@ catch (e) { v8.checks.aborted = blockFailed('v8', e); v8.pass = false; }
 const v9 = report.v9 = { checks: {} };
 try { const { verifyStoryboard } = await import('./verify-storyboard.mjs'); Object.assign(v9, await verifyStoryboard({ browser, BASE, DATA, OUT, post, writeHeaders })); }
 catch (e) { v9.checks.aborted = blockFailed('v9', e); v9.pass = false; }
+// ---------------------------------------------------------------- v10: the dogfood frictions (base proposal, image import as a node,
+// request warnings, merged costs, the photoreal recipe form, the stale-code bar): tools/verify-dogfood.mjs (also runnable alone;
+// its own scratch code copy + data + server). Screenshots v10_*.png.
+const v10 = report.v10 = { checks: {} };
+try { const { verifyDogfood } = await import('./verify-dogfood.mjs'); Object.assign(v10, await verifyDogfood({ browser, OUT })); }
+catch (e) { v10.checks.aborted = blockFailed('v10', e); v10.pass = false; }
 // write path: approve/needs-changes + a note, on another scratch copy (_verify, its own server), then a stale-rev POST must get 409
 try {
   const TMP = path.join(DATA, '_verify');
@@ -1154,8 +1165,8 @@ report.project = P;
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 1));
 const w = report.writes || {};
 const writesOk = w.noteSaved && w.noteShownInColumn && w.staleStatus === 409 && w.newState !== undefined && w.newState !== w.stateBefore && w.approvalsRev > w.approvalsRevBefore;
-console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· v7 (characters stage):', report.v7?.pass ? 'all PASS' : 'FAIL', '· v8 (scenery stage):', report.v8?.pass ? 'all PASS' : 'FAIL', '· v9 (storyboard stage):', report.v9?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
-process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && report.v7?.pass && report.v8?.pass && report.v9?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
+console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· v7 (characters stage):', report.v7?.pass ? 'all PASS' : 'FAIL', '· v8 (scenery stage):', report.v8?.pass ? 'all PASS' : 'FAIL', '· v9 (storyboard stage):', report.v9?.pass ? 'all PASS' : 'FAIL', '· v10 (dogfood frictions):', report.v10?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
+process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && report.v7?.pass && report.v8?.pass && report.v9?.pass && report.v10?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
 await browser.close();
 for (const c of procs) c.kill();
 await new Promise(r => setTimeout(r, 300));   // let the servers release the scratch folder; cleanup() removes it on exit

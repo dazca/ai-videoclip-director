@@ -29,6 +29,7 @@
 //   asset {type: character | location | prop, id, tree, from: node id | null, kind, text?, sketch?, png?, mask?, pins?}
 // (a character's request also carries the same link as `char` {id, tree, from, kind, ...}, the stage-4 name: readers
 // take `asset` first, then `char`).
+import * as P from './prices.js';
 export const TYPES = ['character', 'location', 'prop'];
 const ID = '[A-Za-z0-9_][A-Za-z0-9_-]{0,63}';
 export const TREE_RE = new RegExp(`^(identity|base|look:${ID}|variant:${ID})$`);
@@ -63,18 +64,18 @@ export const TYPE = {
 };
 export const typeOf = (t) => TYPE[t] || null;
 
-// honest per-image estimates (USD, list prices of the image-edit models the agent would use; the agent corrects
-// est_cost with request_update before the director approves when its tool costs differ)
-const KONTEXT_MULTI = 'fal-ai/flux-pro/kontext/max/multi';
+// honest per-image estimates (USD) from the one price table, js/prices.js (list prices with the day they were read);
+// the agent corrects est_cost with request_update before the director approves when its tool costs differ
+const sheet = (what) => { const e = P.estimateWith('sheet'); return { ...e, why: `${what}: ${e.why}` }; };
 export const EST = {
-  identity: { tool: KONTEXT_MULTI, usd: 0.08, why: 'one identity sheet (4 views + head) from the references, Kontext Max multi-image $0.08' },
-  edit: { tool: 'fal-ai/flux-pro/kontext', usd: 0.04, why: 'one edited image, Kontext Pro $0.04' },
-  edit_mask: { tool: 'fal-ai/flux-pro/v1/fill', usd: 0.05, why: 'one masked inpaint (~1 MP), FLUX.1 Fill Pro $0.05 per megapixel' },
-  look: { tool: KONTEXT_MULTI, usd: 0.08, why: 'one look sheet from the approved identity + the garment refs, Kontext Max multi-image $0.08' },
-  'location:base': { tool: KONTEXT_MULTI, usd: 0.08, why: 'one establishing plate (wide, empty of people) from the references, Kontext Max multi-image $0.08' },
-  'location:variant': { tool: KONTEXT_MULTI, usd: 0.08, why: 'one plate of the same place (new angle / light / weather) from the approved base, Kontext Max multi-image $0.08' },
-  'prop:base': { tool: KONTEXT_MULTI, usd: 0.08, why: 'one prop sheet (front, three-quarter, side, detail) from the references, Kontext Max multi-image $0.08' },
-  'prop:variant': { tool: KONTEXT_MULTI, usd: 0.08, why: 'one sheet of the same object (new angle / state) from the approved base, Kontext Max multi-image $0.08' },
+  identity: sheet('one identity sheet (4 views + head) from the references'),
+  edit: P.estimateWith('edit'),
+  edit_mask: P.estimateWith('edit_mask'),
+  look: sheet('one look sheet from the approved identity + the garment refs'),
+  'location:base': sheet('one establishing plate (wide, empty of people) from the references'),
+  'location:variant': sheet('one plate of the same place (new angle / light / weather) from the approved base'),
+  'prop:base': sheet('one prop sheet (front, three-quarter, side, detail) from the references'),
+  'prop:variant': sheet('one sheet of the same object (new angle / state) from the approved base'),
 };
 // estimate(kind) for characters (identity | edit | look); estimate(kind, {type}) for the others (base | variant | edit)
 export const estimate = (kind, { mask = false, n = 1, type = 'character' } = {}) => {

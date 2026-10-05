@@ -7,6 +7,7 @@ import { store, isPrivatePath, prefs } from '../js/store.js';
 import { fmt } from '../js/timeline.js';
 import { openLookForm } from '../core/partb.js';
 import { esc, mediaAttr } from '../core/esc.js';
+import { assetApproval } from '../js/flow.js';
 
 const M = (p) => store.mediaByPath[p];
 const lock = (p) => isPrivatePath(p) ? '<i class="lock" title="private: crop of a real photo; local only, never exported">🔒</i>' : '';
@@ -25,6 +26,14 @@ function cells(p, n = 9, cls = 'c3') {
   return Array.from({ length: n }, (_, i) => `<i class="${cls}" data-media="${esc(m.id)}" title="${esc(m.label)} · cell ${i + 1}" style="background-image:url('${u}');background-position:${(i % 3) * 50}% ${Math.floor(i / 3) * 50}%"></i>`).join('');
 }
 const chip = (k) => { const s = esc(store.state(k)); return `<span class="chip s-${s}" data-k="${esc(k)}" title="${s} (click to cycle)">${s}</span>`; };
+// an asset's approval chip: one definition with the stage workspaces (js/flow.js assetApproval, ROADMAP_v4 F1). An Assets
+// approval from before the flow whose identity / base tree is empty reads "approved (legacy) · no identity node".
+const achip = (e) => {
+  const k = `${e.kind}:${e.id}`, a = assetApproval(e, store.approvals);
+  if (a.key === 'legacy') return `<span class="chip s-legacy" data-k="${esc(k)}" title="${esc(a.title + '. Click: cycle the Assets approval')}">${esc(a.label)}</span>`;
+  if (a.key === 'approved' && store.state(k) === 'draft') return `<span class="chip s-approved" data-k="${esc(k)}" title="${esc(a.title)}">approved</span>`;
+  return chip(k);
+};
 function used(list, max = 10) {
   if (!Array.isArray(list) || !list.length) return '<span class="dim">not on the timeline</span>';
   return list.slice(0, max).map(u => `<a data-t="${Number(u.t) || 0}"data-dock="shot:${esc(u.shot)}" title="${esc(u.shot)} at ${fmt(u.t, true)}">${esc(u.shot)}</a>`).join(' ') + (list.length > max ? ` <span class="dim">+${list.length - max}</span>` : '');
@@ -38,11 +47,11 @@ function charGrid() {
   const C = store.entities.filter(e => e.kind === 'character');
   const leads = C.filter(e => !e.life_of), lives = C.filter(e => e.life_of && e.id.startsWith('avatar')), dancers = C.filter(e => /^[dh]\d$/.test(e.id));
   const lead = (e) => `<div class="cc card lead" data-ent="${esc(e.id)}" data-open="${esc(e.id)}">
-      <div class="ch">${chip('character:' + e.id)}<b>${esc(e.name)}</b> <span class="dim">${(e.looks || []).length} looks · ${(e.motion || []).length} dances${e.lives ? ' · ' + e.lives.length + ' lives' : ''}</span>${e.private_refs?.length ? ' <i class="lock" title="has private identity refs (local only)">🔒</i>' : ''}</div>
+      <div class="ch">${achip(e)}<b>${esc(e.name)}</b> <span class="dim">${(e.looks || []).length} looks · ${(e.motion || []).length} dances${e.lives ? ' · ' + e.lives.length + ' lives' : ''}</span>${e.private_refs?.length ? ' <i class="lock" title="has private identity refs (local only)">🔒</i>' : ''}</div>
       <div class="cb">${im(e.face, 'face')}${im(e.body, 'body')}<div class="strip">${cells(e.sheets?.angles?.[0])}${cells(e.sheets?.expressions?.[0])}${!e.sheets?.angles ? (e.sheets?.['full body'] || []).map(p => im(p, 'sq')).join('') + (e.looks || []).flatMap(l => arr(l.images).slice(2, 4)).map(p => im(p, 'sq')).join('') : ''}</div></div>
       <div class="cr">${esc(e.role || '')}</div></div>`;
-  const life = (e) => `<div class="cc card life" data-ent="${esc(e.id)}" data-open="${esc(e.id)}"><div class="ch">${chip('character:' + e.id)}<b>${esc(e.name)}</b></div>${im(e.face, 'wide')}<div class="cu">${used(e.looks?.[0]?.used, 4)}</div></div>`;
-  const dancer = (e) => { const mo = e.motion?.[0]; return `<div class="cc card life" data-ent="${esc(e.id)}"><div class="ch">${chip('character:' + e.id)}<b>${esc(e.name)}</b> <span class="dim">${esc(mo?.name || '')}</span></div>${im(mo?.dancer || mo?.clip, 'wide fit')}<div class="cu">${used(mo?.used, 4)}</div></div>`; };
+  const life = (e) => `<div class="cc card life" data-ent="${esc(e.id)}" data-open="${esc(e.id)}"><div class="ch">${achip(e)}<b>${esc(e.name)}</b></div>${im(e.face, 'wide')}<div class="cu">${used(e.looks?.[0]?.used, 4)}</div></div>`;
+  const dancer = (e) => { const mo = e.motion?.[0]; return `<div class="cc card life" data-ent="${esc(e.id)}"><div class="ch">${achip(e)}<b>${esc(e.name)}</b> <span class="dim">${esc(mo?.name || '')}</span></div>${im(mo?.dancer || mo?.clip, 'wide fit')}<div class="cu">${used(mo?.used, 4)}</div></div>`; };
   return `<div class="lib"><div class="sec">leads</div><div class="cgrid">${leads.map(lead).join('')}</div>
     ${lives.length ? `<div class="sec">lives of ${esc([...new Set(lives.map(e => store.entityById[e.life_of]?.name || e.life_of))].join(', '))} <span class="dim">(avatars: the same person in another life; each is a look of the lead)</span></div><div class="cgrid sm">${lives.map(life).join('')}</div>` : ''}
     ${dancers.length ? `<div class="sec">dancers <span class="dim">(motion-transfer loops; hover to scrub)</span></div><div class="cgrid sm">${dancers.map(dancer).join('')}</div>` : ''}</div>`;
@@ -60,7 +69,7 @@ function charPage(e) {
   const sheets = Object.entries(e.sheets || {});
   const allExpr = (e.sheets?.expressions || []);
   const requests = (store.requests?.items || []).filter(r => r.target === `character:${e.id}` && r.kind === 'new-costume');
-  return `<div class="lib page"><div class="pbar" data-ent="${esc(e.id)}"><a data-back>‹ characters</a> ${chip('character:' + e.id)}<b>${esc(e.name)}</b> <span class="dim">${esc(e.role || '')}</span>${e.life_of ? ` <span class="dim">· a life of</span> <a data-open="${esc(e.life_of)}">${esc(store.entityById[e.life_of]?.name)}</a>` : ''}</div>
+  return `<div class="lib page"><div class="pbar" data-ent="${esc(e.id)}"><a data-back>‹ characters</a> ${achip(e)}<b>${esc(e.name)}</b> <span class="dim">${esc(e.role || '')}</span>${e.life_of ? ` <span class="dim">· a life of</span> <a data-open="${esc(e.life_of)}">${esc(store.entityById[e.life_of]?.name)}</a>` : ''}</div>
     <div class="sec">identity sheet</div>
     <div class="idrow">${im(e.face, 'face xl')}${im(e.body, 'body xl')}${sheets.map(([k, ps]) => arr(ps).slice(0, 2).map((p, i) => im(p, 'sheet', i ? '' : k)).join('')).join('')}</div>
     ${e.identity ? `<div class="idtx">${esc(e.identity)}</div>` : ''}
@@ -81,7 +90,7 @@ function charPage(e) {
 function locations() {
   return `<div class="lib">${store.entities.filter(e => e.kind === 'location').map(e => {
     const imgs = e.images || [];
-    return `<div class="lb card" data-ent="${esc(e.id)}" id="ent-${esc(e.id)}"><div class="ch">${chip('location:' + e.id)}<b>${esc(e.name)}</b> <span class="dim">${esc(e.description || '')} · ${imgs.length} images · ${arr(e.angles).length} angles · ${esc(arr(e.times).join(', '))}</span></div>
+    return `<div class="lb card" data-ent="${esc(e.id)}" id="ent-${esc(e.id)}"><div class="ch">${achip(e)}<b>${esc(e.name)}</b> <span class="dim">${esc(e.description || '')} · ${imgs.length} images · ${arr(e.angles).length} angles · ${esc(arr(e.times).join(', '))}</span></div>
       <div class="lrow">${im(e.establishing, 'est', 'establishing')}<div class="lims">${imgs.slice(1).map(x => im(x.path, 'w16', `${x.angle} · ${x.tod}`)).join('')}
         <div class="im w16 add" data-newlook="${esc(e.id)}" title="request a new angle or time of day"><span class="plus">+</span><b>New angle / time of day</b></div></div></div>
       <div class="crow"><span class="dim">clips shot here</span> ${(e.clips || []).map(c => { const m = clipMedia(c.clip); return m ? `<div class="im w16s" data-media="${esc(m.id)}" data-strip="${esc(m.strip || '')}" data-n="8" title="${esc(c.clip)}: ${arr(c.used).length} uses"><img src="${mediaAttr(m.thumb)}" alt="" loading="lazy"><span class="il">${esc(c.clip)} · ${arr(c.used).length}</span></div>` : ''; }).join('')}</div></div>`;
@@ -89,7 +98,7 @@ function locations() {
 }
 function props() {
   return `<div class="lib"><div class="pgrid">${store.entities.filter(e => e.kind === 'prop').map(e => `<div class="pc card" data-ent="${esc(e.id)}" id="ent-${esc(e.id)}">
-    ${im(e.hero || e.refs?.[0], 'hero')}<div class="ch">${chip('prop:' + e.id)}<b>${esc(e.name)}</b></div><div class="cr">${esc(e.description || '')}</div>
+    ${im(e.hero || e.refs?.[0], 'hero')}<div class="ch">${achip(e)}<b>${esc(e.name)}</b></div><div class="cr">${esc(e.description || '')}</div>
     <div class="lt">${(e.images || []).slice(1).map(x => im(x.path, 'mini')).join('')}<div class="im mini add" data-newlook="${esc(e.id)}" title="New variant"><span class="plus">+</span></div></div>
     <div class="lu">${[...new Set((e.images || []).flatMap(x => x.clips))].map(g => `<a data-dock="compare:${esc(g)}">${esc(g)}</a>`).join(' ')}</div></div>`).join('')}</div></div>`;
 }

@@ -14,7 +14,8 @@
 // GET  /...                              files under the workbench folder; /data/<p>/... from the data folder
 // GET  /media/<path>                     read-only files under media_base, only below the configured media_roots (Range supported)
 // GET  /api/config                       {default_project, media_roots, private_re} (the page reads it at boot)
-// GET  /api/status                       {ok, default_project, pages, data_dir}
+// GET  /api/status                       {ok, code {hash, started, disk, stale, changed}, default_project, pages, data_dir}
+//                                        (every /api response carries the header x-wb-code: the hash of the code it runs)
 // POST /api/save/<file>                  body {base_rev, data}; <file> in WRITABLE; 409 + current file when base_rev is stale
 // GET  /api/events                       Server-Sent Events {"project", "file"} whenever a data file changes on disk,
 //                                        and {"project", "ui": {...}} for the live UI channel
@@ -53,6 +54,14 @@ const HOST = ARGS.includes('--lan') ? '0.0.0.0' : CFG.host || '127.0.0.1';
 const DEFAULT = CFG.defaultProject;
 const isLocal = (req) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
 const TOKEN = process.env.WB_TOKEN || crypto.randomBytes(24).toString('hex');
+// the code this process runs (hash of serve.mjs, lib/, js/, tabs/, core/, app.js at start): /api/status and the header
+// x-wb-code on every /api response carry it; the MCP server and the page compare it with the files on disk (stale = restart)
+const CODE = S.codeState(), STARTED = new Date().toISOString().slice(0, 19);
+function codeStatus() {
+  const disk = S.codeState(), changed = S.codeDiff(CODE, disk);
+  return { hash: CODE.hash, started: STARTED, disk: disk.hash, stale: changed.length > 0, changed: changed.slice(0, 20),
+    ...(changed.length ? { note: `the workbench code changed on disk after this server started (${changed.slice(0, 5).join(', ')}${changed.length > 5 ? ', …' : ''}): restart the server (node serve.mjs), then reload the page` } : {}) };
+}
 // host names a request may address this server by (DNS rebinding: an attacker's name resolving to us is refused)
 const HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 if (!['127.0.0.1', 'localhost', '::1'].includes(HOST)) {
@@ -76,8 +85,9 @@ const CSP_PAGE = "default-src 'self'; script-src 'self'; style-src 'self' 'unsaf
   + `connect-src 'self' ${OPENVERSE}; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'`;
 const CSP_FILE = "sandbox; default-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'unsafe-inline'";
 // static files: only the page's own (compared lower-cased: Windows and macOS file systems ignore case), the sketch tool
-// (core/sketch/) and the free starter catalogue (catalog/: images + catalog.json + LICENSES.md, one folder deep)
-const STATIC = /^(index\.html|dock\.html|app\.js|app\.css|readme\.md|(core|js|tabs|core\/sketch)\/[\w.-]+\.(js|css)|catalog\/([\w-]+\/)?[\w.-]+\.(json|md|jpe?g|png|webp))$/;
+// (core/sketch/), the free starter catalogue (catalog/: images + catalog.json + LICENSES.md, one folder deep) and the
+// prompt templates (templates/*.json: the photoreal recipe the Queue's request form reads)
+const STATIC = /^(index\.html|dock\.html|app\.js|app\.css|readme\.md|(core|js|tabs|core\/sketch)\/[\w.-]+\.(js|css)|catalog\/([\w-]+\/)?[\w.-]+\.(json|md|jpe?g|png|webp)|templates\/[\w.-]+\.json)$/;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
   '.svg': 'image/svg+xml', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.mp4': 'video/mp4', '.webm': 'video/webm', '.md': 'text/plain; charset=utf-8' };
@@ -261,7 +271,7 @@ function stampPage(name, data, cur) {
   }
   return data;
 }
-const json = (res, code, v) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)); };
+const json = (res, code, v) => { res.writeHead(code, { 'content-type': 'application/json', 'x-wb-code': CODE.hash }); res.end(JSON.stringify(v)); };
 
 http.createServer(async (req, res) => {
   res.setHeader('x-content-type-options', 'nosniff');
@@ -277,7 +287,7 @@ http.createServer(async (req, res) => {
       res.write(': hi\n\n'); const c = { res, project: url.searchParams.get('project') || null }; clients.add(c); req.on('close', () => clients.delete(c)); return;
     }
     if (p === '/api/config') return json(res, 200, { default_project: DEFAULT, media_roots: CFG.mediaRoots, private_re: CFG.privateSrc });
-    if (p === '/api/status') return json(res, 200, { ok: true, app: 'director-workbench', default_project: DEFAULT, pages: clients.size, pages_by_project: [...clients].reduce((o, c) => (o[c.project || '*'] = (o[c.project || '*'] || 0) + 1, o), {}), data_dir: DATA_ROOT });
+    if (p === '/api/status') return json(res, 200, { ok: true, app: 'director-workbench', code: codeStatus(), default_project: DEFAULT, pages: clients.size, pages_by_project: [...clients].reduce((o, c) => (o[c.project || '*'] = (o[c.project || '*'] || 0) + 1, o), {}), data_dir: DATA_ROOT });
     if (p === '/api/projects' && req.method === 'GET') return json(res, 200, S.listProjects());
     if (p === '/api/snapshots' && req.method === 'GET') return json(res, 200, S.listSnapshots(project));
     if (p.startsWith('/api/') && req.method === 'POST') {

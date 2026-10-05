@@ -380,6 +380,16 @@ body.notop #rail, body.norail #rail { display: none; }
 .st-done i { background: #3fae6a; border-color: #3fae6a !important; }
 #rail a.st-done { color: #a9c9b3; }
 #rail a.st-needs_you { color: #f0a090; }
+/* F1: computed states. ready = content satisfies the stage, not yet marked (hollow green); changed = marked done but the
+   content regressed (green dot, amber ring + ⚠); legacy = approved before the flow, no identity / base node */
+.st-ready i { background: transparent; border: 2px solid #3fae6a !important; }
+#rail a.st-ready { color: #c8d8cc; }
+.st-changed i { background: #3fae6a; border-color: #e0a03a !important; box-shadow: 0 0 0 2px rgba(224,160,58,.45); }
+#rail a.st-changed { color: #e8c88a; }
+.stw { color: #e0a03a; font-weight: 600; }
+#rail a .stw { margin-left: 1px; font-size: 10px; }
+.chst.s-legacy, .chip.s-legacy { color: #e8c88a; } .chdot.s-legacy { background: transparent; border: 1px dashed #e0a03a; }
+.chrow .chimp { margin-left: 4px; font-size: 10px; height: 14px; line-height: 12px; padding: 0 4px; cursor: pointer; }
 #rail .next { flex: 1; min-width: 0; padding: 0 8px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; cursor: pointer; }
 #rail .next b { color: var(--fg); font-weight: 600; }
 #rail .next:hover { color: var(--fg); }
@@ -902,3 +912,53 @@ button.on { color: var(--acc); }
 .sbgap { display: flex; align-items: center; gap: 5px; height: 17px; padding: 0 6px; font-size: 11px; border-bottom: 1px solid var(--line2); cursor: pointer; white-space: nowrap; }
 .sbgap:hover { background: var(--bg2); } .sbgap > a { margin-left: auto; flex: none; color: var(--dim); } .sbgap:hover > a { color: var(--acc); }
 .sbgt { flex: none; font-variant-numeric: tabular-nums; color: var(--fg); display: inline-flex; gap: 3px; align-items: center; } .sbgx { overflow: hidden; text-overflow: ellipsis; min-width: 0; color: #c3c7cd; } .sbgc { flex: none; }
+
+/* the stale-code bar (core/stale.js): the server runs older code than the files on disk */
+#stalebar { flex: none; display: flex; align-items: center; gap: 6px; height: 18px; padding: 0 6px; background: #4a300a; color: #ffd89a; border-bottom: 1px solid #8a5a14; font-size: 11px; line-height: 17px; white-space: nowrap; overflow: hidden; z-index: 60; }
+#stalebar code { font: 11px Consolas, monospace; color: #fff1d0; }
+#stalebar .sp { flex: 1; }
+#stalebar button { height: 15px; line-height: 13px; font-size: 11px; cursor: pointer; }
+#stalebar b[data-a=x] { cursor: pointer; padding: 0 3px; }
+/* the agent's proposals in the asset workspace: a base, an existing image as a node (accept / dismiss) */
+.chprop { margin: 4px 6px; padding: 4px 6px; border: 1px solid #5f4a1c; background: #221d12; font-size: 11px; }
+.chprop.imp { display: flex; gap: 8px; align-items: flex-start; }
+.chprop.imp > img { width: 96px; height: 96px; object-fit: contain; background: #111; flex: none; }
+.chprop .chprb { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.chprh { display: flex; align-items: center; gap: 6px; }
+.chprh .sp { flex: 1; }
+.chprop button { height: 17px; line-height: 15px; font-size: 11px; cursor: pointer; margin-right: 4px; }
+.chprt { color: #e9dcc0; white-space: normal; margin: 2px 0; }
+.chprop .chpicked { border-top: 0; padding: 2px 0; }
+.chpq { color: var(--acc); }
+.chnl .im { color: #8fc0ff; }
+/* request warnings (request_create's, the recipe's): on the request card and the queue row */
+.chreq.warn { height: auto; flex-wrap: wrap; padding: 2px 6px; }
+.chreqw { display: flex; flex-direction: column; gap: 1px; width: 100%; font-size: 11px; color: #e8c88a; white-space: normal; }
+.queue tr.warn td { background: #1d1a12; }
+.queue .chreqw { max-width: 360px; }
+/* the queue's new-request form with the photoreal recipe */
+.queue .qnew { color: var(--acc); }
+.qform { margin: 4px 6px 8px; padding: 6px 8px; border: 1px solid var(--line); background: var(--bg2); font-size: 11.5px; display: flex; flex-direction: column; gap: 4px; max-width: 1100px; }
+.qform[hidden] { display: none; }
+.qfh, .qfrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.qfh .sp, .qfrow .sp { flex: 1; }
+.qform label { display: inline-flex; align-items: center; gap: 4px; color: var(--dim); }
+.qform label.wide { flex: 1; } .qform label.wide input { flex: 1; }
+.qform input, .qform select { height: 18px; color: var(--fg); }
+.qform textarea { width: 100%; height: auto; resize: vertical; font-size: 11.5px; line-height: 15px; color: var(--fg); }
+.qform button { height: 19px; cursor: pointer; }
+.qfields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px 8px; }
+.qfields label { flex-direction: column; align-items: stretch; gap: 1px; }
+.qblocks { display: flex; flex-direction: column; gap: 2px; border-left: 2px solid #5f4a1c; padding-left: 6px; }
+.qblocks label { display: flex; align-items: flex-start; gap: 6px; }
+.qblocks label > span { flex: none; width: 104px; text-align: right; padding-top: 1px; }
+.qblocks label.unfilled textarea { border-color: #8a5a14; background: #241d10; }
+.qblocks label.edited > span { color: var(--acc); }
+.qprompt { flex-direction: column; align-items: stretch !important; }
+.qrec { font-size: 10px; padding: 0 3px; border: 1px solid #5f4a1c; color: #e8c88a; }
+.qrec.on { background: #3a2d10; }
+/* costs: one total, a row per source */
+.costs .costsrc td:nth-child(2) { text-align: right; }
+.costs .costsum td { border-top: 1px solid var(--line); }
+.costs h4 { margin: 8px 4px 2px; font-size: 11px; color: var(--dim); }
+.costs details { margin: 6px 4px; font-size: 11px; }

@@ -261,8 +261,9 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
 // 11b. the guided flow: stages + stage 1 (lyrics) tools, on the demo (derived) and on a new lyrics-only project
 {
   const st = await call(mcp, 'stages_get');
-  check('stages_get on a project without stages.json: derived (content = done), next stage named', st.derived === true && st.stages?.length === 7 && st.stages[0].status === 'done' && st.stages[0].done_by === 'derived' && st.next?.id === 'final' && st.facts?.lines === 9,
-    { derived: st.derived, statuses: st.stages?.map(s => s.status), next: st.next });
+  // ROADMAP_v4 F1: content is never "done" by itself (only the director marks done); it reads in_progress, shown "ready"
+  check('stages_get on a project without stages.json: derived (content = in progress, never done), shown status from the content, next stage named', st.derived === true && st.stages?.length === 7 && st.stages[0].status === 'in_progress' && !st.stages[0].done_by && st.stages[0].shown === 'ready' && st.stages.every(s => s.status !== 'done') && st.next?.id && st.next.id !== 'lyrics' && st.facts?.lines === 9,
+    { derived: st.derived, statuses: st.stages?.map(s => [s.status, s.shown]), next: st.next });
   const lg = await call(mcp, 'lyrics_get');
   check('lyrics_get on a project without lyrics.json: v1 derived from song.json, song line ids, timings', lg.derived === true && lg.current === 'v1' && lg.sections?.length === 4 && lg.sections[1].lines[0].id === 'verse/0' && lg.sections[1].lines[0].t0 === S.read(PROJECT, 'song.json').lines.find(l => l.id === 'verse/0').t0 && !fs.existsSync(path.join(D, 'lyrics.json')),
     { derived: lg.derived, sections: lg.sections?.map(s => s.id), first: lg.sections?.[1]?.lines?.[0] });
@@ -476,10 +477,10 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const dup = await call(mcp, 'character_iteration_add', { id: 'bo', request: r1.id });
   const notOut = await call(mcp, 'character_iteration_add', { id: 'bo', request: r1.id, image: 'media/still/ada_face.jpg' });
   const wrongChar = await call(mcp, 'character_iteration_add', { id: 'ada', request: r1.id });
-  check('a generation is a draft request with a char link (target character:bo); bad links refused; character_iteration_add only after a page approval and done; n01 is the head; idempotent; only the request\'s outputs; only its character',
-    r1.status === 'draft' && r1.target === 'character:bo' && r1.char?.tree === 'identity' && /404/.test(rBad.error || '') && /404/.test(rBad2.error || '') && /403/.test(early.error || '') && ap.status === 200
+  check('a generation is a draft request with a character link (char accepted, stored as asset only: target character:bo); bad links refused; character_iteration_add only after a page approval and done; n01 is the head; idempotent; only the request\'s outputs; only its character',
+    r1.status === 'draft' && r1.target === 'character:bo' && r1.asset?.tree === 'identity' && r1.asset.type === 'character' && !r1.char && /404/.test(rBad.error || '') && /404/.test(rBad2.error || '') && /403/.test(early.error || '') && ap.status === 200
     && /409/.test(notDone.error || '') && d1.request?.status === 'done' && n1.node?.id === 'n01' && n1.head === 'n01' && n1.node.via === 'agent' && dup.duplicate === true && /400/.test(notOut.error || '') && /400/.test(wrongChar.error || ''),
-    { r1: r1.char, rBad: rBad.error, rBad2: rBad2.error, early: early.error, notDone: notDone.error, n1: n1.node?.id, dup: dup.duplicate, notOut: notOut.error });
+    { r1: r1.asset, rBad: rBad.error, rBad2: rBad2.error, early: early.error, notDone: notDone.error, n1: n1.node?.id, dup: dup.duplicate, notOut: notOut.error });
   // an edit: a sketch over n01 with a mask and a pin; the request carries them; n02 waits for the director
   const sk = { w: 32, h: 32, underlay: { src: 'media/gen/bo_n1.png' }, strokes: [{ t: 'pen', c: '#ff3b30', size: 3, o: 1, pts: [[4, 4, 0.5], [20, 20, 0.5]] }], mask: [{ t: 'paint', size: 8, pts: [[10, 10, 1]] }], pins: [{ n: 1, x: 12, y: 8, text: 'necklace here, silver' }] };
   const sv = await call(mcp, 'sketch_save', { id: 'bo-edit1', sketch: sk, png: tinyPngB64(32, 32), mask: tinyPngB64(32, 32, [255, 255, 255]), links: { entities: ['bo'] } });
@@ -490,7 +491,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const g = await call(mcp, 'character_get', { id: 'bo' });
   const rq2 = g.requests?.find(r => r.id === r2.id);
   check('an edit request carries the text, the pins and the sketch: character_get gives the sketch PNG / mask (absolute files) and the pins; n02 (parent n01) waits for the director',
-    r2.char?.kind === 'edit' && r2.char.pins?.[0]?.text === 'necklace here, silver' && n2.node?.parent === 'n01' && n2.waiting_for_director === true && g.waiting_for_director?.includes('n02')
+    r2.asset?.kind === 'edit' && r2.asset.pins?.[0]?.text === 'necklace here, silver' && n2.node?.parent === 'n01' && n2.waiting_for_director === true && g.waiting_for_director?.includes('n02')
     && fs.existsSync(rq2?.sketch?.files?.png || '') && fs.existsSync(rq2?.sketch?.files?.mask || '') && rq2.pins[0].n === 1 && rq2.ref_files?.every(Boolean) && g.base?.refs?.[0]?.file && fs.existsSync(g.base.refs[0].file)
     && g.trees?.[0]?.nodes?.length === 2 && g.trees[0].branches?.[0]?.nodes?.join() === 'n01,n02' && g.trees[0].nodes[0].file,
     { n2: n2.node && { id: n2.node.id, parent: n2.node.parent }, waiting: g.waiting_for_director, sketch: rq2?.sketch, branches: g.trees?.[0]?.branches });
@@ -691,8 +692,8 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const studio = JSON.parse(fs.readFileSync(path.join(D, 'entities/locations/studio.json'), 'utf8')), baseImg = studio.iter.nodes.find(n => n.id === studio.iter.trees.base.approved)?.image;
   const rq = await call(mcp, 'request_create', { kind: q1.kind, target: q1.target, prompt: q1.prompt, refs: q1.refs, est_cost: q1.est_cost, tool: q1.tool });
   const gp2 = await call(mcp, 'gaps_get');
-  check('gaps_get: the groups (counts), a shot without a request (its studio overridden to the approved base) gets its draft requests (a start frame then the video: kind shot-still first, target shot:<id>, refs = the approved studio base image, Kontext $0.08, the video priced per second), the estimate against the cap; request_create on the shot takes it off the list',
-    /^v\d+$/.test(ov.version || '') && typeof gp.counts?.no_request === 'number' && gp.no_request.some(x => x.shot === 's1-intro') && q1?.kind === 'shot-still' && q1.target === 'shot:s1-intro' && q1.refs.includes(baseImg) && q1.est_cost === 0.08 && p1.requests[1]?.kind === 'shot-video' && p1.requests[1].est_cost >= 0.25
+  check('gaps_get: the groups (counts), a shot without a request (its studio overridden to the approved base) gets its draft requests (a start frame then the video: kind shot-still first, target shot:<id>, refs = the approved studio base image, NB2 2K $0.12 from js/prices.js, the video priced per second), the estimate against the cap; request_create on the shot takes it off the list',
+    /^v\d+$/.test(ov.version || '') && typeof gp.counts?.no_request === 'number' && gp.no_request.some(x => x.shot === 's1-intro') && q1?.kind === 'shot-still' && q1.target === 'shot:s1-intro' && q1.refs.includes(baseImg) && q1.est_cost === 0.12 && /nano-banana-2/.test(q1.tool) && p1.requests[1]?.kind === 'shot-video' && p1.requests[1].est_cost >= 0.24 && /h3-max/.test(p1.requests[1].tool)
     && typeof gp.estimate.over_cap === 'boolean' && gp.estimate.total_usd >= gp.estimate.usd && rq.status === 'draft' && !gp2.no_request.some(x => x.shot === 's1-intro') && gp2.estimate.usd < gp.estimate.usd,
     { p1: p1 && { gen: p1.gen, reqs: p1.requests.map(r => [r.kind, r.est_cost, r.refs]) }, baseImg, est: gp.estimate, est2: gp2.estimate?.usd });
   const tq = await call(mcp, 'timeline_query', { t0: 4000, t1: 6000 }), sbs = await call(mcp, 'storyboard_get', { scene: sc.id });
@@ -729,6 +730,124 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   check('createProject without a template; cap 0 refuses paid queueing', ok && Array.isArray(JSON.parse(fs.readFileSync(path.join(DATA, 'nt', 'events.json'), 'utf8'))) && capErr === 402, { why, capErr });
   const ent = S.ops.entity_upsert(PROJECT, { kind: 'prop', id: 'pp', fields: { id: 'other', kind: 'character' } }).entity;
   check('entity_upsert: fields cannot change id / kind', ent.id === 'pp' && ent.kind === 'prop', ent);
+}
+// 14. the dogfood frictions (DOGFOOD_her_v3.md): one cost ledger with falgen, cost_record, media_update, base_propose,
+// node_import_propose (+ the page's accept), request warnings and the deprecated char link, the photoreal recipe,
+// wait_for, the stale server (status, warnings, the offline fallback for an op it does not know) and mcp/client.mjs
+{
+  const callW = async (client, name, args = {}) => { const r = await client.callTool({ name, arguments: args }); const t = r.content?.[0]?.text || ''; let j; try { j = JSON.parse(t); } catch (e) { j = t; } return { r: r.isError ? { error: t } : j, warn: (r.content || []).slice(1).map(c => c.text).join('\n') }; };
+  const pageAct = (body) => post(`/api/op/asset_act?project=${PROJECT}`, body, { origin: URL_ });
+  const approveInPageW = async (rid) => { const cur = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')); cur.items.find(r => r.id === rid).status = 'approved'; return post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur }); };
+  // falgen: a scratch folder under the test media base, named in project.json (read only)
+  fs.mkdirSync(path.join(MB, 'proj', 'gen'), { recursive: true });
+  fs.writeFileSync(path.join(MB, 'proj', 'gen', 'spent.json'), JSON.stringify({ total: 1.5 }));
+  fs.writeFileSync(path.join(MB, 'proj', 'LEDGER.md'), '| Date | Phase | Tool | Items | Est $ | Running total |\n|---|---|---|---|---|---|\n| 2026-10-04 | song | Suno | | ~10 | ~10 |\n| 2026-10-04 | C1 | fal C1 via falgen | | 0.24 | gen total 0.24 |\n| 2026-10-04 | HV1 | fal HV1 via falgen | | 0.24 | gen total 0.48 |\n| 2026-10-04 | HV2 | fal HV2 via falgen | | 0.36 | gen total 0.84 |\n');
+  const pj = path.join(D, 'project.json'), pj0 = fs.readFileSync(pj, 'utf8');
+  fs.writeFileSync(pj, JSON.stringify({ ...JSON.parse(pj0), falgen: 'proj/gen' }));
+  const c0 = await call(mcp, 'costs_get');
+  const fgRow = c0.sources?.find(s => s.id === 'falgen'), un = c0.sources?.find(s => s.id === 'falgen_unitemized');
+  const rec = await call(mcp, 'cost_record', { usd: 0.24, via: 'falgen', job: 'HV1', note: 'ran before its request' });
+  const recDup = await call(mcp, 'cost_record', { usd: 0.24, via: 'falgen', job: 'HV1' });
+  const recBad = await call(mcp, 'cost_record', { usd: 0.1, via: 'Bad Via!' });
+  const doneReq = (await call(mcp, 'requests_list', { status: 'done' }))[0];
+  const recDone = doneReq ? await call(mcp, 'cost_record', { usd: 0.1, via: 'retro', request: doneReq.id }) : { error: '409 (no done request)' };
+  const c1 = await call(mcp, 'costs_get');
+  check('costs_get merges falgen (project.json "falgen"): ledger rows not in costs.json + spent.json not itemised, C1 counted once; cost_record adds HV1 (via falgen) and the total does not move (no double count); the same job again is not recorded; a bad via 400; a done request 409; never an approval',
+    fgRow?.deduped === 1 && fgRow.usd === 0.6 && un?.usd === 0.66 && rec.recorded === true && rec.item?.via === 'falgen' && /never an approval/.test(rec.note) && recDup.recorded === false && !!recBad.error && /409/.test(recDone.error || '')
+    && Math.abs(c1.total_spent_usd - c0.total_spent_usd) < 0.005 && c1.sources.find(s => s.id === 'falgen').deduped === 2 && c1.falgen?.other_ledger_rows?.length === 1,
+    { c0: c0.sources, c1: c1.sources, totals: [c0.total_spent_usd, c1.total_spent_usd], recDone: recDone.error });
+  fs.writeFileSync(pj, JSON.stringify({ ...JSON.parse(pj0), falgen: '../../outside' }));
+  const cOut = await call(mcp, 'costs_get');
+  fs.writeFileSync(pj, pj0);
+  check('a falgen folder outside the media base is refused (no read), reported in costs_get', /inside the media base/.test(cOut.falgen?.error || ''), cOut.falgen);
+
+  // media_update: relabel, re-kind, re-link; private only toward more private
+  const mu = await call(mcp, 'media_update', { id: 'I1', label: 'studio still (relabelled)', kind: 'look', entities: ['ada', 'studio'] });
+  const muPriv = await call(mcp, 'media_update', { id: 'I1', private: true });
+  const muBack = await call(mcp, 'media_update', { id: 'I1', private: false });
+  const muNone = await call(mcp, 'media_update', { id: 'nope', label: 'x' });
+  const mI1 = JSON.parse(fs.readFileSync(path.join(D, 'media.json'), 'utf8')).items.find(m => m.id === 'I1');
+  check('media_update: relabel + kind + links; private:true flags it (status private, a thumbs/priv_ thumbnail); private:false refused (403); an unknown id 404',
+    mu.changed?.join() === 'label,kind,entities' && mI1.label === 'studio still (relabelled)' && mI1.kind === 'look' && mI1.private === true && mI1.status === 'private' && (!mI1.thumb || /thumbs\/priv_/.test(mI1.thumb)) && muPriv.changed?.includes('private') && /403/.test(muBack.error || '') && /404/.test(muNone.error || ''),
+    { mu: mu.changed, priv: [mI1.private, mI1.status, mI1.thumb], back: muBack.error });
+
+  // base_propose + node_import_propose, accepted in the page only
+  const bp = await call(mcp, 'base_propose', { id: 'ada', text: 'Ada: the lead, short dark hair', refs: ['media/still/ada_face.jpg', { path: 'media/still/ada_body.jpg', source: 'media' }], why: 'her registered stills' });
+  const bpBad = await call(mcp, 'base_propose', { id: 'ada', refs: ['media/still/nope.jpg'] });
+  const ip = await call(mcp, 'node_import_propose', { id: 'ada', tree: 'identity', media: 'ada_body', why: 'the approved legacy look image' });
+  const ipBad = await call(mcp, 'node_import_propose', { id: 'ada', tree: 'identity', media: 'demo-song', why: 'audio' });
+  const agentAccept = await post(`/api/op/asset_act?project=${PROJECT}`, { type: 'character', id: 'ada', act: 'import_accept', proposal: ip.proposal?.id });
+  let offAccept = null; try { S.ops.asset_act(PROJECT, { type: 'character', id: 'ada', act: 'base_accept' }); } catch (e) { offAccept = e.code; }
+  const g0 = await call(mcp, 'asset_get', { id: 'ada' });
+  const acc1 = await pageAct({ type: 'character', id: 'ada', act: 'base_accept' });
+  const acc2 = await pageAct({ type: 'character', id: 'ada', act: 'import_accept', proposal: ip.proposal?.id });
+  const g1 = await call(mcp, 'asset_get', { id: 'ada' });
+  const node = g1.trees?.[0]?.nodes?.[0];
+  check('base_propose / node_import_propose: proposals the agent cannot accept (HTTP without the page Origin 403, offline 403); asset_get shows them; the page accepts: the base (by director, proposed_by agent) and an identity node with origin imported, provenance, request null, the head; bad refs 404, a non-image 400',
+    bp.base_proposal?.refs?.length === 2 && /404/.test(bpBad.error || '') && ip.proposal?.status === 'open' && /400/.test(ipBad.error || '') && agentAccept.status === 403 && offAccept === 403
+    && g0.base_proposal?.refs?.[0]?.file && g0.import_proposals?.length === 1 && acc1.status === 200 && acc2.status === 200 && g1.base?.by === 'director' && g1.base.proposed_by === 'agent' && !g1.base_proposal && !g1.import_proposals?.length
+    && node?.origin === 'imported' && node.request === null && node.provenance?.media === 'ada_body' && g1.trees[0].head === node.id,
+    { bp: bp.base_proposal?.refs?.length, ipBad: ipBad.error, agent: agentAccept.status, off: offAccept, acc: [acc1.status, acc2.status, acc2.body], node });
+
+  // request warnings, the deprecated char link, the recipe
+  await call(mcp, 'look_create', { id: 'ada', name: 'Night out' });
+  const w1 = await callW(mcp, 'request_create', { kind: 'look-sheet', prompt: 'Ada night out', est_cost: 0.12, char: { id: 'ada', tree: 'look:night-out', kind: 'look' } });
+  await pageAct({ type: 'character', id: 'ada', act: 'approve', tree: 'identity' });
+  const w2 = await call(mcp, 'request_create', { kind: 'look-sheet', prompt: 'x', est_cost: 0.12, asset: { type: 'character', id: 'ada', tree: 'look:night-out', kind: 'look' } });
+  const rc = await call(mcp, 'request_create', { kind: 'look-sheet', refs: ['media/still/ada_body.jpg'], asset: { type: 'character', id: 'ada', tree: 'look:night-out', from: node?.id, kind: 'look' },
+    recipe: { wardrobe: 'a black satin slip dress', action: 'she leans on the counter', place: 'a narrow bar at night, zinc counter', light: 'warm tungsten bulbs above, hard, from the left' } });
+  const rcV = await call(mcp, 'request_create', { kind: 'shot-video', refs: ['media/still/ada_body.jpg'], recipe: { model: 'kling3pro', action: 'she turns her head slowly', seconds: 6 } });
+  const ru = await call(mcp, 'request_update', { id: rc.id, recipe: { blocks: { texture: 'Visible pores and satin creases.' }, light: 'cold fluorescent tubes overhead' } });
+  const reqFile = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')).items.find(r => r.id === w1.r.id);
+  check('request_create: a look sheet with from null and no approved identity warns (stored on the request, shown on its card); char is deprecated (a warning, stored as asset, never echoed); once the identity is approved the warning names the node to start from',
+    w1.r.warnings?.some(w => /no approved identity/.test(w)) && w1.r.warnings.some(w => /deprecated/.test(w)) && !w1.r.char && !reqFile.char && reqFile.asset?.type === 'character' && reqFile.warnings?.length === 2
+    && w2.warnings?.some(w => new RegExp(`set from: "${node?.id}"`).test(w)),
+    { w1: w1.r.warnings, w2: w2.warnings });
+  check('request_create recipe: the prompt from the photoreal blocks (identity lock since image 1 is the approved identity), est and tool from js/prices.js (NB2 2K $0.12; Kling v3 Pro $0.112/s x 6 s = $0.672 + its negative prompt); request_update recipe rebuilds the prompt from edited blocks / fields',
+    rc.recipe?.blocks?.some(b => b.id === 'identity_lock') && /Keep the face exactly as in Image 1/.test(rc.prompt) && /satin slip dress/.test(rc.prompt) && rc.est_cost === 0.12 && /nano-banana-2/.test(rc.tool) && !rc.warnings
+    && rcV.est_cost === 0.672 && /kling-video\/v3\/pro/.test(rcV.tool) && /morphing face/.test(rcV.recipe?.negative_prompt || '')
+    && /Visible pores and satin creases\./.test(ru.request?.prompt || '') && /cold fluorescent tubes/.test(ru.request.prompt) && !/tungsten/.test(ru.request.prompt),
+    { rc: rc.warnings || rc.est_cost, rcV: [rcV.est_cost, rcV.tool], ru: ru.request?.prompt?.slice(0, 200) || ru.error });
+
+  // wait_for: blocks until the director approves in the page (the server's change feed wakes it)
+  const target = rc.id;
+  const waiting = call(mcp, 'wait_for', { request: target, until: ['approved', 'rejected'], timeout_s: 30 });
+  await wait(800); const t0 = Date.now(); await approveInPageW(target);
+  const wf = await waiting, wfMs = Date.now() - t0;
+  const wfNow = await call(mcp, 'wait_for', { request: target, until: ['approved'], timeout_s: 5 });
+  const wfTo = await call(mcp, 'wait_for', { stage: 'final', timeout_s: 1 });
+  const wfBad = await call(mcp, 'wait_for', { request: target, stage: 'final' });
+  check('wait_for: wakes when the page approves (changed, status approved, within a few s), returns at once when already there, times out with the current state, needs exactly one item',
+    wf.changed === true && wf.status === 'approved' && wf.from === 'draft' && wfMs < 6000 && wfNow.already === true && wfTo.timed_out === true && /400/.test(wfBad.error || ''), { wf, wfMs, wfTo: wfTo.timed_out, wfBad: wfBad.error });
+
+  // a stale server: a copy of the code where lib/store.mjs differs (it does not know media_update) on its own port
+  const OLD = path.join(TMP, 'oldcode'), P2 = PORT + 1;
+  for (const p of ['serve.mjs', 'index.html', 'dock.html', 'app.js', 'app.css', 'lib', 'js', 'tabs', 'core', 'templates']) fs.cpSync(path.join(WB, p), path.join(OLD, p), { recursive: true });
+  const sf = path.join(OLD, 'lib', 'store.mjs'); fs.writeFileSync(sf, fs.readFileSync(sf, 'utf8').replace('  media_update(p, {', '  media_update_was(p, {'));
+  const old = spawn(process.execPath, [path.join(OLD, 'serve.mjs'), String(P2)], { stdio: 'pipe', env: process.env });
+  try {
+    await new Promise((ok, bad) => { old.stdout.once('data', ok); old.once('exit', (c) => bad(new Error('old server exited ' + c))); });
+    const m2 = await connect({ WORKBENCH_URL: `http://localhost:${P2}` });
+    try {
+      const st = await callW(m2, 'status');
+      const mu2 = await callW(m2, 'media_update', { id: 'I1', label: 'via the offline fallback' });
+      const sg = await callW(m2, 'song_get', { words: false });
+      check('a stale server: status says server.code.stale + restart, and every tool adds a "warning: … restart the server" block; an op the old server does not know (404 no such op) is done on the files directly, with a warning',
+        st.r.server?.code?.stale === true && /restart/.test(st.r.server.restart || '') && /restart the server/.test(st.warn) && mu2.r.media?.label === 'via the offline fallback' && /does not know "media_update"/.test(mu2.warn) && /restart the server/.test(sg.warn),
+        { code: st.r.server?.code, warn: mu2.warn.slice(0, 200), mu2: mu2.r.error });
+    } finally { await m2.close().catch(() => {}); }
+  } finally { old.kill(); await wait(200); }
+  const fresh = await callW(mcp, 'status');
+  check('the current server: code not stale, no warning', fresh.r.server?.code?.stale === false && !fresh.warn, fresh.r.server?.code);
+
+  // mcp/client.mjs from another folder: a tool call (JSON out) and a runner's cost_record hook
+  const cli = (args) => new Promise((ok) => { const c = spawn(process.execPath, [path.join(WB, 'mcp', 'client.mjs'), ...args], { cwd: os.tmpdir(), env: { ...process.env, WORKBENCH_URL: URL_ } }); let o = '', e = ''; c.stdout.on('data', d => { o += d; }); c.stderr.on('data', d => { e += d; }); c.on('exit', (code) => ok({ code, o, e })); });
+  const c1o = await cli(['costs_get', '--project', PROJECT]);
+  const c2o = await cli(['cost_record', '{"usd":0.36,"via":"falgen","job":"HV2"}', '--project', PROJECT]);
+  const c3o = await cli(['no_such_tool', '{}']);
+  let cj = null; try { cj = JSON.parse(c1o.o); } catch (e) { /* not JSON */ }
+  check('mcp/client.mjs from another folder: costs_get prints JSON (exit 0); cost_record works as a runner hook; an unknown tool exits 1',
+    c1o.code === 0 && typeof cj?.total_spent_usd === 'number' && c2o.code === 0 && /"recorded": true/.test(c2o.o) && c3o.code === 1, { c1: c1o.code, c2: c2o.o.slice(0, 80), c3: [c3o.code, (c3o.o + c3o.e).slice(0, 120)] });
 }
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {

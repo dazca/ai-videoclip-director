@@ -195,7 +195,9 @@ try {
     { agentDone: sDone.status, v1: LY.versions[0].sections[0].lines[0].text, agentNote: LY.notes.find(x => x.id === lnA.id)?.via, pageNote: LY.notes.find(x => x.id === 'ln99'), badShape: badShape.status, stage: stg });
   const snapS = (await post(`/api/snapshot?project=${P}`, { message: 'sec: final done' })).body;
   await pageSave('stages.json', (d) => { d.stages.find(x => x.id === 'final').status = 'in_progress'; });   // the director reopened it
-  const agentMove = await op('stage_update', { stage: 'lyrics', status: 'empty' });   // lyrics counts as done (the demo has lyrics)
+  // content alone is never done (ROADMAP_v4 F1): the director marks lyrics done in the page, then the agent tries to move it
+  await pageSave('stages.json', (d) => { d.stages.find(x => x.id === 'lyrics').status = 'done'; });
+  const agentMove = await op('stage_update', { stage: 'lyrics', status: 'empty' });
   await post(`/api/restore?project=${P}`, { snapshot: snapS.id, by: 'agent' });
   const stR = readP('stages.json').stages.find(x => x.id === 'final');
   const sp1 = await op('song_attach', { path: 'roots/private/face.png' }), sp2 = await op('song_attach', { path: path.join(MB, 'outside/secret.txt') }), sp3 = await op('song_attach', { path: 'private/song.wav' });
@@ -434,6 +436,58 @@ try {
   // ---------------------------------------------------------------- F09: the EDL extractor's server (source check: it needs the owner's render page)
   const edl = fs.readFileSync(path.join(WB, 'importers/azemar_extract_edl.mjs'), 'utf8');
   check('F09 EDL extractor server: 127.0.0.1, decode in try/catch, confined to ROOT', /listen\(\d+, '127\.0\.0\.1'/.test(edl) && /try \{ p = inside\(ROOT,/.test(edl) && /if \(!p\) \{ r\.writeHead\(403\)/.test(edl));
+
+  // ---------------------------------------------------------------- the dogfood fixes: proposals, imports, costs, media, the recipe template
+  {
+    const asPage = (body) => post(`/api/op/asset_act?project=${P}`, body, { origin: A.base });
+    const bp = await op('base_propose', { id: 'ada', text: 'x', refs: ['media/still/ada_face.jpg'] });
+    const bpPhoto = await op('base_propose', { id: 'ada', refs: [{ path: 'media/still/ada_face.jpg', source: 'photo' }] });
+    const bpEsc = await op('base_propose', { id: 'ada', refs: ['../../../workbench.config.json'] });
+    const ip = await op('node_import_propose', { id: 'ada', tree: 'identity', media: 'ada_body', why: 'test' });
+    const tries = {};
+    for (const act of ['base_accept', 'base_dismiss', 'import', 'import_accept', 'import_dismiss']) tries[act] = (await op('asset_act', { type: 'character', id: 'ada', act, media: 'ada_body', proposal: ip.body?.proposal?.id })).status;
+    let off = {}; for (const act of ['base_accept', 'import', 'import_accept']) { try { S.ops.asset_act(P, { type: 'character', id: 'ada', act, media: 'ada_body', proposal: 'ip01' }); off[act] = 200; } catch (e) { off[act] = e.code; } }
+    const upsert = await op('entity_upsert', { kind: 'character', id: 'ada', fields: { iter: { base_proposal: { text: 'forged', refs: [] }, nodes: [] } } });
+    const E = readP('entities/characters/ada.json');
+    check('dogfood: accepting a base proposal or an import, and importing an image, are the page\'s acts only (agent surface 403, offline 403); entity_upsert cannot plant a proposal (iter ignored); a proposed "photo" ref must be private (400), a path out of the project 400 / 404',
+      bp.status === 200 && bpPhoto.status === 400 && [400, 404].includes(bpEsc.status) && Object.values(tries).every(s => s === 403) && Object.values(off).every(s => s === 403)
+      && /iter ignored/.test((upsert.body?.warnings || []).join(' ')) && E.iter?.base_proposal?.text === 'x' && !E.base,
+      { bp: bp.status, bpPhoto: bpPhoto.status, bpEsc: bpEsc.status, tries, off, warn: upsert.body?.warnings });
+    // the page imports only a registered image (no arbitrary path), never into a locked tree
+    const impPath = await asPage({ type: 'character', id: 'ada', act: 'import', tree: 'identity', media: '../../../workbench.config.json' });
+    const impAudio = await asPage({ type: 'character', id: 'ada', act: 'import', tree: 'identity', media: 'demo-song' });
+    const impOk = await asPage({ type: 'character', id: 'ada', act: 'import', tree: 'identity', media: 'ada_face' });
+    await asPage({ type: 'character', id: 'ada', act: 'approve', tree: 'identity' });
+    const impLocked = await asPage({ type: 'character', id: 'ada', act: 'import', tree: 'identity', media: 'ada_body' });
+    check('dogfood: the page\'s import takes registered images only (a path 404, audio 400) and never changes a locked tree (409)', impPath.status === 404 && impAudio.status === 400 && impOk.status === 200 && impLocked.status === 409, { impPath: impPath.status, impAudio: impAudio.status, impOk: impOk.status, impLocked: impLocked.status });
+    // media_update: a private flag never goes back
+    const mp = await op('media_update', { id: 'bo_face', private: true });
+    const mpBack = await op('media_update', { id: 'bo_face', private: false });
+    const mpStatus = await op('media_update', { id: 'bo_face', status: 'used' });
+    const mBo = readP('media.json').items.find(m => m.id === 'bo_face');
+    const thumbRemote = mBo.thumb ? await get(lanIp || '127.0.0.1', A.port, `/data/${P}/${mBo.thumb}`, { host: `localhost:${A.port}` }) : { status: 'none' };
+    check('dogfood: media_update private:true is one-way (private:false 403, a status change 403); its thumbnail is a thumbs/priv_ file', mp.status === 200 && mpBack.status === 403 && mpStatus.status === 403 && mBo.private === true && (!mBo.thumb || /^thumbs\/priv_/.test(mBo.thumb)), { mp: mp.status, back: mpBack.status, st: mpStatus.status, thumb: mBo.thumb, remote: thumbRemote.status });
+    // costs: a falgen folder outside the media base is never read; cost_record never approves
+    const pj = path.join(D, 'project.json'), pj0 = fs.readFileSync(pj, 'utf8');
+    put(path.join(TMP, 'spent.json'), JSON.stringify({ total: 999 }));
+    fs.writeFileSync(pj, JSON.stringify({ ...JSON.parse(pj0), falgen: '..' }));
+    const cOut = await op('costs_get', {});
+    fs.writeFileSync(pj, JSON.stringify({ ...JSON.parse(pj0), falgen: TMP }));
+    const cAbs = await op('costs_get', {});
+    fs.writeFileSync(pj, pj0);
+    const draft = readP('requests.json').items.find(r => r.status === 'draft');
+    const cr = await op('cost_record', { usd: 0.5, via: 'retro', request: draft?.id });
+    const after = readP('requests.json').items.find(r => r.id === draft?.id);
+    check('dogfood: a falgen folder outside the media base (relative or absolute) is not read (an error, no spend added); cost_record on a draft request records the cost and leaves the request a draft (never an approval)',
+      /inside the media base/.test(cOut.body?.falgen?.error || '') && /inside the media base/.test(cAbs.body?.falgen?.error || '') && cAbs.body.total_spent_usd < 999 && cr.status === 200 && after?.status === 'draft' && after.log.length === draft.log.length,
+      { out: cOut.body?.falgen?.error, abs: cAbs.body?.total_spent_usd, cr: cr.status, after: after?.status });
+    // the recipe template is served (read only); nothing else under templates/ or next to it; every /api response says its code
+    const tpl = await get('127.0.0.1', A.port, '/templates/photoreal_recipe.json', { host: `localhost:${A.port}` });
+    const tplOther = { up: await st('/templates/..%2Fpackage.json'), md: await st('/templates/x.md'), docs: await st('/docs/PHOTOREAL.md'), client: await st('/mcp/client.mjs'), prices: await st('/js/prices.js') };
+    check('dogfood: /templates/photoreal_recipe.json is served (sandbox CSP, nosniff); /templates/ serves nothing else, docs/ and mcp/ stay closed; /api responses carry x-wb-code',
+      tpl.status === 200 && /sandbox/.test(tpl.headers['content-security-policy'] || '') && tpl.headers['x-content-type-options'] === 'nosniff' && [400, 403].includes(tplOther.up) && tplOther.md === 403 && tplOther.docs === 403 && tplOther.client === 403 && tplOther.prices === 200 && /^[0-9a-f]{12}$/.test(cOut.code || (await fetch(A.base + '/api/status')).headers.get('x-wb-code') || ''),
+      { tpl: tpl.status, tplOther });
+  }
 
   // ---------------------------------------------------------------- browser: XSS payloads stay inert, the page and the dock work under the CSP
   let puppeteer, exe;

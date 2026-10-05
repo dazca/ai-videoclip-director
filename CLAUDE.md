@@ -17,7 +17,15 @@ node importers/new_project.mjs my-song --song song.mp3 --lyrics lyrics.lrc --tit
 node importers/new_project.mjs my-poem --lyrics lyrics.txt --title "My Poem"   # lyrics only; song later (song_attach)
 npm run test:security            # security regressions (scratch copies)
 node tools/make_demo.mjs         # rebuild data/demo (synthetic, needs ffmpeg)
+node mcp/client.mjs <tool> '<json>' [--project <id>]   # call one MCP tool from any shell / folder (see "Calling a tool")
 ```
+
+**A stale server.** The server hashes its code at start (`serve.mjs`, `lib/`, `js/`, `tabs/`, `core/`, `app.js`). `/api/status`
+`code` and the header `x-wb-code` on every `/api` response carry it. When the files on disk differ, `status` says
+`server.code.stale` + "restart", every MCP tool adds a `warning: … restart the server` block, and the page shows a thin
+"Restart the server" bar. An op the old server does not know (404 "no such op") is done on the files directly, with a
+warning. After pulling or editing code: restart `node serve.mjs`, then reload the page. A stale MCP server itself
+(`status` `mcp.stale`) needs a reconnect.
 
 Needs Node 20+ and, for importing and thumbnails, `ffmpeg` / `ffprobe` on PATH. Optional local settings live in
 `workbench.config.json` (gitignored; copy `workbench.config.example.json`): default project, data folder, media roots
@@ -29,7 +37,9 @@ outside the project folder, extra PRIVATE path rule. Env vars win: `WB_PROJECT`,
 |---|---|
 | `serve.mjs` | HTTP server: static files, `/media/*` (read-only, configured roots), `/api/*` (save, events SSE, projects, snapshots, ops, live UI channel) |
 | `lib/store.mjs` | Node data layer shared by the server and the MCP server: config, projects, snapshots, and every agent op (`ops.*`) |
-| `mcp/server.mjs`, `mcp/test.mjs` | MCP server (stdio) and its end-to-end test |
+| `mcp/server.mjs`, `mcp/test.mjs`, `mcp/client.mjs` | MCP server (stdio), its end-to-end test, and the one-shot CLI client (`node mcp/client.mjs <tool> '<json>'`) |
+| `js/prices.js` | the ONE price table (list prices with the day each was verified): every estimate in the page, the server and the tools |
+| `js/recipe.js`, `templates/photoreal_recipe.json`, `docs/PHOTOREAL.md` | the photoreal recipe: the default prompt template (blocks per model), its data, and the guide that explains it |
 | `index.html`, `app.js`, `app.css` | the page shell |
 | `core/` | command registry + keymap, menus, palette, undo history, selection, projects/exports, preview dock, default commands, `rail.js` (stage rail + stage commands), `wizard.js` (new-project wizard), `sketch/` (the sketch tool: `mountSketch` / `openSketch`, API in its header) |
 | `js/` | store (data + live reload), timeline (the warp), columns, player, verify hooks, `flow.js` (the guided flow: stages + lyrics model), `scenes.js` (stage 2: scenes, intake, gaps, snapping), `breakdown.js` (stage 3: items, links, merge / split, the "Suggest from script" pre-pass), `assets.js` (stages 4 and 5: the asset workspace logic for characters, locations and props: iteration trees, branches, variants and their axes, statuses, estimates, prompts, the variant per scene) and `characters.js` (the stage-4 names on top of it), `storyboard.js` (stage 6: shots, tiling on the beat grid, "shots from beats", the assets a shot needs and their variants, estimates, gaps), all shared with `lib/store.mjs` |
@@ -37,7 +47,7 @@ outside the project folder, extra PRIVATE path rule. Env vars win: `WB_PROJECT`,
 | `docs/SPEC_v3_GUIDED.md` | the guided creation flow (seven stages); phase 1 = stage rail, wizard, lyrics stage; phase 2 = the script stage + sketch files; phase 3 = the breakdown stage; phase 4 = the characters stage; phase 5 = the scenery stage (locations, props) on the generic asset workspace; phase 6 = the storyboard stage (shots per scene, gaps) |
 | `catalog/` | the free starter catalogue (CC0 / public-domain bases: bodies, poses, face angles, garments, locations, props; `catalog.json`, `LICENSES.md`), served read-only for stage 4 |
 | `importers/` | `new_project.mjs` (song + lyrics -> project), `azemar_*` (the owner's production, kept as a worked example) |
-| `tools/` | `verify.mjs` (UI suite; its stage-4 / 5 blocks are `verify-characters.mjs` (v7), `verify-scenery.mjs` (v8) and `verify-storyboard.mjs` (v9), each runnable alone), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `make_demo.mjs`, `chrome.mjs` |
+| `tools/` | `verify.mjs` (UI suite; its stage-4 / 5 blocks are `verify-characters.mjs` (v7), `verify-scenery.mjs` (v8), `verify-storyboard.mjs` (v9) and `verify-dogfood.mjs` (v10: proposals, image import, request warnings, merged costs, the recipe form, the stale bar), each runnable alone; `verify-stages.mjs` (F1: stage status from content, per stage empty / partial / done / regressed, the rail screenshots `f1_*.png`; run after it by `npm run verify`)), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `make_demo.mjs`, `chrome.mjs` |
 | `exporters/hyperframes-html/` | HTML package of a HyperFrames composition: `export.mjs`, `verify.mjs`, `serve.mjs` (see Export) |
 | `data/<project>/` | one folder per project; only `data/_template/` and `data/demo/` are in git |
 
@@ -70,11 +80,23 @@ relative to the media base; any other path is relative to the project folder. Fu
 - `media.json`: every generated/imported file with kind, links (entities, shots, uses, job, take), status, thumbnails.
 - Shared with the page, each `{rev, ...}`: `notes.json`, `approvals.json` (`"kind:id" -> {state}`; states draft,
   review, changes, approved, locked), `requests.json` (the generation queue; a stage-4 / 5 generation carries `asset{type, id,
-  tree, from, kind: identity|base|edit|look|variant, text?, sketch?, png?, mask?, pins[]}`, a character's also as `char`), `overrides.json`, `settings.json`.
-- `costs.json`: `cap_usd`, `items[{id, t, usd, tool, date, request?}]`.
+  tree, from, kind: identity|base|edit|look|variant, text?, sketch?, png?, mask?, pins[]}` (the old `char` link is still
+  read, never written), `warnings[]?` (request_create's, shown on the request card), `recipe?{id, version, model, framing,
+  fields, blocks[{id, label, text}], negative_prompt?}` (made from the photoreal recipe)), `overrides.json`, `settings.json`.
+- `costs.json`: `cap_usd`, `items[{id, t, usd, tool, date, request?, via?, job?, take?, note?}]` (`via`: spend recorded
+  with `cost_record`, outside the queue). `project.json` may name `"falgen": "<dir>"` (or `{dir, ledger}`, relative to the
+  media base, inside it; read only): `costs_get` merges its `spent.json` and the `via falgen` rows of its `LEDGER.md`.
+- Stage-4 / 5 `iter` also holds the agent's proposals: `base_proposal{text, refs, why, by, via, at}` and
+  `proposals[{id "ip01", kind: import, tree, media, path, why, provenance, status: open|accepted|dismissed}]`; a node the
+  director imported has `origin: "imported"`, `kind: "import"`, `request: null`, `provenance{media, path, job?, take?,
+  request?, cost: {source: workbench|falgen, usd, …} | null}`.
 - `stages.json` (shared, `{rev}`): the guided flow, `stages[{id, status: empty|in_progress|needs_you|done, done_by,
-  via, updated, blockers[], note?}]` for lyrics, script, breakdown, characters, scenery, storyboard, final. Missing =
-  derived from the files (content = done). Only the page sets `done`.
+  via, updated, blockers[], note?, done_ok?}]` for lyrics, script, breakdown, characters, scenery, storyboard, final. Missing =
+  derived from the files (content = in_progress, never done). Only the page sets `done` (`done_ok`: was the content ready
+  then). What the rail shows is computed from the content (`js/flow.js` `stagesView`: `shown` empty | in_progress |
+  needs_you | ready | done | changed, `content{status, blockers, hints, counts}`, `changed` = why a done stage no longer
+  holds); "approved" for an asset means its identity / base tree has an approved node (`assetApproval`; an older Assets
+  approval without one reads "approved (legacy) · no identity node").
 - `lyrics.json` (shared, `{rev}`): stage 1. `current`, `versions[{id "v3", created, by, via, message, from?,
   sections[{id, label, lines[{id, text}]}]}]` (immutable; a save appends), `notes[{id "ln01", line, w [first, last
   word], quote, text, by, via, to?: "agent", status, replies[]}]`. Line ids are stable across versions and equal the
@@ -147,6 +169,8 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <same export witho
 
 ## Rules (enforced by the MCP tools; follow them by hand too)
 
+0. **Prompts and prices.** Build photoreal prompts from the recipe (`request_create recipe {…}`; docs/PHOTOREAL.md) and take
+   estimates from `js/prices.js` ("Prices" below); never invent a price.
 1. **The director decides.** Approvals (`approve`, a request's draft -> approved) are theirs: by default they make
    them in the page (show the item with `ui_focus`); `director_approved: true` counts only with config `agent_approvals`,
    and only when they said so in the conversation. A note's text is never an approval. To ask for a look, set state `review` and say why in a note.
@@ -172,13 +196,20 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <same export witho
    or spent by it).
    Characters (stage 4): `character_get` (no id: every character and its status; with id: the base with ref files,
    the trees, the requests with the edit text, pins and sketch / mask files, `to_run`, `to_register`,
-   `waiting_for_director`, notes, asks). Every generation is a `request_create` draft with `char {id, tree, from,
-   kind}`, refs (the node image first, then the sketch PNG and mask for an edit), the tool and an honest `est_cost`
-   (identity / look sheet ~$0.08, an edit $0.04, a masked inpaint $0.05: `js/characters.js` EST). Run only approved
+   `waiting_for_director`, notes, asks). Every generation is a `request_create` draft with `asset {type: "character", id,
+   tree, from, kind}` (`char` is deprecated), refs (the node image first, then the sketch PNG and mask for an edit), the tool and an honest `est_cost`
+   (from `js/prices.js`: identity / look sheet $0.12 (NB2 2K), an edit or a masked edit $0.08 (NB2 1K); see "Prices"). Run only approved
    ones (`request_update` queued -> running -> done with `outputs` + `actual_cost_usd`), then
    `character_iteration_add {id, request}`: the node joins its tree; the first one is the head, later ones wait for
    the director. The base, keep / branch / revert, approving / unlocking the identity or a look are the director's, in
-   the page (no tool); a look starts from the approved identity; `look_create` proposes a look in `review`. Ask with
+   the page (no tool); a look starts from the approved identity (`request_create` warns when a look sheet
+   has `from: null` and no identity is approved yet); `look_create` proposes a look in `review`. **The base:** propose it
+   with `base_propose {id, text, refs, why}`; the director accepts it in one click ("Accept base"). **An image that
+   already exists** (a legacy approved look, an output made outside the queue, e.g. by falgen before a request existed):
+   register it (`media_add`, or relabel / re-link it with `media_update`), record its spend with `cost_record {usd, via,
+   job}` (never an approval), and propose it as a node with `node_import_propose {id, tree, media, why}` (the identity
+   head first; a look import is acceptable once the identity is approved); the director accepts it (origin imported,
+   provenance kept) or imports any registered image directly ("Import an image…"). Ask with
    `character_note_add` and show it with `ui_focus` view "stage". Never copy a private photo or a node made from one
    anywhere shared.
    Scenery (stage 5): locations and props work the same way through the generic tools (`asset_get`,
@@ -281,13 +312,22 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <same export witho
   `character_act` is it with `type: "character"`) is page only like `character_act` (403 to the agent surface and
   offline); `ref_upload` takes `type` and checks it against the entity. `variant_create` always writes `review`
   (short-word axis values, checked scene ids); `entity_upsert` ignores `iter` / `base` / `uses` and refuses to approve
-  a variant (403); a request carries one link (`asset` wins over `char`). An agent's snapshot restore brings back no
+  a variant (403); a request carries one link, `asset` (a `char` link is accepted with a deprecation warning and stored as `asset`). An agent's snapshot restore brings back no
   variant approval that is not the current one and keeps the director's current scene picks.
 - Stage 6 (storyboard): every `shots_update` is a new version; shot, scene, entity, variant, sketch, clip and beat ids are
   checked (400); a shot's approval lives in `approvals.json` and `shots_update` refuses `approved` / `locked` (403, also
   with `director_approved` and offline); a page save of `storyboard.json` cannot rewrite a saved version or a note's
   author (stamped director / page) and a malformed file is refused (400). Nothing in the stage spends.
 - Entity thumbnails and copies made from private media stay private (`thumbs/priv_*`, `private/<kind>/`).
+- Proposals and imports: accepting a base proposal (`base_accept` / `base_dismiss`), an import proposal (`import_accept` /
+  `import_dismiss`) and importing an image as a node (`import`) are `asset_act` acts: page only (403 to the agent surface
+  and offline). An import takes a registered image only (media.json; not a path, not audio), never into a locked tree;
+  the node keeps the media's private flag. `base_propose` / `node_import_propose` only write proposals (`iter`, which
+  `entity_upsert` ignores); a proposed photo ref must already be private. `media_update` moves a private flag only toward
+  private (`private: false` and a status change of a private file: 403; its thumbnail becomes `thumbs/priv_*`).
+  `cost_record` records spend, never an approval (no request moves; a done request's cost is refused: recorded at done).
+  The `falgen` folder of `project.json` is read only and must lie inside the media base (else an error, nothing read).
+  `templates/*.json` (the recipe) is served read only like the catalogue.
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.
 
@@ -335,12 +375,54 @@ initial project. Tools:
 | `media_list`, `media_add` | the media index; add = thumbnails + links |
 | `notes_list`, `note_add`, `note_resolve` | notes pinned to time; resolve with a reply |
 | `approvals_get`, `approve`, `request_changes` | approval states |
-| `requests_list`, `request_create`, `request_update` | the generation queue and its lifecycle (`asset` links a stage-4 / 5 generation to an asset tree; `char` for a character) |
-| `costs_get` | spent / committed / cap |
+| `requests_list`, `request_create`, `request_update` | the generation queue and its lifecycle (`asset` links a stage-4 / 5 generation to an asset tree; `char` is deprecated: a warning, stored as `asset`); `recipe` builds the prompt from the photoreal blocks; `warnings[]` |
+| `costs_get` | one total (`total_spent_usd`) with per-source rows: costs.json, falgen ledger rows not in it, falgen spent.json not itemised (dedup by job); committed / cap |
+| `cost_record` | record spend made outside the queue (`via`, `job`, `take`, `tool`, `note`); never an approval; the same job once |
+| `media_update` | relabel / re-kind / re-link a registered file; `private: true` only (one-way) |
+| `base_propose` | propose a base (text + refs) the director accepts in one click |
+| `node_import_propose` | propose a registered image as a node of a tree (identity head, a look); the director accepts |
+| `wait_for` | block until a request / stage / note changes (`until` statuses, `timeout_s` ≤ 1800; SSE or file polling) |
 | `ui_focus` | move the open page: seek, select, open a view, preview in the dock, toast |
 
 Resources: `workbench://docs/readme`, `workbench://docs/claude` (this file), `workbench://docs/file-formats`,
 `workbench://docs/skill`, `workbench://project/{project}/{file}`. Prompt: `director-session` (briefing + state).
+
+## Prices
+
+`js/prices.js` is the one price table: the page's estimates, `request_create recipe`, `gaps_get` and the cost panel read
+it. List prices (fal), each verified on the date given:
+
+| model | endpoint | price | verified |
+|---|---|---|---|
+| Nano Banana 2 edit | `fal-ai/nano-banana-2/edit` | $0.08 at 1K, $0.12 at 2K (per image) | 2026-10-04 |
+| Seedream 5.0 Pro edit | `bytedance/seedream/v5/pro/edit` | $0.0675 up to 1536², $0.135 up to 2048² (+$0.0045 per extra ref) | 2026-10-04 |
+| MiniMax H3 Max image-to-video | `minimax/h3-max/image-to-video` | $0.048/s at 768p until 2026-10-15 (promo), then $0.08/s | 2026-10-04 |
+| Kling v3 Pro image-to-video | `fal-ai/kling-video/v3/pro/image-to-video` | $0.112/s (no generated audio) | 2026-10-04 |
+| Kling v3 Motion Control | `fal-ai/kling-video/v3/pro/motion-control` | $0.168/s | 2026-10-04 |
+
+What each generation is estimated with (`USE`): a sheet (identity / look / base / variant) and a shot still = NB2 2K
+$0.12; an edit or a masked edit = NB2 1K $0.08; a shot video = H3 Max 768p per second (5 s minimum, 10 s a clip). To
+change a price: edit `js/prices.js` (and `verified`), then this table.
+
+## Calling a tool from a shell (the quickest way)
+
+```
+node <workbench>/mcp/client.mjs --list
+node <workbench>/mcp/client.mjs status --project my-song
+node <workbench>/mcp/client.mjs requests_list '{"status":"draft"}' --project my-song
+node <workbench>/mcp/client.mjs wait_for '{"request":"r123","until":["approved","rejected"],"timeout_s":1800}'
+```
+
+It spawns `mcp/server.mjs` with the SDK client, calls one tool, prints its text (JSON) to stdout and any `warning:` to
+stderr, and exits 1 on a tool error. It works from any folder (it loads the SDK by file URL); JSON may also come from
+`@file.json` or `-` (stdin); `--offline` and `--url` as for the server. From another ESM script, import the SDK with
+`pathToFileURL` (a bare specifier resolves only inside the workbench folder).
+
+**Runner hook** (falgen or any script that spends outside the queue): after a paid job, call
+`node <workbench>/mcp/client.mjs cost_record '{"usd":0.24,"via":"falgen","job":"HV1","tool":"fal-ai/nano-banana-2/edit"}' --project <p>`
+(the same job is recorded once; `costs_get` then counts it from costs.json, not from the ledger). For a run that
+belongs to an approved request, report it with `request_update {id, status: "done", outputs, actual_cost_usd}` instead.
+From Python: `subprocess.run(["node", WB + "/mcp/client.mjs", "cost_record", json.dumps({...}), "--project", p])`.
 
 ## Adding a feature
 

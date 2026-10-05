@@ -1,5 +1,7 @@
 // The stage rail (docs/SPEC_v3_GUIDED.md): one 18 px row under the top bar with the seven stages of the guided flow,
-// a status dot each (empty / in progress / needs you / done) and a "next: ..." hint with what blocks it. Hidden with
+// a status dot each and a "next: ..." hint with what blocks it. The dot is computed from the content (js/flow.js
+// stagesView "shown": empty / in progress / needs you / ready to mark done / done / done ⚠ changed since), never from
+// the stored mark alone; the tooltip lists the counts and the blockers. Hidden with
 // the top bar (`), or on its own (View > Stage rail). A click opens the stage workspace (tabs/stage.js); every action is
 // a command (palette "Go to stage: Lyrics", Alt+Shift+1..7, right-click on a stage).
 //   WB.stages: { open(id), current(), view(), setStatus(id, status) }
@@ -12,10 +14,10 @@ import '../tabs/breakdown.js';   // and the breakdown stage
 import '../tabs/charstage.js';   // and the characters stage
 import '../tabs/scenery.js';   // and the scenery stage (locations, props)
 import '../tabs/storyboard.js';   // and the storyboard stage
-import { STAGES, STATUS_LABEL, stagesView, projectFacts, stageById } from '../js/flow.js';
+import { STAGES, STATUS_LABEL, stagesView, projectFacts, stageById, stageTip } from '../js/flow.js';
 
 const WB = () => window.WB;
-const facts = () => projectFacts({ song: store.song, script: store.script, shots: store.shots, entities: store.entities, lyrics: store.lyrics, scenes: store.scenes, breakdown: store.breakdown, storyboard: store.board });
+const facts = () => projectFacts({ song: store.song, script: store.script, shots: store.shots, entities: store.entities, lyrics: store.lyrics, scenes: store.scenes, breakdown: store.breakdown, storyboard: store.board, approvals: store.approvals });
 const view = () => stagesView(store.stages, facts());
 const current = () => { const s = prefs.get('stage', 'lyrics'); return stageById(s) ? s : 'lyrics'; };
 const onStage = (c) => (c || WB().context()).tab === 'stage';
@@ -24,8 +26,10 @@ export const stages = {
   view, current,
   async open(id) { if (!stageById(id)) return; prefs.set('stage', id); await WB().app.show('stage'); document.dispatchEvent(new CustomEvent('wb:stage', { detail: id })); render(); },
   // the page's own act: a status change here is the director's (serve.mjs stamps via "page"; done only from here)
+  // a "done" records whether the content was ready then (done_ok): a later regression reads "changed since"
   setStatus(id, status) {
-    return store.mutate('stages.json', (d) => { const s = d.stages.find(x => x.id === id); if (s) s.status = status; }, { label: `stage ${id} ${STATUS_LABEL[status]}` })
+    const ready = view().stages.find(x => x.id === id)?.content?.status === 'ready';
+    return store.mutate('stages.json', (d) => { const s = d.stages.find(x => x.id === id); if (!s) return; s.status = status; if (status === 'done') s.done_ok = ready; else delete s.done_ok; }, { label: `stage ${id} ${STATUS_LABEL[status]}` })
       .then(() => toast(`${stageById(id).title}: ${STATUS_LABEL[status]}`));
   },
 };
@@ -35,7 +39,7 @@ function render() {
   if (!el || !store.stages) return;
   const v = view(), cur = WB()?.app?.active() === 'stage' ? current() : null;
   const next = v.next;
-  el.innerHTML = v.stages.map(s => `<a data-stage="${s.id}" class="st-${s.status}${s.id === cur ? ' on' : ''}" title="${esc(`${s.n} ${s.title}: ${STATUS_LABEL[s.status]}${s.done_by && s.status === 'done' ? ` (${s.done_by === 'derived' ? 'had content' : 'marked by the ' + s.done_by})` : ''}\n${stageById(s.id).does}${s.blockers_all.length ? '\n· ' + s.blockers_all.join('\n· ') : ''}\nAlt+Shift+${s.n} · right-click: status`)}"><i></i>${s.n} ${esc(s.title)}</a>`).join('')
+  el.innerHTML = v.stages.map(s => `<a data-stage="${s.id}" data-shown="${s.shown}" class="st-${s.shown}${s.id === cur ? ' on' : ''}" title="${esc(`${stageTip(s)}\n${stageById(s.id).does}\nAlt+Shift+${s.n} · right-click: status`)}"><i></i>${s.n} ${esc(s.title)}${s.shown === 'changed' ? '<b class="stw">⚠</b>' : ''}</a>`).join('')
     + `<span class="next" data-stage="${esc(next?.id || '')}" title="${esc(next ? `next: ${next.title}${next.blockers.length ? '\n· ' + next.blockers.join('\n· ') : ''}` : 'every stage is done')}">${next ? `next: <b>${esc(next.title)}</b>${next.blockers.length ? ' · ' + esc(next.blockers[0]) : ''}` : 'all stages done'}</span>`;
 }
 export function mountRail() {
@@ -44,7 +48,7 @@ export function mountRail() {
   el.setAttribute('aria-label', 'stages');
   document.body.classList.toggle('norail', prefs.get('rail', true) === false);
   el.addEventListener('click', (e) => { const a = e.target.closest('[data-stage]'); if (a?.dataset.stage) stages.open(a.dataset.stage); });
-  store.on((w) => { if (['stages', 'lyrics', 'scenes', 'breakdown', 'board', 'entities', 'all'].includes(w)) render(); });
+  store.on((w) => { if (['stages', 'lyrics', 'scenes', 'breakdown', 'board', 'entities', 'approvals', 'all'].includes(w)) render(); });
   document.addEventListener('wb:page', render);
   render();
 }
