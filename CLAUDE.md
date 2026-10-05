@@ -56,6 +56,10 @@ win: `WB_PROJECT`, `WORKBENCH_DATA`, `WORKBENCH_MEDIA_BASE`, `FAL_KEY`.
 | `core/importmedia.js` | File › Import media… (D8): the dialog (dropped files uploaded in chunks, a media-root path / folder read in place with its jobs and recovered costs, kind / label / private per row, link to a request, record a cost), dropping files anywhere on the page, and "Use as…" (rows and the `media` context menu: identity / look / base / variant node, a shot's take / start frame; `useAsItems(media)`, `WB.importMedia`) |
 | `js/surfaces.js`, `lib/ops/surfaces.mjs`, `mcp/tools/surfaces.mjs`, `tabs/surfaces.js` | E2 the lyric gate: the shared logic (a surface `{line, w?, where}` on a storyboard shot, `cleanWhere` / `cleanEntry` (kinds window / chat / dialog / karaoke / taskbar / other), `coverage` (every song word covered when a surface of a shot on screen at its time names it; the uncovered runs), `gateCheck` (Final's line), surfaces.json), the ops (`surfaces_get`, `surface_propose`, the page-only `surface_act`), and the Shot panel's "lyrics on screen" (`mountSurfaces`); the timeline's `surface` column (`js/columns.js`) and the Lyrics stage's per-line count read `coverage` |
 | `core/helptip.js` | F5: `help(line, more)`: one line of help + a `?` popover (`<details>`, fixed to the window, Esc / a click elsewhere closes it); the stages' empty states and the storyboard's side panel use it |
+| `core/stagebar.js` | F8: ONE stage bar for every stage (`tabs/stage.js` renders it): fixed slots at the same x everywhere (`SLOTS`): name, status, Mark done / Reopen, Needs you, the primary act (`WB.stageActions[stage].primary {label, title, can, run}` when a stage offers one, Final: Lock for render…; else Save version / Send edit request = `stage.save`), Ask the agent… (`ASKS` per stage), Send round N (k) / Round N: Claude working / Close revision R<n> (the rail's commands), blockers + the agent's stage note, List / Time, ‹ prev / next › |
+| `core/dialog.js`, `core/connect.js` | a small modal (`openDialog`, `copyText`); F9 Help › Connect Claude… (the `claude mcp add` line for this checkout, the agent token's FILE path (never its value), the `mcp/client.mjs status` quick test, a copy button each, the state: pages open + the last agent write; from `GET /api/connect`, local only) and F10 Help › About (package.json `version` + the `git describe` commit, from `/api/status`) |
+| `js/interpret.js`, `lib/ops/interpret.mjs`, `mcp/tools/interpret.mjs`, `core/interp.js` | E10: the agent's interpretation next to the director's verbatim intake answers and notes: the shape and labels, the ops (`interpretation_set`, the page-only `interpretation_act`), the tool, and the block under an answer / a note (Script › Intake, every Notes column, the timeline notes column) with Accept / Edit |
+| `tools/verify-layout.mjs` | v26 of the UI suite (run by `npm run verify`, or alone): F7 the timeline fills the height at 1280 / 1600 and keeps every column on screen, the docked preview narrows the columns; F8 the same stage bar on every stage; F9 the Connect dialog (and its quick test, run as shown); F10 About; E10 interpretations over MCP and in the page; screenshots `v26_*.png` |
 | `js/events.js`, `js/eventscol.js`, `core/events.js`, `lib/ops/events.mjs`, `mcp/tools/events.mjs` | E1, named sync points: the shared logic (events.json v2 and the old array, kinds, `snapToEvent` (the nearest accepted event within 1 s), anchors (`anchorsOf`, `reanchor` for a draft, `settleAnchors` for a write: the anchor wins), `retimePlan` (anchored boundaries + the cuts that sit on them, old -> new, problems), `importList` (an audio events.json in seconds)), the timeline's events column (drag = measured), the page acts (the event dialog, + Named event here / at a word, Import events…, Re-time after the take… with its preview and one undo step, the Time view markers), the ops and the agent tools |
 | `core/timemode.js` | the stages' Time view (List | Time, Alt+T; ROADMAP_v4 F6): `TimeAxis` places a stage's rows on the timeline's warp (`WB.timeline.warp`, `tl.watch` for its relayouts and playhead), click-to-seek, scroll sync, "+ Add at m:ss" (`tmadd`); the timeline page stays laid out behind the others (`.pgwrap.bg`) so its warp stays true |
 | `core/` | command registry + keymap, menus, palette, undo history (`history.push({label, undo, redo})` for a stage draft edit), selection, projects/exports, preview dock, default commands (+ the timeline "+ Add", `notes.addHere`), `rail.js` (stage rail + stage commands + open-notes counts + the review round at its right end: "Round N · K open notes", Send round to Claude, the agent's progress, Close revision, the revision chip; `WB.rounds`), `notescol.js` (the Notes column every stage mounts: row-aligned cells, typing, threads, its width (`width` / `maxWidth`), API in its header), `wizard.js` (new-project wizard, with the unticked "Prepare starting proposals"), `proposals.js` (the proposals strip every target with proposals shows: cards, Pick / Mix / 3 more / ×, the large view, `register(stage, apply)` for what a pick does, "Prepare proposals" and "Make free layouts" (Generate menu, palette), the offer after a save; API in its header), `sketch/` (the sketch tool: `mountSketch` / `openSketch`, API in its header) |
@@ -94,6 +98,7 @@ that owns them and imported by the others); ops call each other through `ops.<na
 | composition data (E9) | `composition.mjs` | `composition.mjs` | `composition_export` (the picks as `exports/<out>` (default `composition/edl.json`): shots, take file mapped under the composition, in / out, looks / variants, placeholders, the song anchors, a checksum; writes nothing else; allowed while locked), `composition_get` (read only: what an export would hold; the page's dialog) |
 | lyric gate (E2) | `surfaces.mjs` | `surfaces.mjs` | `surfaces_get` (read only: every lyric word covered or not, the uncovered runs, the surfaces per shot, the proposals), `surface_propose` (the agent's proposal: surfaces.json), `surface_act` (page only: accept / dismiss / reopen a proposal, add / remove a surface: shot.lyrics through a new storyboard version; no tool) |
 | named events (E1) | `events.mjs` | `events.mjs` | `events_get` (read only: the events, the boundaries anchored to each, the pending re-time plan, the records), `event_add` (an agent's event: proposed), `retime_propose` (an agent's re-time: a proposed record + its plan; nothing moves); `events_act`, `retime_apply`, `retime_undo` page only (no tool) |
+| interpretations (E10) | `interpret.mjs` | `interpret.mjs` | `interpretation_set` (the agent's reading of an intake answer (`key`) or a note (`note`): via agent, status proposed; an edited one is the director's: 409), `interpretation_act` (page only: accept / edit; no tool) |
 | rounds, revisions | `rounds.mjs` | `rounds.mjs` | review rounds (`round_get`, `round_absorb`, `round_reply`, `round_finish`; `round_send` is page only: no tool) and revisions R<n> (`revisions_get`, `revision_compare`; `revision_close` / `revision_restore` are page only: no tool), the opt-in git mirror |
 
 A new domain: a `lib/ops/<domain>.mjs` imported (or re-exported) by `lib/store.mjs`, and a `mcp/tools/<domain>.mjs`
@@ -142,7 +147,7 @@ relative to the media base; any other path is relative to the project folder. Fu
   kind, id, w?, quote?, t?, pin?{x, y}, line?, scene?}, text, by, via: page|agent|import, status: open|absorbed|dismissed,
   round, replies[{id, text, by, via, at}], absorbed_in, created, to?: "agent", ask?: request|fill_gaps|extract|storyboard|round,
   gaps?, version?, marker?, about?, legacy?{store, id}, closed_by?, closed_via?, closed_at?, change?{stage, file?, version?,
-  summary, at, by}}], legacy_seen[]}`. Targets per
+  summary, at, by}, interpretation? (E10: the same shape as an intake answer's)}], legacy_seen[]}`. Targets per
   stage: lyrics `stage` / `section` / `line` (+ `w` [first, last word], `quote`); script `stage` / `scene` / `beat`
   (`"sc02/b1"`); breakdown `stage` / `item` / `scene`; characters and scenery `stage` / `asset` / `tree`
   (`"ada/look:x"`) / `node` (`"ada/n03"`, + `pin` 0..1 on its image) / `use` (`"ada/sc02"`: the asset in a scene);
@@ -211,7 +216,8 @@ relative to the media base; any other path is relative to the project folder. Fu
   a save appends), `states{<scene id>: {status: draft|needs_you|ok, by, via, at}}` (outside the versions; `ok` only from
   the page), `notes[{id "sn01", scene|null, beat?, text, by, via, to?: "agent", kind?: request|fill_gaps, gaps?[[t0,
   t1]], status, version, replies[]}]`, `intake{mood|kind|who|where|era|refs|must|mustnot|budget: {text, by, via, at,
-  asked?}}`. Scenes are bound to song time (t0 < t1 ms; `line_ids` = the song lines starting inside). Missing = v1
+  asked?, interpretation?}}` (E10: `interpretation {text, by, via: "agent", at, status: proposed | accepted | edited, agent_text?,
+  reviewed?{by: "director", via: "page", at}}`: the agent's reading, next to the verbatim text; the server's: a page save keeps its copy). Scenes are bound to song time (t0 < t1 ms; `line_ids` = the song lines starting inside). Missing = v1
   derived from `script.json` (its `stages` become scenes, its `lines` their beats); `script.json` itself is never
   rewritten and its readers (the timeline script column, `timeline_query`) keep working. Logic: `js/scenes.js`.
 - `breakdown.json` (shared, `{rev}`): stage 3, what the script needs. `current`, `versions[{id "v3", created, by, via,
@@ -470,6 +476,12 @@ of t). The first film's `xp/world.js` is NOT changed: its adoption is a proposal
    -> new) and moves nothing. The director measures, accepts and applies in the page (Timeline › Re-time after the take…: one
    undoable change = a new scenes and storyboard version); `events_act`, `retime_apply` and `retime_undo` are theirs (403). Never
    write `events.json` by hand.
+4j. **Interpretations** (E10). The director's words stay verbatim: an intake answer (`intake_answer`, only what they said) and a
+   note's text are never rewritten. Your reading of them goes NEXT to them: `interpretation_set {key: <intake question> | note: <id>,
+   text}` ("warm but sad" -> "tungsten practicals against blue window light; slow push-ins; no hard cuts in the verses"): marked as
+   yours (via agent, status proposed), shown under the verbatim words. The director accepts or edits it in the page
+   (`interpretation_act`: no tool, 403); an edited one is their words (409 to you: reply in a note). Act on the accepted / edited
+   reading; ask when one is still "proposed" and it matters.
 5. **Snapshot before big edits** (`snapshot_save`); a restore snapshots the current state first, so it is undoable.
 6. Register every new file (`media_add`, or automatically on `request_update` done) so it shows up in the page.
 
@@ -494,7 +506,7 @@ of t). The first film's `xp/world.js` is NOT changed: its adoption is a proposal
   private refs", and the ops `take_act`, `surface_act`, `media_use`, `media_upload`, `batch_act`, `jobbooks_import`, `asset_act` /
   `character_act` (base / import accept, approvals, constants), `ref_upload`, `breakdown_promote`, `round_send`,
   `revision_close`, `revision_restore`, `final_lock` / `final_unlock`, `proposal_act`, `events_act`, `retime_apply` /
-  `retime_undo`. An agent gets 403 on each
+  `retime_undo`, `interpretation_act`. An agent gets 403 on each
   ("agents use the MCP tools"), whatever `via` its body claims; an agent's save is stamped `by: "agent", via:
   "agent"`, and `/api/restore` without the page is an agent's restore. Every `/api` write answers `x-wb-client: page |
   agent`. Offline mode is unchanged: the MCP server's file ops run with `via` absent (an agent) and never approve.
@@ -538,6 +550,15 @@ of t). The first film's `xp/world.js` is NOT changed: its adoption is a proposal
   alternative's time lies inside the song and its file is registered; request / take / kind come from the media entry, never
   from the caller. A page save of `storyboard.json` keeps the server's picks (a forged `clip` is replaced or dropped) and the
   agent's `shots_update` ignores `clip`. `takes.json` is not a page save. Notes render escaped (tools/security-test.mjs).
+- Interpretations (E10, `lib/ops/interpret.mjs`): `interpretation_set` stores `via: "agent"`, status `proposed` whatever the body
+  claims, needs an intake answer to interpret (409) and never touches the verbatim text; an `edited` one is the director's (409).
+  `interpretation_act` (accept / edit) is page only (S9: the page token + this server's Origin + `Sec-Fetch-Site: same-origin`; no MCP
+  tool; 403 to curl with the page token, the agent token, the Origin alone, Sec-Fetch-Site alone, cross-site, a forged Origin with the
+  agent token, a claimed via "page" and offline). A save of `scenes.json` / `notes.json` (the page's or an agent's) never writes an
+  interpretation: the server keeps its copy (a forged "accepted" is dropped). Rendered escaped (tools/security-test.mjs).
+- Help › Connect Claude… (F9): `GET /api/connect` (local only: 403 to a LAN client) gives absolute paths, the server URL, the pages open
+  and the last agent write; it names the agent token's FILE (`<data folder>/.wb-agent-token`) and never carries a token: neither the
+  endpoint, the dialog's text / HTML nor its copy buttons hold one (tools/security-test.mjs), so screenshots and exports cannot leak it.
 - The lyric gate (E2, `lib/ops/surfaces.mjs`): `surface_act` (accept / dismiss / reopen a proposal, add / remove a surface) is page only
   (via "page" from this server's Origin + Sec-Fetch-Site; no MCP tool; 403 to the agent surface, a claimed via "page", a foreign Origin and
   offline). A surface (and `surface_propose`) names a shot of the current storyboard, a song line, a word range on it, a `where` that starts
@@ -736,6 +757,10 @@ of t). The first film's `xp/world.js` is NOT changed: its adoption is a proposal
 claude mcp add workbench -- node /absolute/path/to/workbench/mcp/server.mjs
 ```
 
+The director's page has the exact line for its checkout: **Help › Connect Claude…** (with `--env WORKBENCH_URL=…` when the server is
+not on 8140), where the agent token file is, and `node <workbench>/mcp/client.mjs status` as a quick test. Help › About shows the
+version (package.json) and the git commit.
+
 It calls the running server (`WORKBENCH_URL`, default `http://localhost:8140`) so the director sees every write live;
 if the server is down it works on the files (`WORKBENCH_DATA`) with the same code. `WORKBENCH_PROJECT` sets the
 initial project. Tools:
@@ -749,7 +774,8 @@ initial project. Tools:
 | `notes_get`, `notes_add`, `notes_status` | ONE list of notes for every stage and the timeline: filters (stage, kind, id, note, status, to, by), counts per stage; a note on any row (`target {stage, kind, id, w?, quote?, t?, pin?}`) or a reply (`reply_to`); absorbed / open / dismissed (the director's: not by you) |
 | `lyrics_note_add`, `lyrics_note_resolve` | notes on a line or a word range, thread replies, resolve (aliases: notes.json v2) |
 | `song_attach` | add / replace the song file: peaks, energy, grid, duration; lines re-timed |
-| `intake_get`, `intake_answer` | stage 2: the intake questions (mood, kind, who, where, era, refs, must, must-not, budget) and answers; mark asked in chat |
+| `intake_get`, `intake_answer` | stage 2: the intake questions (mood, kind, who, where, era, refs, must, must-not, budget) and answers (+ `interpretation`); mark asked in chat |
+| `interpretation_set` | E10: your reading of an intake answer (`key`) or a note (`note`), next to the director's verbatim words: via agent, proposed; the director accepts / edits it in the page (no tool); an edited one is theirs (409) |
 | `script_get`, `scenes_update` | stage 2: scenes (time range, lines, title, text, beats, sketches with image paths + pins, status), gaps, coverage, asks for the agent, versions + diff; a new version (full list / upsert + remove / restore; snap to lines, bars, sections, events; `anchors {t0?, t1?: event id}`; statuses draft / needs_you) |
 | `scene_note_add`, `scene_note_resolve` | notes on a scene or a beat, thread replies, resolve |
 | `sketch_save`, `sketch_get`, `sketch_list` | sketch files: save (JSON + base64 PNG + mask), get the PNG / mask paths (absolute too) and the numbered pins, list (by scene) |
@@ -891,6 +917,8 @@ listed in `GENERATORS` (`lib/run.mjs`). Tests never call fal: `tools/mock-fal.mj
   Re-render on `store.on(what => ...)` (`'all'` after a full reload, else the field name: `notes`, `requests`, ...).
 - **A column**: one object in `js/columns.js` (`kind: 'text'` drive/follow or `'lane'` canvas).
 - **Help in a stage**: one line + a `?` popover, `help(line, more)` from `core/helptip.js` (F5: no paragraphs of prose in a workspace).
+- **A stage's bar**: never a bar of its own: `core/stagebar.js` draws the one stage bar; a stage whose main act is not "Save version"
+  offers `WB.stageActions[<stage>].primary {label, title, can, run}` (Final: Lock for render…), and its asks go in `ASKS` there.
 - **A stage workspace**: a module in `tabs/` loaded from `MODULES` in `tabs/stage.js` and imported by `core/rail.js`
   (so its commands exist before it is opened); offer `WB.stageActions[<stage>] = {canSave, save, canNote, note}` and
   the rail's `stage.save` (Ctrl+Enter) / `stage.note` (Alt+N) reach it. Its **Time view** (List | Time, Alt+T, `core/timemode.js`,
@@ -907,7 +935,7 @@ listed in `GENERATORS` (`lib/run.mjs`). Tests never call fal: `tools/mock-fal.mj
   pick does there (one undo step with the recorded pick); add the stage / kind to `js/proposals.js` `TARGETS`.
 - **A page-only act** (the director's decision): an op in its `lib/ops/<domain>.mjs` that fails unless `via === 'page'`, and one
   line in `serve.mjs` setting `body.via` from the request's Origin (see `breakdown_promote`, `character_act`,
-  `asset_act`, `ref_upload`, `round_send`, `proposal_act`, `final_lock`, `take_act`, `surface_act`, `media_upload`, `media_use`, `batch_act`, `jobbooks_import`, `events_act`, `retime_apply`, `retime_undo`); no MCP tool; a security check that the agent surface gets 403.
+  `asset_act`, `ref_upload`, `round_send`, `proposal_act`, `final_lock`, `take_act`, `surface_act`, `media_upload`, `media_use`, `batch_act`, `jobbooks_import`, `events_act`, `retime_apply`, `retime_undo`, `interpretation_act`); no MCP tool; a security check that the agent surface gets 403.
 - **An agent op / MCP tool**: a function in the `Object.assign(ops, {...})` of its `lib/ops/<domain>.mjs` (it is then
   also `POST /api/op/<name>`; see "Where to add an op or a tool"), and a `mcp.registerTool` in `mcp/tools/<domain>.mjs`
   with a zod schema and a description an agent can follow; cover it in `mcp/test.mjs`.

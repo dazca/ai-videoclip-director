@@ -115,7 +115,7 @@ C.push(
   // one key per act across the stage workspaces: each stage module offers WB.stageActions[<stage>] {canSave, save, canNote, note}
   { id: 'stage.save', group: 'Stages', title: 'Save a version (lyrics / script / breakdown / storyboard) / send the edit request (characters, scenery)', keys: ['Ctrl+Enter'], global: true, when: (c) => onStage(c) && !!WB().stageActions?.[current()]?.canSave(), run: () => WB().stageActions[current()].save() },
   { id: 'stage.note', group: 'Stages', title: 'Note (lyrics: the selected words; script: the open scene; breakdown: the open item; storyboard: the selected shot)', keys: ['Alt+N'], when: (c) => onStage(c) && !!WB().stageActions?.[current()]?.canNote(), run: () => WB().stageActions[current()].note() },
-  { id: 'view.rail', group: 'View', title: 'Stage rail', checked: () => !document.body.classList.contains('norail'), run: () => { const off = !document.body.classList.contains('norail'); document.body.classList.toggle('norail', off); prefs.set('rail', !off); WB().timeline?.requestRelayout(); } },
+  { id: 'view.rail', group: 'View', title: 'Stage rail', checked: () => !document.body.classList.contains('norail'), run: () => { const off = !document.body.classList.contains('norail'); document.body.classList.toggle('norail', off); prefs.set('rail', !off); WB().timeline?.requestRelayout(); document.dispatchEvent(new Event('wb:rail')); } },
 );
 // the review round: one command per act (palette, File menu, the rail's buttons)
 C.push(

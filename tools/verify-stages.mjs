@@ -184,8 +184,9 @@ try {
   if (bars.script) await pg.evaluate(() => window.WB.stages.open('script'));
   await wait(200); await pg.screenshot({ path: path.join(OUT, 'f1_stage_bar_script.png'), clip: { x: 0, y: 0, width: 1500, height: 80 } });
   const nextHint = await pg.evaluate(() => document.querySelector('#rail .next')?.textContent || '');
-  const sameBtns = Object.values(bars).every(b => b.btns.length === 3 && /^(Mark done|Reopen)$/.test(b.btns[0]) && b.btns[1] === 'Needs you' && b.btns[2] === 'Ask the agent…');
-  check('U6 / U8: every stage bar shows one status (no "(marked …)"), the same three buttons (Mark done | Reopen · Needs you · Ask the agent…) in the same place; "Ask the agent…" lists the stage\'s asks, each worded "Ask the agent …"; the rail\'s next hint is "next: <stage> · <its status>"',
+  // F8: one stage bar (core/stagebar.js): Mark done | Reopen · Needs you · the primary act · Ask the agent… · the round button
+  const sameBtns = Object.values(bars).every(b => b.btns.length === 5 && /^(Mark done|Reopen)$/.test(b.btns[0]) && b.btns[1] === 'Needs you' && /^(Save version|Send edit request|Lock for render…|Unlock)$/.test(b.btns[2]) && b.btns[3] === 'Ask the agent…' && /^(Send round \d+ \(\d+\)|Round \d+: Claude working|Close revision R\d+)$/.test(b.btns[4]));
+  check('U6 / U8: every stage bar shows one status (no "(marked …)"), the same five buttons (Mark done | Reopen · Needs you · the primary act · Ask the agent… · the round) in the same place; "Ask the agent…" lists the stage\'s asks, each worded "Ask the agent …"; the rail\'s next hint is "next: <stage> · <its status>"',
     sameBtns && Object.values(bars).every(b => !/marked/.test(b.st) && b.asks.length >= 1 && b.asks.every(a => /^Ask the agent/.test(a))) && new Set(Object.values(bars).map(b => b.askX)).size <= 2
     && /^next: \S+ · (empty|in progress|needs you|ready to mark done|done ⚠ changed since)$/.test(nextHint.trim()), { bars, nextHint });
 

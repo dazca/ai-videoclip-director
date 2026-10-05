@@ -1,4 +1,6 @@
-# Director workbench (v2: commands, menus, projects; media, preview dock, characterization)
+# Director Workbench
+
+The one version string is `package.json` `version`; **Help › About** shows it with the git commit of this checkout.
 
 A vertical, time-synced, multi-column view of a music video: time runs top to bottom, every column shares one
 time axis `y(t)`, and that axis is warped so wrapped text (lyrics, script, notes, events) pushes the audio lanes down
@@ -57,7 +59,13 @@ claude mcp add workbench -- node /absolute/path/to/workbench/mcp/server.mjs
 claude mcp add workbench -e WORKBENCH_PROJECT=demo -- node /absolute/path/to/workbench/mcp/server.mjs   # start on a project
 ```
 
-or put the JSON form of `.mcp.json.example` in the project's `.mcp.json` (or `claude mcp add-json`). Then start the
+**In the page: Help › Connect Claude…** (F9) shows these exact lines for this checkout, each with a **copy** button: the
+`claude mcp add workbench -- node <this folder>/mcp/server.mjs` command (with `--env WORKBENCH_URL=…` when the server is not on
+8140), **where the agent token is** (`<data folder>/.wb-agent-token`: the file path only; the token itself is never shown, copied
+or exported, and the MCP server reads the file by itself), and the quick test `node <this folder>/mcp/client.mjs status`. Under them:
+the server, the pages open and the last write an agent made (`GET /api/connect`, local only).
+
+Or put the JSON form of `.mcp.json.example` in the project's `.mcp.json` (or `claude mcp add-json`). Then start the
 workbench (`npm start`), open the page, and in Claude: *"use the director-session prompt"* or just *"what's open in
 the workbench?"*. With the server running every tool goes through its HTTP API (`WORKBENCH_URL`, default
 `http://localhost:8140`) and the page updates live; without it the tools read and write the files directly
@@ -90,7 +98,8 @@ place; uploads and "Use as…" are the director's, in the page), `wait_for` (blo
 until a request / stage / note changes), `ui_focus`; the guided flow: `stages_get` / `stage_update` (the per-stage note tools below
 are aliases that write the same notes.json v2 and answer in their old shapes),
 `lyrics_get` / `lyrics_update` / `lyrics_versions` / `lyrics_note_add` / `lyrics_note_resolve`, `song_attach`; stage 2:
-`intake_get` / `intake_answer`, `script_get` / `scenes_update`, `scene_note_add` / `scene_note_resolve`, `sketch_save` /
+`intake_get` / `intake_answer`, `interpretation_set` (E10: the agent's reading of an intake answer or a note, shown under the
+director's verbatim words and marked as the agent's; the director accepts or edits it in the page), `script_get` / `scenes_update`, `scene_note_add` / `scene_note_resolve`, `sketch_save` /
 `sketch_get` / `sketch_list` (image paths + pins, so the agent can look at the director's drawings); stage 3:
 `breakdown_get` / `breakdown_update`, `breakdown_note_add` / `breakdown_note_resolve`; stage 4: `character_get`,
 `character_iteration_add`, `character_note_add`, `look_create`; stages 4 and 5, any asset (characters, locations, props): `asset_get`,
@@ -111,8 +120,12 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   3 Breakdown · 4 Characters · 5 Scenery · 6 Storyboard · 7 Final**. The **stage rail** (one 18 px row under the top
   bar, hidden with it, or alone with View > Stage rail) shows each with a status dot (hollow = empty, amber = in
   progress, red = needs you, green = done) and, at the right, `next: <stage> · <what blocks it>`. Click a stage (or
-  Alt+Shift+1..7, palette "Go to stage: Lyrics", right-click on the rail) to open its workspace; its bar has the status
-  buttons: **only the director marks a stage done** (here or on the rail; agents can set in progress / needs you and
+  Alt+Shift+1..7, palette "Go to stage: Lyrics", right-click on the rail) to open its workspace. **One stage bar** (F8,
+  `core/stagebar.js`) tops every stage, with the same slots at the same place everywhere: the stage, its status, **Mark
+  done** (Reopen once done), **Needs you**, the stage's primary act (**Save version**; Characters / Scenery **Send edit
+  request**; Final **Lock for render…**), **Ask the agent…**, **Send round N (k)** (the review round, as on the rail; then
+  "Round N: Claude working", then "Close revision R<n>"), what blocks it, List | Time, and ‹ previous / next › stage.
+  **Only the director marks a stage done** (here or on the rail; agents can set in progress / needs you and
   blockers). Later stages can be opened early. A project made before the flow counts stages with content as done.
 - **List | Time** (ROADMAP_v4 F6, a provisional decision: List stays the default): the stage bar of Lyrics, Script,
   Breakdown, Storyboard and Final has a **List | Time** toggle (also **Alt+T**, View menu, right-click on the stage),
@@ -195,7 +208,9 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   draft is saved as a version by itself. **Fill the gaps** writes an ask for the agent listing the unscripted
   ranges (`script_get` `asks_for_agent`); the agent answers with `scenes_update` and the page follows live. The Notes
   column sits on each scene's row (Alt+N: the open scene). Side panel: **Intake** (the nine starting questions,
-  answered here or in a chat; "asked in chat" marks; **Ask for a draft**), **Versions** (A/B side-by-side diff with the
+  answered here or in a chat; "asked in chat" marks; **Ask for a draft**; under an answer, the agent's **interpretation**
+  (E10) in its own style, "agent's reading · not reviewed", with **Accept** / **Edit**: the answer itself stays verbatim; an edited
+  reading is yours and the agent cannot overwrite it; the same block sits under a note in every Notes column), **Versions** (A/B side-by-side diff with the
   scenes added / changed / removed, restore). Right-click a scene (+ Add: scene here = a split at the clicked line's
   time, beat at this time; a gap: scene here) for its commands; double-click a scene in the timeline Scenes column to
   open it here.
@@ -363,7 +378,7 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   M marker · N new note · A approve, R request changes (selection, else the shot at the playhead) · Ctrl+Z,
   Ctrl+Shift+Z / Ctrl+Y undo/redo · Ctrl+S snapshot · Ctrl+Shift+S save project as · Ctrl+D duplicate (request) ·
   Delete (notes) · F2 rename (note, section) · 1-4 pages (1 Timeline, 2 Assets, 3 Review, 4 Settings; 5-9 custom pages) · Alt+1-9 toggle columns · H hide the column under the mouse,
-  Shift+H show all · Alt+H header full/thin/hidden · Ctrl+0 fit song · Ctrl+1 100 % · T (or 0) linear time · F follow ·
+  Shift+H show all · Alt+H header full/thin/hidden · Ctrl+0 fit song (a song shorter than the window always fills its height, F7) · Ctrl+1 100 % · T (or 0) linear time · F follow ·
   +/- zoom · P preview dock · V floating render · `` ` `` top bar · Alt+H column header · Ctrl+, settings · ? cheat sheet ·
   F10 menu bar · Esc closes menus / dialogs / palette / cheat sheet (only).
 - **Mouse**: wheel = time · **Ctrl+wheel / pinch = zoom time at the cursor** (the time under the pointer stays on its
@@ -450,7 +465,7 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `script.json` | `{stages[{name,t0,t1,text}], lines[{id:"s07", t0, t_end?, lyric, mode:"W"|"S"|"B"|"W→S", action, line_id}]}` |
 | `shots.json` | `{shots[{id, t0, t1, section, kind, title, cast[], locations[], clips[use ids], thumb, render_frame_ms}], uses[{id:"G05@20158", clip, take, in_ms, t0, t1, file, start_image, location, thumb, label}]}` |
 | `entities/{characters,locations,props}/<id>.json` | `{id, kind, name, role|description, refs[paths], thumb, status, private_refs?, breakdown?{item, scenes}, ...}`; `entities/index.json` lists them. A character also carries `looks[{id, name, garments[], colors[], images[], notes, status: draft/review/approved, from?: breakdown/agent/page, breakdown?}]` and stage 4: `base{text, refs[{path, source: catalog/openverse/photo/sketch/media, private?, title?, licence?, licence_url?, creator?, url?, original?, attribution?, catalog_id?, openverse_id?}], at, by, via}` and `iter{nodes[{id: "n03", tree: "identity" \| "look:<id>", parent, from_identity?, image, request, kind: identity/edit/look, edit{text, sketch?, png?, mask?, pins[{n, x, y, text}]}, choice: null/kept/branch/reverted, private?, at, by, via, note?}], trees{<tree>: {head, approved?, approved_at?, approved_by?, via?}}, notes[{id: "cn01", tree?, node?, text, by, via, to?, status, at, replies[]}], log[{at, by, via, act, tree?, node?, detail?}]}`: append-only (a node never changes except the director's `choice`; every act is logged); `identity_sheet` = the approved identity image. Catalogue paths (`catalog/...`) are relative to the workbench folder. Locations and props (stage 5) carry the same `base` and `iter` (trees `"base"` and `"variant:<id>"`, node kinds base/edit/variant, notes `"an01"`) and `variants[{id, name, axes{angle?, tod?, weather?} (location) \| {angle?, state?} (prop), notes, images[], status: draft/review/approved, from?: page/agent, scenes?[] (the agent's proposal), breakdown?}]`; `sheet` = the approved base image. Every asset may carry `uses{<scene id>: {variant: <variant / look id> \| null (the base / identity), by, via: "page", at, note?}}`: the variant each scene needs (the director's pick; without one, the variant the agent proposed for that scene, else the base). Logic: `js/assets.js` (shared), `js/characters.js` (the stage-4 names) |
-| `notes.json` | v2, ONE list for every stage and the timeline: `{v: 2, rev, round, notes[{id, target{stage: lyrics/script/breakdown/characters/scenery/storyboard/final/timeline, kind, id, w?, quote?, t?, pin?{x, y}, line?, scene?}, text, by, via: page/agent/import, status: open/absorbed/dismissed, round, replies[{id, text, by, via, at}], absorbed_in, created, to?: "agent", ask?: request/fill_gaps/extract/storyboard, gaps?, version?, marker?, about?, legacy?{store, id}}], legacy_seen[]}`. Kinds per stage: lyrics stage/section/line (+ `w`, `quote`); script stage/scene/beat (`"sc02/b1"`); breakdown stage/item/scene; characters / scenery stage/asset/tree (`"ada/look:x"`)/node (`"ada/n03"`, + `pin`)/use (`"ada/sc02"`); storyboard stage/scene/shot; final stage/shot; timeline time (`t` ms). Shapes and logic: `js/notes.js`. **Migration**: on its first read the server (or the page, on a static host) reads the old stores into it without loss: notes.json v1 `{rev, notes[{id, t, line_id, by, text, status, at, about?, reply_to?}]}` (kept as `notes.v1.json`; a `reply_to` note becomes a reply), and the `notes` of `lyrics.json`, `scenes.json`, `breakdown.json`, `storyboard.json` and each entity's `iter.notes`; those files are never written for notes again (a note added to one later is imported once; `legacy_seen` keeps a deleted one from coming back) |
+| `notes.json` | v2, ONE list for every stage and the timeline: `{v: 2, rev, round, notes[{id, target{stage: lyrics/script/breakdown/characters/scenery/storyboard/final/timeline, kind, id, w?, quote?, t?, pin?{x, y}, line?, scene?}, text, by, via: page/agent/import, status: open/absorbed/dismissed, round, replies[{id, text, by, via, at}], interpretation? (E10: the agent's reading, see Security), absorbed_in, created, to?: "agent", ask?: request/fill_gaps/extract/storyboard, gaps?, version?, marker?, about?, legacy?{store, id}}], legacy_seen[]}`. Kinds per stage: lyrics stage/section/line (+ `w`, `quote`); script stage/scene/beat (`"sc02/b1"`); breakdown stage/item/scene; characters / scenery stage/asset/tree (`"ada/look:x"`)/node (`"ada/n03"`, + `pin`)/use (`"ada/sc02"`); storyboard stage/scene/shot; final stage/shot; timeline time (`t` ms). Shapes and logic: `js/notes.js`. **Migration**: on its first read the server (or the page, on a static host) reads the old stores into it without loss: notes.json v1 `{rev, notes[{id, t, line_id, by, text, status, at, about?, reply_to?}]}` (kept as `notes.v1.json`; a `reply_to` note becomes a reply), and the `notes` of `lyrics.json`, `scenes.json`, `breakdown.json`, `storyboard.json` and each entity's `iter.notes`; those files are never written for notes again (a note added to one later is imported once; `legacy_seen` keeps a deleted one from coming back) |
 | `approvals.json` | `{rev, states[], items:{"<kind>:<id>": {state, by, at, why?, comment?}}}`; kinds: `shot`, `use`, `job`, `script`, `character`, `location`, `prop` |
 | `costs.json` | `{cap_usd, fal_total_usd, items[{id, t, usd, tool, date, request?, via?, job?, take?, note?}], pre_production[], ledger[]}`; `project.json` `falgen` (a folder inside the media base, read only) adds its spent.json / LEDGER.md rows to `costs_get` (deduplicated by job) |
 | `peaks/<id>.json` | `{bin_ms:5, n, scale, min, max}`: min/max per 5 ms bin, int8 (value/127*scale), base64; ~140 KB each |
@@ -466,7 +481,7 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `project.json` | `{title, created, from?}` |
 | `stages.json` | `{rev, stages[{id: lyrics/script/breakdown/characters/scenery/storyboard/final, status: empty/in_progress/needs_you/done, done_by?, via?, updated?, updated_by?, blockers[], note?}]}`: the guided flow (shared with the page; only the page sets `done`, stamped `done_by: "director", via: "page"`); missing = derived (content = in progress, never done); `stages_get` adds `shown` / `content` / `changed`, computed from the files (js/flow.js `stagesView`) |
 | `lyrics.json` | `{rev, current: "v3", seq, versions[{id, n, created, by, via, message, from?, sections[{id, label, lines[{id, text, t?}]}]}], notes[{id, line, w: [first, last word] \| null, quote, text, by, via, to?: "agent", kind?, status, at, version, replies[{id, text, by, via, at}]}]}`: stage 1. Versions are immutable (a save appends one and moves `current`; the server keeps its copy of every saved version); line ids are stable across versions and are the `song.json` line ids (a missing file reads as v1 derived from `song.json`). The server re-syncs `song.json` lines on every new current version |
-| `scenes.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, scenes[{id: "sc03", t0, t1, title, text, line_ids[], beats[{id: "b1", t, text}], sketches[ids]}]}], states{<scene>: {status: draft/needs_you/ok, by, via, at}}, notes[{id: "sn01", scene \| null, beat?, text, by, via, to?: "agent", kind?: request/fill_gaps, gaps?, status, at, version, replies[]}], intake{<question>: {text, by, via, at, asked?}}}`: stage 2, the script draft (shared with the page). Versions are immutable (a save appends; restore copies); statuses and intake answers live outside them; only the page sets a scene `ok`. A missing file reads as v1 derived from `script.json` (`stages` -> scenes, `lines` -> beats), which is never rewritten. Shapes and logic: `js/scenes.js` |
+| `scenes.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, scenes[{id: "sc03", t0, t1, title, text, line_ids[], beats[{id: "b1", t, text}], sketches[ids]}]}], states{<scene>: {status: draft/needs_you/ok, by, via, at}}, notes[{id: "sn01", scene \| null, beat?, text, by, via, to?: "agent", kind?: request/fill_gaps, gaps?, status, at, version, replies[]}], intake{<question>: {text, by, via, at, asked?, interpretation?}}}`: stage 2, the script draft (shared with the page). Versions are immutable (a save appends; restore copies); statuses and intake answers live outside them; only the page sets a scene `ok`. A missing file reads as v1 derived from `script.json` (`stages` -> scenes, `lines` -> beats), which is never rewritten. Shapes and logic: `js/scenes.js` |
 | `breakdown.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, script?, items[{id: "bi03", kind: character/location/prop/wardrobe/fx, name, description, links[{scene, beats[], note?}], source: agent/director, aliases?, for? (wardrobe: the character item), dropped?}]}], states{<item>: {status: draft/review/ok, entity_id?, look_id?, by, via, at}}, notes[{id: "bn01", item \| null, scene?, text, by, via, to?: "agent", kind?: request/extract, status, at, version, replies[]}]}`: stage 3, the breakdown (shared with the page). Versions are immutable (a save appends; restore copies); statuses and entity links live outside them; only the page sets an item `ok` or links it to an entity ("Create entity": a draft entity in `entities/`, or a look on a character). Links name scene / beat ids of `scenes.json`. Shapes and logic: `js/breakdown.js` |
 | `storyboard.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, script?, shots[{id: "sh03", scene, t0, t1, kind: wide/medium/close/insert/performance/xp-desktop/…, title, text, camera, sketch, beats[], cast[], locations[], props[], variants{<entity>: <variant / look> \| null}, gen: still/video/null, clips[], thumb?, section?, clip?, lyrics?[{line, w?, where}] (the lyric gate, E2: page only)}]}], notes[{id: "sbn01", shot, scene?, text, by, via, to?: "agent", kind?: request/storyboard/fill_gaps, gaps?, status, at, version, replies[]}]}`: stage 6, the storyboard. A version is immutable (a save appends one); the shots of a scene tile it; the variant each asset needs is the scene's (entity `uses`) unless `variants` overrides it. The shot's approval is `approvals.json` `shot:<id>`. Missing = v1 derived from `shots.json` (never rewritten; its readers keep working). Logic: `js/storyboard.js` |
 | `takes.json` | the agent's take proposals (the server's; the page reads it): `{v: 1, rev, proposals[{id: "tp03", shot, request, job, take, file, media, kind, in_ms, out_ms, why, by, via: "agent", at, status: open/picked/dismissed}]}`. The pick itself is the storyboard shot's `clip{request, take, file, media, kind, in_ms, out_ms, note, alt[{take, file?, t, note}], by, via: "page", at, proposal?}` (written only by the page's `take_act`, carried forward by every other save) |
@@ -718,6 +733,14 @@ small files are served in one read so no handle stays open.
   or another shot's take: 400 / 404), with 0 <= in < out <= the take's duration (a still: no range) and alternatives inside
   the song; request / take / kind come from the media entry. A page save of `storyboard.json` keeps the server's picks and
   the agent's `shots_update` ignores `clip`; `takes.json` is not a page save.
+- Interpretations (E10, `lib/ops/interpret.mjs`): an intake answer or a note may carry `interpretation {text, by, via: "agent", at,
+  status: proposed | accepted | edited, agent_text?, reviewed?}`. `interpretation_set` (the agent) always writes via "agent", status
+  proposed, and never touches the verbatim text; an edited one is the director's (409). `interpretation_act` (accept / edit) is page
+  only (S9: the page token + this server's Origin + Sec-Fetch-Site; no MCP tool; 403 to curl, the agent token, the Origin or
+  Sec-Fetch-Site alone, cross-site, a forged Origin with the agent token, a claimed via "page" and offline). A save of `scenes.json`
+  or `notes.json` never writes one (the server keeps its copy). Rendered escaped.
+- Help › Connect Claude… (F9): `GET /api/connect` (local only) names the agent token's **file**; no response, page, copy button or
+  export ever carries a token's value (tools/security-test.mjs checks the endpoint, the dialog's text and HTML and what it copies).
 - The lyric gate (E2): accepting a proposal, adding or removing a surface (`surface_act`) is the page's act only (via "page" from
   this server's Origin; no MCP tool; 403 to the agent surface, a claimed via "page", a foreign Origin and offline). A surface and a
   `surface_propose` name a shot, a song line, a word range on it, a known kind (≤ 120 characters, no control characters) and words
@@ -882,7 +905,9 @@ line (30 % of the view).
   config; in the owner's production `project/gen/refs/*`, `character-lab/refs/*`) are crops of real photos. They are flagged `private`, shown only in the local page with a 🔒 badge, their thumbnails are
   `thumbs/priv_*`, `serve.mjs` serves them to localhost only, and every export goes through `scrub()` in
   `core/projects.js` (bundle, CSV, storyboard): no private path ever leaves the machine.
-- **Preview dock** (`core/dock.js`, P): bottom-right by default; drag the title to any corner, the grip resizes, ⧉
+- **Preview dock** (`core/dock.js`, P): **docked** at the right by default (F7): a full-height panel, and the page narrows to
+  make room (the timeline's columns re-fit, nothing is covered; the grip on its left edge sets its width); **⇥** floats it
+  bottom-right over the page instead (⇥ again docks it); floating, drag the title to any corner, the grip resizes, ⧉
   pops it out to `dock.html` (BroadcastChannel `wb-dock-<project>` keeps time, source and hover in sync; closing the
   window brings the dock back); geometry in localStorage. Modes: **film** (the render, exact seek on every playhead
   change, rate-nudged within a frame while playing), **hover** (after 220 ms over a shot, clip, cast chip, media cell

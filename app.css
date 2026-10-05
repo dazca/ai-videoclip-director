@@ -75,6 +75,7 @@ body.notop .tl .picker { right: 24px; }
 .tl .head .hb b:hover { color: var(--acc); }
 .tl .head .gut { position: absolute; right: -3px; top: 0; width: 5px; height: 100%; cursor: col-resize; z-index: 7; }
 .tl .head .gut:hover { background: var(--acc); opacity: .5; }
+.tl .head.last .gut { right: 0; }   /* the last column's handle stays inside the window (no sideways scroll) */
 .tl .head[data-col=ruler] .nm { color: var(--acc); font-variant-numeric: tabular-nums; }
 .tl .picker { position: absolute; top: 0; right: 10px; z-index: 9; height: 16px; width: 12px; padding: 0; border: 0; background: var(--bg2); color: var(--dim); cursor: pointer; font-size: 11px; line-height: 16px; }
 .tl[data-header=none] .picker, .tl[data-header=thin] .picker { opacity: .35; height: 10px; line-height: 10px; }
@@ -1520,3 +1521,52 @@ button.on { color: var(--acc); }
 .lypoem:not(.tmode) .lyl { min-height: calc(18px + var(--lyfill, 0px)); }
 .lypoem:not(.tmode) .lyhead { padding-top: calc(var(--lyfill, 0px) / 2); }
 .lysfk { flex: none; font-style: normal; font-size: 9.5px; line-height: 13px; margin-left: 4px; padding: 0 3px; color: #9db7d6; background: var(--bg3); }
+
+/* ---------------- F8: one stage bar (core/stagebar.js): fixed slots at the same x on every stage */
+.sgbar .sgname { flex: none; width: 92px; overflow: hidden; text-overflow: ellipsis; }
+.sgbar [data-slot=status] { flex: none; width: 128px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sgbar [data-slot=mark] { flex: none; width: 66px; }
+.sgbar [data-slot=primary] { flex: none; width: 106px; overflow: hidden; text-overflow: ellipsis; }   /* fixed: Ask the agent… and Send round sit at the same x on every stage */
+.sgbar [data-slot=round] { flex: none; }
+.sgbar [data-slot=primary]:disabled, .sgbar [data-slot=round]:disabled { opacity: .45; cursor: default; }
+.sgbar button.sgrnd { color: #f3d9a6; border-color: #6a5320; } .sgbar button.sgrnd.sec { color: var(--dim); border-color: var(--line); }
+.sgbar [data-slot=info] { flex: 1 1 auto; }
+.sgbar .sgtm.none { border: 0; }
+.sgbar .sgnv { flex: none; width: 86px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sgbar [data-slot=next] { text-align: right; }
+
+/* ---------------- a small modal dialog (core/dialog.js): Help › Connect Claude…, About */
+.wbdlgb { position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,.45); display: flex; align-items: flex-start; justify-content: center; padding-top: 10vh; }
+.wbdlg { width: 460px; max-width: calc(100vw - 32px); max-height: 80vh; display: flex; flex-direction: column; background: var(--bg2); border: 1px solid var(--line); box-shadow: 0 8px 28px rgba(0,0,0,.6); outline: none; }
+.wbdlg.wide { width: 720px; }
+.wbdlgh { flex: none; display: flex; height: 18px; line-height: 17px; padding: 0 6px; border-bottom: 1px solid var(--line); font-size: 11px; }
+.wbdlgh .sp { flex: 1; } .wbdlgh a { color: var(--dim); padding: 0 4px; } .wbdlgh a:hover { color: var(--fg); text-decoration: none; }
+.wbdlgc { overflow: auto; padding: 6px 8px 8px; font-size: 11.5px; }
+.cn-lead { margin: 0 0 6px; color: var(--dim); }
+.cnstep { margin: 0 0 7px; }
+.cnl { color: var(--fg); margin-bottom: 2px; }
+.cnrow { display: flex; gap: 1px; align-items: stretch; }
+.cncode { flex: 1; min-width: 0; font: 11px/15px Consolas, monospace; background: var(--bg); border: 1px solid var(--line); padding: 2px 5px; color: #d7e3f1; white-space: pre-wrap; word-break: break-all; user-select: all; }
+.cnrow button { flex: none; width: 52px; cursor: pointer; }
+.cnn { font-size: 10.5px; margin-top: 1px; }
+.cnstate { border-top: 1px solid var(--line2); padding-top: 5px; margin-top: 2px; }
+.cn-on { color: #8fd0a3; } .cn-off { color: #f0a090; }
+.cnfoot { display: flex; margin-top: 4px; font-size: 10.5px; } .cnfoot .sp { flex: 1; }
+.abt .abn { font-size: 13px; } .abt .abv { color: var(--acc); }
+.abtab { border-collapse: collapse; margin: 6px 0; } .abtab th { text-align: left; color: var(--dim); font-weight: normal; padding: 1px 10px 1px 0; vertical-align: top; } .abtab td { padding: 1px 0; }
+
+/* ---------------- E10: the agent's interpretation under the director's verbatim words (core/interp.js) */
+.itp { display: block; margin: 2px 0 1px; padding: 1px 0 1px 6px; box-shadow: inset 2px 0 0 #6d8fc0; background: #161c26; font-size: 10.5px; line-height: 13px; color: #b8c6da; }
+.itp .itph { display: flex; gap: 4px; align-items: baseline; }
+.itp .itph .sp { flex: 1; }
+.itp .itpw { color: #7f9cc4; font-size: 9.5px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.itp .itpt { display: block; font-style: italic; white-space: pre-wrap; }
+.itp b[data-itp] { flex: none; white-space: nowrap; font-weight: normal; font-size: 9.5px; cursor: pointer; color: #9cc4f0; padding: 0 3px; border: 1px solid #2c3a50; }
+.itp b[data-itp]:hover { color: #fff; border-color: #6d8fc0; }
+.itp.s-accepted { box-shadow: inset 2px 0 0 #3f8a5c; } .itp.s-accepted .itpw { color: #7fbf8f; }
+.itp.s-edited { box-shadow: inset 2px 0 0 var(--acc); background: #1d1a12; color: var(--fg); } .itp.s-edited .itpw { color: var(--acc); } .itp.s-edited .itpt { font-style: normal; }
+
+/* ---------------- F7: the preview dock docked at the right: the panes narrow to make room */
+body.docked #panes { margin-right: var(--dockw, 0px); }
+.dock.docked { box-shadow: none; border-width: 0 0 0 1px; }
+.dock.docked .grip { left: 0; top: 50%; width: 5px; height: 28px; cursor: ew-resize; transform: none; background: var(--line); }

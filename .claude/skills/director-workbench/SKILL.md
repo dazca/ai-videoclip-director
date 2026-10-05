@@ -10,6 +10,11 @@ project through the MCP tools (server `director-workbench`) or the JSON files in
 up live in their page. Read `CLAUDE.md` in the workbench folder (MCP resource `workbench://docs/claude`) for the file
 formats and how to add features.
 
+Not connected yet? The director's page shows the exact setup for their checkout: **Help › Connect Claude…** (the
+`claude mcp add workbench -- node <workbench>/mcp/server.mjs` line, where the agent token file is, and the quick test
+`node <workbench>/mcp/client.mjs status`). Never ask for the token's value and never paste it anywhere: the MCP server reads
+the file itself.
+
 ## Start of a session
 
 1. `status`: is the server up (live page) or are you on files only? Which project? How many pages are open?
@@ -143,7 +148,10 @@ your times (`t0` / `t1` ms on scenes, beats, shots) are what places them, so kee
    them (`events_get` lists them, accepted or not, and what is anchored to each).
 2. **Script** (stage 2, `scenes.json`): start from the **intake** (`intake_get`): ask the open questions in the
    conversation (mark them `intake_answer` `asked_in_chat: true`) and record the director's own words with
-   `intake_answer` (`by: "director"` when you relay them). Then draft **scenes** with `scenes_update` (each call is a
+   `intake_answer` (`by: "director"` when you relay them). What you **understand** from an answer (or a note) goes
+   NEXT to it, never into it: `interpretation_set {key | note, text}` ("warm but sad" -> "tungsten practicals against blue
+   window light; slow push-ins; no hard cuts in the verses"). The page shows it under the verbatim words as the agent's
+   reading; the director accepts or edits it there (you cannot; an edited one is theirs: 409). Then draft **scenes** with `scenes_update` (each call is a
    NEW version with a message): every scene bound to song time (`t0` < `t1`, `snap: "lines"` / `"bars"` /
    `"sections"` / `"events"`; a boundary that must land on a named event: `anchors: {t0?, t1?: "<event id>"}`), a title, a visual description, timed **beats** inside it, and sketch ids. `script_get` shows the
    scenes with their lyric lines, the **gaps** (unscripted ranges with the lines in them), coverage, notes and
@@ -295,7 +303,8 @@ theirs (403 to you).
 - Never edit timing by moving pixels: times are integer ms in the JSON; layout follows.
 - Never mark a stage done or edit `stages.json` / `lyrics.json` / `scenes.json` by hand to look like the director's
   (`via: "page"`): use the tools, which stamp your writes `via: "agent"`. Never mark a scene `ok`.
-- Never invent intake answers: record only what the director said.
+- Never invent intake answers: record only what the director said. Your reading goes in `interpretation_set`, never in the
+  answer or the note itself, and you never accept your own interpretation (only the director does, in the page).
 - Never mark a breakdown item `ok`, and never try to turn one into an entity yourself: set `review` and ask.
 - Never choose keep / branch / revert, approve an identity, a base, a look or a variant, pick the variant a scene
   uses, or write an asset's `iter` / `base` / `uses` by hand: those are the director's, in the page. Register only

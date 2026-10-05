@@ -20,6 +20,7 @@
 //   nc.render() / nc.place()  rebuild / re-align (the column watches the scroller, its rows and the store itself)
 import { store, esc, prefs, toast } from '../js/store.js';
 import * as N from '../js/notes.js';
+import { interpHtml } from './interp.js';   // E10: the agent's reading under a note's verbatim text
 
 const WB = () => window.WB;
 export const NC_MIN = 260, NC_MAX = 420;   // the Notes column's width: 25% of the stage, clamped
@@ -102,7 +103,7 @@ export class NotesColumn {
     const reps = (n.replies || []).map(x => `<div class="ncr ${x.via === 'agent' ? 'ag' : 'dr'}" title="${esc(`${x.via === 'agent' ? 'agent' : 'director'} · ${when(x.at)}`)}">${esc(x.text)}</div>`).join('');
     const replyEd = this.ed?.reply === n.id ? `<textarea class="nced rep" data-tok="${this.ed.tok}" rows="1" placeholder="reply (Enter saves, Esc cancels)" spellcheck="false"></textarea>` : '';
     return `<div class="ncn s-${st} ${ag ? 'ag' : 'dr'}${n.to === 'agent' ? ' ask' : ''}" data-nid="${esc(n.id)}" title="${esc(`${n.id} · ${ag ? `${n.by && n.by !== 'agent' ? n.by + ' · ' : ''}agent` : 'director'} · ${when(n.created)} · ${st}${n.round ? ' · round ' + n.round : ''}\n${N.targetLabel(n.target)}`)}">`
-      + `<span class="ncx">${acts}</span>${sub ? `<i class="ncs">${esc(sub)}</i>` : ''}${n.to === 'agent' ? '<i class="nca" title="an ask for the agent">→ agent</i>' : ''}${st !== 'open' ? `<i class="ncst">${st === 'absorbed' ? '✓' : '×'}</i>` : ''}<span class="ncb">${esc(n.text)}</span>${reps}${replyEd}</div>`;
+      + `<span class="ncx">${acts}</span>${sub ? `<i class="ncs">${esc(sub)}</i>` : ''}${n.to === 'agent' ? '<i class="nca" title="an ask for the agent">→ agent</i>' : ''}${st !== 'open' ? `<i class="ncst">${st === 'absorbed' ? '✓' : '×'}</i>` : ''}<span class="ncb">${esc(n.text)}</span>${interpHtml(n.interpretation, { note: n.id })}${reps}${replyEd}</div>`;
   }
   editorHtml(r) {
     const t = this.ed.target, opts = r.targets.length > 1 || !r.targets.some(x => keyOf(x) === keyOf(t)) ? [...(r.targets.some(x => keyOf(x) === keyOf(t)) ? [] : [t]), ...r.targets] : null;

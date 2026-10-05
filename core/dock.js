@@ -1,6 +1,8 @@
 // Preview dock (Part B, SPEC v2 section 7). A small box in a corner (bottom-right by default) that shows whatever is
 // relevant: the rendered film synced to the playhead (Film), the hovered/selected shot, clip at its in-point, image,
 // take comparison side by side, a character / location / prop sheet, or a media file. Pin keeps a source.
+// Docked by default (F7): a full-height panel at the right that narrows the panes (the timeline's columns re-fit, nothing
+// is covered); ⇥ floats it in a corner over the page (or drag its title), and docks it again.
 // Toggle P · drag the title to any corner · drag the grip to resize · ⧉ pops it out to its own window (dock.html),
 // kept in sync over a BroadcastChannel · geometry remembered in localStorage.
 //   WB.dock.open() / close() / toggle() / isOpen() / show(source) / el / body   (interface from Part A, kept)
@@ -117,17 +119,19 @@ export const dock = {
   source: null,          // shown/pinned source (null = film)
   hoverSrc: null,        // temporary (hover), wins unless pinned
   pinned: false, popped: null, shownSig: null, raf: 0, lastT: -1, lastPlaying: false,
-  geo: Object.assign({ corner: 'br', w: 400, h: 250 }, prefs.get('dockGeo', {})),
+  // docked (F7, the default): a full-height panel at the right; the panes narrow by its width (body.docked, --dockw), so it
+  // never covers the timeline's columns. Floating: a box in a corner over the page (drag the title; ⇥ docks it again)
+  geo: Object.assign({ corner: 'br', w: 400, h: 250, docked: true, dw: 360 }, prefs.get('dockGeo', {})),
 
   current() { return (!this.pinned && this.hoverSrc) || this.source || FILM; },
   mode() { const c = this.current(); return c.kind === 'film' ? 'film' : this.pinned ? 'pin' : 'hover'; },
   ensure() {
     if (this.el) return;
     const el = document.createElement('div'); el.className = 'dock' + (STANDALONE ? ' solo' : '');
-    el.innerHTML = `<div class="dh"><span class="dt" title="drag to another corner">preview</span><span class="dbt"><b data-x="film" title="Film: the render at the playhead">film</b><b data-x="pin" title="pin this source">pin</b>${STANDALONE ? '' : '<b data-x="pop" title="pop out to its own window">⧉</b><b data-x="close" title="P">×</b>'}</span></div><div class="db"></div>${STANDALONE ? '' : '<i class="grip" title="resize"></i>'}`;
+    el.innerHTML = `<div class="dh"><span class="dt" title="drag to another corner">preview</span><span class="dbt"><b data-x="film" title="Film: the render at the playhead">film</b><b data-x="pin" title="pin this source">pin</b>${STANDALONE ? '' : '<b data-x="dockmode" title="docked at the right: the columns narrow to make room (click: float it in a corner)">⇥</b><b data-x="pop" title="pop out to its own window">⧉</b><b data-x="close" title="P">×</b>'}</span></div><div class="db"></div>${STANDALONE ? '' : '<i class="grip" title="resize"></i>'}`;
     el.querySelector('.dbt').addEventListener('click', (e) => {
       const x = e.target.closest('[data-x]')?.dataset.x;
-      if (x === 'close') this.close(); if (x === 'film') this.film(); if (x === 'pin') this.pin(); if (x === 'pop') this.popout();
+      if (x === 'close') this.close(); if (x === 'film') this.film(); if (x === 'dockmode') this.setDocked(!this.geo.docked); if (x === 'pin') this.pin(); if (x === 'pop') this.popout();
     });
     this.el = el; this.body = el.querySelector('.db');
     if (!STANDALONE) { this.applyGeo(); this.wireDrag(); }
@@ -137,12 +141,13 @@ export const dock = {
   open() {
     if (this.popped && !this.popped.closed) { this.popped.focus(); return; }
     this.ensure(); if (!this.isOpen()) document.body.appendChild(this.el);
+    this.applyGeo();
     prefs.set('dock', true); this.render(true); this.loop();
     document.dispatchEvent(new CustomEvent('wb:dock', { detail: true }));
   },
   close() {
     if (this.popped && !this.popped.closed) { this.popped.close(); this.popped = null; }
-    this.el?.remove(); cancelAnimationFrame(this.raf); this.raf = 0; this.shownSig = null;
+    this.el?.remove(); cancelAnimationFrame(this.raf); this.raf = 0; this.shownSig = null; this.syncBody();
     prefs.set('dock', false); document.dispatchEvent(new CustomEvent('wb:dock', { detail: false }));
   },
   toggle() { (this.isOpen() || (this.popped && !this.popped.closed)) ? this.close() : this.open(); },
@@ -210,22 +215,43 @@ export const dock = {
 
   // ---- geometry: corner + size, drag the title to a corner, grip resizes
   applyGeo() {
+    if (STANDALONE || !this.el) return;
     const g = this.geo, st = this.el.style, top = document.body.classList.contains('notop') ? 0 : 18;
     st.left = st.right = st.top = st.bottom = '';
-    st.width = Math.max(200, Math.min(innerWidth - 20, g.w)) + 'px'; st.height = Math.max(120, Math.min(innerHeight - 40, g.h)) + 'px';
-    if (g.corner[0] === 't') st.top = top + 'px'; else st.bottom = '0px';
-    if (g.corner[1] === 'l') st.left = '0px'; else st.right = '0px';
-    this.el.dataset.corner = g.corner;
+    this.el.classList.toggle('docked', !!g.docked);
+    if (g.docked) {
+      const panes = document.getElementById('panes'), pt = panes ? Math.round(panes.getBoundingClientRect().top) : top;
+      st.width = Math.round(Math.max(200, Math.min(innerWidth * 0.5, g.dw || 360))) + 'px'; st.height = 'auto';
+      st.top = pt + 'px'; st.bottom = '0px'; st.right = '0px';
+      this.el.dataset.corner = 'dock';
+    } else {
+      st.width = Math.max(200, Math.min(innerWidth - 20, g.w)) + 'px'; st.height = Math.max(120, Math.min(innerHeight - 40, g.h)) + 'px';
+      if (g.corner[0] === 't') st.top = top + 'px'; else st.bottom = '0px';
+      if (g.corner[1] === 'l') st.left = '0px'; else st.right = '0px';
+      this.el.dataset.corner = g.corner;
+    }
+    const b = this.el.querySelector('[data-x=dockmode]'); if (b) { b.classList.toggle('on', !!g.docked); b.title = g.docked ? 'docked at the right: the columns narrow to make room (click: float it in a corner)' : 'floating over the page (click: dock it at the right, the columns narrow)'; }
+    this.syncBody();
   },
-  setCorner(c) { if (!CORNERS.includes(c)) return; this.geo.corner = c; prefs.set('dockGeo', this.geo); if (this.el) this.applyGeo(); },
+  // the panes make room for a docked, open dock (the timeline re-fits its columns through its ResizeObserver)
+  syncBody() {
+    const on = !STANDALONE && this.isOpen() && !!this.geo.docked;
+    document.body.classList.toggle('docked', on);
+    if (on) document.body.style.setProperty('--dockw', this.el.offsetWidth + 'px'); else document.body.style.removeProperty('--dockw');
+  },
+  setDocked(on) { this.geo.docked = !!on; prefs.set('dockGeo', this.geo); this.applyGeo(); document.dispatchEvent(new CustomEvent('wb:dock', { detail: this.isOpen() })); },
+  setCorner(c) { if (!CORNERS.includes(c)) return; this.geo.corner = c; this.geo.docked = false; prefs.set('dockGeo', this.geo); if (this.el) this.applyGeo(); },
   wireDrag() {
     const head = this.el.querySelector('.dt'), grip = this.el.querySelector('.grip');
     head.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return; e.preventDefault();
       const r = this.el.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
-      const move = (ev) => { const st = this.el.style; st.right = st.bottom = ''; st.left = (ev.clientX - dx) + 'px'; st.top = (ev.clientY - dy) + 'px'; };
+      const x0 = e.clientX, y0 = e.clientY;
+      const move = (ev) => {
+        if (this.geo.docked) { if (Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) < 8) return; this.geo.docked = false; this.el.classList.remove('docked'); this.syncBody(); this.el.style.width = Math.max(200, Math.min(innerWidth - 20, this.geo.w)) + 'px'; this.el.style.height = Math.max(120, Math.min(innerHeight - 40, this.geo.h)) + 'px'; } const st = this.el.style; st.right = st.bottom = ''; st.left = (ev.clientX - dx) + 'px'; st.top = (ev.clientY - dy) + 'px'; };
       const up = (ev) => {
         removeEventListener('pointermove', move); removeEventListener('pointerup', up);
+        if (this.geo.docked) return;   // a click on the title, not a drag: stays docked
         const cx = ev.clientX - dx + r.width / 2, cy = ev.clientY - dy + r.height / 2;
         this.setCorner((cy < innerHeight / 2 ? 't' : 'b') + (cx < innerWidth / 2 ? 'l' : 'r'));
       };
@@ -234,15 +260,17 @@ export const dock = {
     grip.addEventListener('pointerdown', (e) => {
       e.preventDefault(); const x0 = e.clientX, y0 = e.clientY, w0 = this.el.offsetWidth, h0 = this.el.offsetHeight, c = this.geo.corner;
       const move = (ev) => {
+        if (this.geo.docked) { this.geo.dw = w0 + x0 - ev.clientX; return this.applyGeo(); }
         this.geo.w = w0 + (c[1] === 'r' ? x0 - ev.clientX : ev.clientX - x0);
         this.geo.h = h0 + (c[0] === 'b' ? y0 - ev.clientY : ev.clientY - y0);
         this.applyGeo();
       };
-      const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); this.geo.w = this.el.offsetWidth; this.geo.h = this.el.offsetHeight; prefs.set('dockGeo', this.geo); };
+      const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); if (this.geo.docked) this.geo.dw = this.el.offsetWidth; else { this.geo.w = this.el.offsetWidth; this.geo.h = this.el.offsetHeight; } prefs.set('dockGeo', this.geo); };
       addEventListener('pointermove', move); addEventListener('pointerup', up);
     });
     addEventListener('resize', () => this.isOpen() && this.applyGeo());
     document.addEventListener('wb:topbar', () => this.isOpen() && this.applyGeo());
+    document.addEventListener('wb:rail', () => this.isOpen() && this.applyGeo());
   },
 
   // ---- pop-out: dock.html in its own window, synced over BroadcastChannel (time, source, hover)
@@ -251,7 +279,7 @@ export const dock = {
     const w = window.open(`dock.html?project=${encodeURIComponent(PROJECT)}`, 'wb-dock-' + PROJECT, `popup=yes,width=${g.w},height=${g.h}`);
     if (!w) return;
     this.popped = w;
-    this.el?.remove(); this.shownSig = null;
+    this.el?.remove(); this.shownSig = null; this.syncBody();
     const hello = () => this.post({ type: 'state', source: this.source, pinned: this.pinned, hover: this.hoverSrc, ...this.playhead() });
     setTimeout(hello, 400); setTimeout(hello, 1500);
     this.loop();

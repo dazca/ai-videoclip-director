@@ -265,4 +265,7 @@ export default {
   show() { S?.render(); },
   get ws() { return S; },
 };
-window.WB = Object.assign(window.WB || {}, { stageActions: { ...(window.WB?.stageActions || {}), final: { canSave: () => false, save: () => {}, canNote: () => !!S?.nc && WB().stages?.current() === 'final', note: () => S.nc.editCurrent() } } });
+window.WB = Object.assign(window.WB || {}, { stageActions: { ...(window.WB?.stageActions || {}), final: { canSave: () => false, save: () => {},
+  // F8: the stage bar's primary act on Final: Lock for render… (Unlock while locked); the panel's own button stays
+  primary: { get label() { return S?.view?.lock ? 'Unlock' : 'Lock for render…'; }, title: 'Lock for render: close a revision (the final snapshot) and lock the project (agents cannot change anything until you unlock)', can: () => !!S?.view, run: () => (S.view.lock ? S.unlock() : S.askLock()) },
+  canNote: () => !!S?.nc && WB().stages?.current() === 'final', note: () => S.nc.editCurrent() } } });

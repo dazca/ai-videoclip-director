@@ -198,8 +198,8 @@ export async function verifyTimeMode({ browser, OUT }) {
     const sh = await call('shots_update', { upsert: [{ id: 's1-intro', t1: 2000 }, { t0: 2000, t1: 4000, kind: 'insert', title: 'boot screen', text: 'CRT boot text scrolls line after line', camera: 'static' },
       { id: 's5-outro', t1: 19000 }, { t0: 19000, t1: 20000, kind: 'insert', title: 'fade', text: 'the screen fades to a dot and the tone stops', camera: 'static' }], message: 'v19: short shots' });
     if (sh.status !== 200) throw new Error('shots_update ' + sh.status + ' ' + JSON.stringify(sh.body));
-    await pg.setViewport({ width: 1280, height: 800, deviceScaleFactor: 1 });
-    await pg.evaluate(() => { const tl = window.WB.timeline; tl.pxPerSec = 16; tl.relayout(); tl.scrollToTime(0); });
+    await pg.setViewport({ width: 1280, height: 420, deviceScaleFactor: 1 });   // F7: a short song fills the window: a low window gives the short axis (~16 px/s)
+    await pg.evaluate(() => { const tl = window.WB.timeline; tl.pxPerSec = 16; tl.fill = false; tl.relayout(); tl.scrollToTime(0); });   // a fixed short axis (F7: no fill)
     await open('storyboard'); await until(() => document.querySelectorAll('.sblist .sbcard.tmsub').length >= 6); await frames(4); await wait(300);
     const sbs = await pg.evaluate(() => {
       const vis = (e) => e.offsetParent !== null && getComputedStyle(e).display !== 'none';
