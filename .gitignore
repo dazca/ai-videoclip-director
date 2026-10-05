@@ -38,3 +38,6 @@ npm-debug.log*
 Thumbs.db
 desktop.ini
 .claude/worktrees/
+
+# composition data exports (E9: exporters/composition-data.mjs), made on demand
+data/**/exports/

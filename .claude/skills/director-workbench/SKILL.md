@@ -82,6 +82,13 @@ another, with in / out, a note and alternatives); the pick lands on the storyboa
 You never pick (no tool) and never write `clip` (`shots_update` ignores it and keeps theirs). An imported file is a take
 once it is linked to the shot (`media_update {id, shots: ["sh03"]}`). Final's checklist counts the shots with a pick.
 
+**The picks for the composition** (E9). When the director wants the render to follow the picks, `composition_export`
+(`{dry_run: true}` first to see the counts; `map` rules `{from, to}` turn workbench media paths into the composition's,
+e.g. `project/gen/out/` -> `assets/world/`) writes `data/<project>/exports/composition/edl.json` and nothing else (also while
+locked). Tell the director how many shots are picked and which are placeholders (unpicked / private / missing / unmapped).
+The composition reads it with `exporters/composition-data/reader.js`; never edit the composition's own files to adopt it
+unless the director asks (docs/COMPOSITION_ROUNDTRIP.md has the proposal).
+
 **Identity checks** (D7, free). A character's `constants[]` (D2) are the details that must stay identical ("orange starburst
 clip above the LEFT ear", "cyan jaw seam"); the ticked ones are its checklist. The director keeps them in the Characters stage
 (Identity tab, "Constants"); you may propose them with `entity_upsert {kind: "character", id, fields: {constants: [{text, check,

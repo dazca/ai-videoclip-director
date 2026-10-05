@@ -1031,7 +1031,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
 
   // a stale server: a copy of the code where lib/ops/core.mjs differs (it does not know media_update) on its own port
   const OLD = path.join(TMP, 'oldcode'), P2 = PORT + 1;
-  for (const p of ['serve.mjs', 'index.html', 'dock.html', 'app.js', 'app.css', 'lib', 'generators', 'js', 'tabs', 'core', 'templates']) fs.cpSync(path.join(WB, p), path.join(OLD, p), { recursive: true });
+  for (const p of ['serve.mjs', 'index.html', 'dock.html', 'app.js', 'app.css', 'lib', 'generators', 'js', 'tabs', 'core', 'templates', 'exporters/composition-data.mjs']) fs.cpSync(path.join(WB, p), path.join(OLD, p), { recursive: true });
   const sf = path.join(OLD, 'lib', 'ops', 'core.mjs'); fs.writeFileSync(sf, fs.readFileSync(sf, 'utf8').replace('  media_update(p, {', '  media_update_was(p, {'));
   const old = spawn(process.execPath, [path.join(OLD, 'serve.mjs'), String(P2)], { stdio: 'pipe', env: process.env });
   try {
@@ -1648,6 +1648,40 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
     { k1: k1.error || k1.badge, k2: k2.error || k2.badge, kBad: kBad.error?.slice(0, 80), mid, ask: asks()[0]?.status, latest: g2.latest });
 }
 // ==================== 23. (D7) identity checks + (D2) constants: END ====================
+// ==================== 24. (E9) composition data export: BEGIN ====================
+// On its own project copy (mcp-comp): exporters/composition-data.mjs, lib/ops/composition.mjs, mcp/tools/composition.mjs, the
+// reader (exporters/composition-data/reader.js). composition_export writes exports/<out> only (the project's files unchanged),
+// placeholders before a pick, the picked take with in / out and the mapped file after the page's pick, the same bytes twice
+// (changed: false, the checksum), the reader resolving a song time, out / map paths that leave exports/ refused (400).
+{
+  const CP = 'mcp-comp', CD = path.join(DATA, CP);
+  S.duplicateProject(PROJECT, CP, true);
+  const pageOp = (name, body = {}) => post(`/api/op/${name}?project=${CP}`, body, { origin: URL_ });
+  const sha = (f) => { try { return crypto.createHash('sha1').update(fs.readFileSync(path.join(CD, f))).digest('hex'); } catch (e) { return null; } };
+  const EF = path.join(CD, 'exports', 'composition', 'edl.json'), edl = () => JSON.parse(fs.readFileSync(EF, 'utf8'));
+  const tools = (await mcp.listTools()).tools.map(t => t.name);
+  const e0 = await call(mcp, 'composition_export', { project: CP }), d0 = edl();
+  const pk = await pageOp('take_act', { act: 'pick', shot: 's2-wall', media: 'C1_1', in_ms: 500, out_ms: 1500 });
+  const FILES = ['approvals.json', 'requests.json', 'storyboard.json', 'takes.json', 'media.json', 'settings.json', 'notes.json'], before = FILES.map(sha);
+  const MAP = [{ from: 'media/clip/', to: 'assets/world/' }, { from: '', to: 'assets/' }];
+  const e1 = await call(mcp, 'composition_export', { project: CP, map: MAP }), d1 = edl(), e2 = await call(mcp, 'composition_export', { project: CP, map: MAP });
+  const after = FILES.map(sha), sw = d1.shots.find(s => s.id === 's2-wall');
+  const { checksumOf } = await import('../exporters/composition-data.mjs');
+  const R = createRequire(import.meta.url)('../exporters/composition-data/reader.js').from(d1), r = R.at(4200), rIntro = R.at(1000);
+  check('composition_export: before a pick every shot is a placeholder ("unpicked"); after the page\'s pick s2-wall carries the take (file mapped to assets/world/C1_1.mp4, source, take 1, in 500 / out 1500); the song anchors (bpm, beats, sections); the same picks again = the same bytes (changed false, same checksum = sha256 of the body); only exports/ is written; the reader resolves t = 4.2 s to C1_1 at 0.7 s',
+    tools.includes('composition_export') && !e0.error && d0.format === 'director-workbench/composition-edl' && d0.version === 1 && d0.shots.every(s => s.status === 'placeholder' && s.placeholder.reason === 'unpicked')
+    && pk.status === 200 && !e1.error && e1.changed === true && sw?.status === 'picked' && sw.take.file === 'assets/world/C1_1.mp4' && sw.take.source === 'media/clip/C1_1.mp4' && sw.take.take === 1 && sw.take.in_ms === 500 && sw.take.out_ms === 1500
+    && d1.song.bpm === 120 && d1.song.first_beat_ms === 0 && d1.song.sections.length > 0 && d1.checksum === checksumOf(d1) && e2.changed === false && e2.checksum === e1.checksum
+    && JSON.stringify(before) === JSON.stringify(after) && r?.shot === 's2-wall' && r.file === 'assets/world/C1_1.mp4' && r.media_ms === 700 && rIntro?.status === 'placeholder',
+    { e0: e0.error || e0.counts, e1: e1.error || e1.counts, sw, r, same: e2.changed === false });
+  const outs = ['../evil.json', '..\\evil.json', '/evil.json', 'C:/evil.json', 'a/../../evil.json', './edl.json', 'a//b.json', 'edl.txt', 'composition/..'];
+  const bad = await Promise.all(outs.map(out => call(mcp, 'composition_export', { project: CP, out })));
+  const badMap = await call(mcp, 'composition_export', { project: CP, map: [{ from: '', to: '../../up/' }] }), badMap2 = await call(mcp, 'composition_export', { project: CP, map: [{ from: '', to: 'C:/x/' }] });
+  const stray = fs.readdirSync(path.join(DATA)).concat(fs.readdirSync(CD)).filter(f => /evil/.test(f));
+  check('composition_export refuses an out that leaves exports/ ("..", a backslash, a leading slash, a drive, ".", an empty segment, not .json) and a map that leaves the composition (400); nothing is written outside',
+    bad.every(b => /error 400/.test(b.error || '')) && /error 400/.test(badMap.error || '') && /error 400/.test(badMap2.error || '') && !stray.length, { bad: bad.map(b => (b.error || 'OK').slice(0, 40)), stray });
+}
+// ==================== 24. (E9) composition data export: END ====================
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {
   // ---------------------------------------------------------------- clean up whatever happened

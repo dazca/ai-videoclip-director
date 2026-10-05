@@ -73,7 +73,8 @@ linked to the change) / `round_reply` / `round_finish`, and `revisions_get` (the
 of two); proposals: `proposals_add` (3 free choices on a scene, a shot, a lyric line, a look: SVG made with code, sanitised
 on the server, or a short text) / `proposals_get` (the sets, the director's picks and mix notes, the "3 more" asks); `final_get` (stage 7, read only: the ready-to-render checklist, everything not approved yet by stage with its cost,
 the costs against the cap, the lock); `takes_get` / `take_propose` (take selection: the takes of a shot or a request, and the agent's
-proposed take with in / out and why; the pick is the director's, in the page); `approvals_get` / `request_changes` (approving is the page's), `requests_list` /
+proposed take with in / out and why; the pick is the director's, in the page); `composition_export` (E9: the picks as `edl.json` for the
+HyperFrames composition; writes only that file); `approvals_get` / `request_changes` (approving is the page's), `requests_list` /
 proposed take with in / out and why; the pick is the director's, in the page); `check_add` / `checks_get` (D7 identity checks: the
 agent's vision check of a node or take against the character's approved identity and constants checklist; a badge for the director, never an
 approval or a pick); `approvals_get` / `approve` / `request_changes`, `requests_list` /
@@ -297,6 +298,11 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   **A/B** (the dock plays A and B side by side in lockstep over their ranges), unpick. The agent's proposals (◆, from
   `take_propose`) sit above the editor with a one-click **Pick**. The timeline **clips** column shows the pick (★ take,
   in–out) over its shot, and Final's checklist counts the shots with a picked take.
+- **Export composition data…** (File menu; E9, `core/compexport.js`): the picks as one JSON file for the HyperFrames
+  composition, `data/<project>/exports/composition/edl.json` (versioned, deterministic, with a checksum): per shot the picked
+  take (its file mapped under the composition's assets: one rule a line, `from => to`), in / out, the look per character,
+  placeholders for unpicked or private shots, and the song's timing anchors. The dialog shows how many shots are picked and
+  remembers the map. The composition reads it with `exporters/composition-data/reader.js`; see docs/COMPOSITION_ROUNDTRIP.md.
 - **Constants and identity checks** (D2 / D7; `js/checks.js`, `lib/ops/checks.mjs`, `core/checkbadge.js`): the Characters
   stage's Identity tab has a compact **Constants** list: the details that must stay identical in every image ("orange starburst
   clip above the LEFT ear", "cyan jaw seam"), one row each with a tick (on the identity checklist), a short name for the badge
@@ -726,6 +732,22 @@ node exporters/hyperframes-html/serve.mjs  <outDir>                             
 ```
 
 Details: `exporters/hyperframes-html/README.md`.
+
+### The way back: the picks as data for the composition (E9)
+
+```
+node exporters/composition-data.mjs --project <id> [--out composition/edl.json] [--map "project/gen/out/=assets/world/"] [--dry-run]
+```
+
+Writes `data/<project>/exports/<out>` only (also File › Export composition data… and the MCP tool `composition_export`):
+format `director-workbench/composition-edl` v1, every storyboard shot with its time range, clip-use ids, the picked take (file
+mapped under the composition, in / out) or a placeholder (`unpicked`, `private`, `missing`, `unmapped`), the alternatives, the
+look per character and the variant per location / prop, the song's timing anchors and a sha256 checksum. Private media is never
+written. A composition includes `exporters/composition-data/reader.js` (`<script src>`, no dependencies) and asks
+`WB_EDL.load("wb/edl.json").at(t)` or `.use("G05@20158", t)` for the file and its in-point: a pure function of time, so the
+render stays deterministic. Format, reader API and the (not applied) adoption proposal for the first film's `xp/world.js`:
+`docs/COMPOSITION_ROUNDTRIP.md`. Tested by `npm run verify` v22 (a test composition renders take A, then take B) and
+`tools/security-composition.mjs`.
 
 ## Extension API (for tab modules; full reference at the top of `core/commands.js`)
 
