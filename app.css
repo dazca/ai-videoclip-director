@@ -236,7 +236,27 @@ body.notop .tl .picker { right: 24px; }
 .settings button { line-height: 14px; cursor: pointer; }
 .settings button.cap { border-color: var(--acc); color: var(--acc); }
 .bad, .settings .kc.bad { color: #e08a8a; border-color: #8a3030; }
-.queue textarea { width: 340px; height: 18px; resize: vertical; font-size: 11.5px; line-height: 16px; padding: 0 3px; }
+.queue textarea { width: 340px; height: auto; min-height: 50px; resize: vertical; font-size: 11.5px; line-height: 15px; padding: 1px 3px; }
+.queue textarea[readonly] { color: var(--dim); }
+/* F3 + D3a: explicit Approve / Reject / Run per row, Run all approved, the selection, ref / output thumbnails, live progress */
+.queue .qacts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 3px 6px; border-bottom: 1px solid var(--line); font-size: 11.5px; }
+.queue .qacts button, .queue .qbtns button { height: 20px; padding: 0 8px; cursor: pointer; font-size: 11.5px; }
+.queue .qacts button[disabled] { opacity: .45; cursor: default; }
+.queue .qselt { color: var(--fg); font-weight: 600; }
+.queue td.qbtns { white-space: nowrap; } .queue td.qbtns > * { margin-right: 4px; vertical-align: middle; }
+.queue td.qbtns button.run { min-width: 82px; }
+.queue .qprog { color: #9cc4f0; display: inline-block; max-width: 380px; white-space: normal; word-break: break-all; } .queue .qwhy { color: #e08a8a; display: inline-block; max-width: 260px; white-space: normal; }
+.queue .qdone { color: #9ad09a; display: inline-block; max-width: 280px; white-space: normal; }
+.queue .qprog code { font-size: 10.5px; color: var(--fg); }
+.queue td.refs { max-width: 360px; }
+.queue .qthumb { display: inline-flex; flex-direction: column; align-items: center; width: 54px; margin: 0 2px 2px 0; vertical-align: top; font-size: 9.5px; color: var(--dim); text-decoration: none; overflow: hidden; }
+.queue .qthumb img { width: 52px; height: 40px; object-fit: cover; border: 1px solid var(--line); background: #000; }
+.queue .qthumb span { max-width: 54px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue .qthumb.out img { border-color: #4f8a4f; }
+.queue .qarrow { color: var(--dim); margin: 0 3px; vertical-align: top; line-height: 40px; }
+.queue tr.q-running td, .queue tr.q-queued td { background: #121a24; }
+.settings .gentbl select { height: 19px; }
+.settings .gentbl .ok { color: #9ad09a; } .settings .gentbl .no { color: #e08a8a; }
 .queue tr.sel { outline: 1px solid #6ea0e6; }
 .chip.s-archived { background: #222 !important; color: #777; }
 

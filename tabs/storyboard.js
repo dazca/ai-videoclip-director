@@ -227,7 +227,7 @@ class Board {
     if (this.reqs(id).some(r => OPEN_REQ.includes(r.status))) return toast(`${id} already has an open request: approve or reject it first`);
     const pr = this.proposal(s), q = pr.requests[0];
     const r = await store.addRequest({ kind: q.kind, target: q.target, prompt: q.prompt, refs: q.refs.filter(x => !x.startsWith('(')), est_cost: q.est_cost, extra: { tool: q.tool, est_why: q.why, shot: { id, gen: pr.gen } } });
-    toast(`draft request ${r.id}: ${q.kind.replace('shot-', '')} of ${id} · est ${usd(q.est_cost)}${pr.missing.length ? ` · ${nn(pr.missing.length, 'asset')} not approved yet` : ''} · approve it here, then the agent runs it`);
+    toast(`draft request ${r.id}: ${q.kind.replace('shot-', '')} of ${id} · est ${usd(q.est_cost)}${pr.missing.length ? ` · ${nn(pr.missing.length, 'asset')} not approved yet` : ''} · approve it here, then Run it (Review › Queue) or let the agent run it`);
   }
   approveReq(id) { return store.setRequest(id, { status: 'approved' }).then(() => toast(`request ${id} approved: the agent may run it now (MCP)`)); }
   rejectReq(id) { return store.setRequest(id, { status: 'rejected', why: 'rejected by the director' }).then(() => toast(`request ${id} rejected`)); }

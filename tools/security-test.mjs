@@ -26,6 +26,11 @@ const HAS_FFMPEG = spawnSync('ffmpeg', ['-version']).status === 0;
 fs.writeFileSync(path.join(TMP, 'config.json'), JSON.stringify({ media_roots: ['roots/'], private_media: '^faces/' }));   // agent_approvals off (the default)
 Object.assign(process.env, { WORKBENCH_DATA: DATA, WORKBENCH_MEDIA_BASE: MB, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: P });
 for (const k of ['WB_TOKEN', 'WB_HOST', 'WB_AGENT_APPROVALS', 'WB_ALLOW_REMOTE_OPS']) delete process.env[k];
+// the request runner (D3a) talks to a MOCK fal only (WB_FAL_BASE counts only with WB_TEST=1); the key is a sentinel
+const { startMockFal } = await import('./mock-fal.mjs');
+const FAL_KEY = `fal-sec-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+const FAL = await startMockFal({ key: FAL_KEY, polls: 1 });
+Object.assign(process.env, { WB_TEST: '1', WB_FAL_BASE: FAL.url, FAL_KEY, WB_RUN_POLL_MS: '30' });
 const S = await import('../lib/store.mjs');
 const { tinyPngB64 } = await import('./tiny-png.mjs');
 
@@ -41,6 +46,7 @@ async function start(args) {
   const port = await freePort();
   const c = spawn(process.execPath, [path.join(WB, 'serve.mjs'), String(port), ...args], { stdio: 'pipe', env: process.env });
   c.stderr.on('data', d => process.stderr.write('server: ' + d));
+  c.log = ''; c.stdout.on('data', d => { c.log += d; }); c.stderr.on('data', d => { c.log += d; });
   await new Promise((ok, bad) => { c.stdout.once('data', ok); c.once('exit', (x) => bad(new Error('server exited ' + x))); });
   const base = `http://localhost:${port}`;
   const token = /<meta name="wb-token" content="([^"]+)">/.exec(await (await fetch(`${base}/?project=${P}`)).text())?.[1];
@@ -87,6 +93,68 @@ try {
   const fileCsp = (await get('127.0.0.1', A.port, `/data/${P}/song.json`, { host: `localhost:${A.port}` })).headers;
   check('F01/F02 server side: CSP without inline script on the page, invalid ?project= redirected, sandbox + nosniff on files', scriptSrc.trim() === "'self'" && !inline.length && /frame-ancestors 'self'/.test(csp)
     && bad.status === 302 && bad.headers.location === `/?project=${P}` && /sandbox/.test(fileCsp['content-security-policy'] || '') && fileCsp['x-content-type-options'] === 'nosniff', { csp, inline: inline.length, bad: [bad.status, bad.headers.location] });
+
+  // ---------------------------------------------------------------- D3a: the request runner (mock fal; agent approvals off)
+  {
+    const bodies = [];
+    const opR = async (name, args) => { const r = await op(name, args); bodies.push(JSON.stringify(r.body)); return r; };
+    const capOf = () => readP('costs.json'); const setCap = (usd) => { const c = capOf(); c.cap_usd = usd; fs.writeFileSync(path.join(D, 'costs.json'), JSON.stringify(c)); };
+    setCap(50);
+    const waitStatus = async (id, sts, ms = 8000) => { const t0 = Date.now(); let r; while (Date.now() - t0 < ms) { r = readP('requests.json').items.find(x => x.id === id); if (sts.includes(r?.status)) return r; await wait(80); } return r; };
+    const q = (await opR('request_create', { kind: 'identity', prompt: 'sec runner: one image', est_cost: 0.12, tool: 'fal-ai/nano-banana-2/edit' })).body;
+    const s0 = FAL.stats.submits;
+    const runDraft = await opR('request_run', { ids: [q.id] });
+    const selfAp = await opR('request_update', { id: q.id, status: 'approved', director_approved: true, by: 'director' });
+    const selfQ = await opR('request_update', { id: q.id, status: 'queued' });
+    const hand = readP('requests.json'); hand.items.find(x => x.id === q.id).status = 'approved'; hand.rev++; fs.writeFileSync(path.join(D, 'requests.json'), JSON.stringify(hand));   // typed by hand: no recorded approval
+    const runHand = await opR('request_run', { ids: [q.id] });
+    check('D3a an agent cannot get a request run without the director: request_run refuses a draft, self-approval 403 (also with director_approved), a status typed by hand is refused; nothing reached fal',
+      runDraft.status === 200 && runDraft.body.started.length === 0 && /draft/.test(runDraft.body.refused[0].why) && selfAp.status === 403 && [403, 409].includes(selfQ.status)
+      && runHand.body?.started?.length === 0 && /no director approval/.test(runHand.body.refused?.[0]?.why || '') && FAL.stats.submits === s0,
+      { runDraft: runDraft.body?.refused, selfAp: selfAp.status, selfQ: selfQ.status, runHand: runHand.body?.refused });
+    const back = readP('requests.json'); back.items.find(x => x.id === q.id).status = 'draft'; back.rev++; fs.writeFileSync(path.join(D, 'requests.json'), JSON.stringify(back));
+    await pageSave('requests.json', (d) => { d.items.find(x => x.id === q.id).status = 'approved'; });   // the director, in the page
+    const dry = await opR('request_run', { ids: [q.id], dry_run: true });
+    const costs0 = JSON.stringify(readP('costs.json'));
+    check('D3a a dry run spends nothing: no fal call, costs.json byte-identical, the request still approved, no gen/ folder',
+      dry.body?.dry_run === true && dry.body.items[0].ok && FAL.stats.submits === s0 && JSON.stringify(readP('costs.json')) === costs0 && readP('requests.json').items.find(x => x.id === q.id).status === 'approved' && !fs.existsSync(path.join(D, 'gen', q.id)), dry.body?.items?.[0]);
+    const run = await opR('request_run', { ids: [q.id] });   // the agent surface runs an approved request (background)
+    const done = await waitStatus(q.id, ['done', 'failed']);
+    const costItems = readP('costs.json').items.filter(x => x.request === q.id || x.job === q.id || x.id === q.id);
+    check('D3a the agent surface runs an approved request: started, then done with one output and one cost item ($0.12, via runner); the runner never approves (its log has no approved entry of its own)',
+      run.body?.started?.length === 1 && done?.status === 'done' && done.outputs?.length === 1 && costItems.length === 1 && costItems[0].usd === 0.12 && FAL.stats.submits === s0 + 1
+      && done.log.filter(l => l.status === 'approved').every(l => l.via === 'page'), { run: run.body, status: done?.status, costItems });
+    // the cap: 0 blocks every paid run at run time; a dry run says it does not fit
+    const q2 = (await opR('request_create', { kind: 'identity', prompt: 'sec runner: capped', est_cost: 0.12, tool: 'fal-ai/nano-banana-2/edit' })).body;
+    await pageSave('requests.json', (d) => { d.items.find(x => x.id === q2.id).status = 'approved'; });
+    setCap(0);
+    const capDry = await opR('request_run', { ids: [q2.id], dry_run: true });
+    await opR('request_run', { ids: [q2.id] }); await wait(400);
+    const q2r = readP('requests.json').items.find(x => x.id === q2.id);
+    check('D3a the cap is enforced at run time (cap 0: refused 402, nothing called, still approved; the dry run says it does not fit)',
+      capDry.body?.items?.[0]?.cap?.fits === false && q2r.status === 'approved' && q2r.last_run?.status === 'refused' && /cap/.test(q2r.last_run.why) && FAL.stats.submits === s0 + 1, { dry: capDry.body?.items?.[0]?.cap, last: q2r.last_run });
+    setCap(50);
+    // the key: only to the queue / storage origins (a forged status_url gets nothing), never in a response, file or log
+    const fal = (await import('../generators/fal.mjs')).default;
+    let forged = null; try { await fal.poll({ status_url: 'http://evil.example/requests/x/status' }, { key: FAL_KEY }); } catch (e) { forged = e.message; }
+    const gi = await opR('generators_get', {}), st = await fetch(`${A.base}/api/status`).then(r => r.text());
+    bodies.push(st);
+    // WB_FAL_BASE is ignored without WB_TEST=1 (a stray env var cannot redirect the key); the key file must be outside the project
+    const child = (env, code) => spawnSync(process.execPath, ['--input-type=module', '-e', code], { cwd: WB, env: { ...process.env, ...env }, encoding: 'utf8' });
+    const base1 = child({ WB_TEST: '', WB_FAL_BASE: 'http://127.0.0.1:9' }, "const m = await import('./generators/fal.mjs'); console.log(m.QUEUE, m.STORAGE)").stdout.trim();
+    const kIn = path.join(D, 'fal.key'), kOut = path.join(TMP, 'outside-keys', 'fal.env');
+    put(kIn, `FAL_KEY=${FAL_KEY}-inproject`); put(kOut, `# my keys\nFAL_KEY=${FAL_KEY}-file\n`);
+    const cfgIn = path.join(TMP, 'cfg-in.json'), cfgOut = path.join(TMP, 'cfg-out.json');
+    fs.writeFileSync(cfgIn, JSON.stringify({ media_roots: ['roots/'], fal_key_file: kIn })); fs.writeFileSync(cfgOut, JSON.stringify({ media_roots: ['roots/'], fal_key_file: kOut }));
+    const info = (cfg) => child({ FAL_KEY: '', WORKBENCH_CONFIG: cfg }, `const S = await import('./lib/store.mjs'); console.log(JSON.stringify(S.generatorsInfo('${P}').fal_key))`);
+    const iIn = info(cfgIn), iOut = info(cfgOut);
+    fs.rmSync(kIn, { force: true });
+    const leaks = S.walk(D).filter(f => { try { return fs.readFileSync(path.join(D, f)).includes(FAL_KEY); } catch (e) { return false; } });
+    check('D3a the fal key: sent only to the fal queue / storage origin (a forged status_url is refused), never in a response (generators_get says where it came from only), a project file (job.json, requests, costs, media) or the server log; WB_FAL_BASE needs WB_TEST=1; a key file inside the project is refused, one outside works (and is not printed)',
+      /refusing to send the fal key/.test(forged || '') && gi.body?.fal_key?.found === true && !bodies.some(b => b.includes(FAL_KEY)) && !leaks.length && !A.c.log.includes(FAL_KEY)
+      && base1 === 'https://queue.fal.run https://rest.alpha.fal.ai' && /"found":false/.test(iIn.stdout) && /outside the workbench/.test(iIn.stdout) && /"found":true/.test(iOut.stdout) && /fal_key_file/.test(iOut.stdout) && !(iIn.stdout + iOut.stdout + iIn.stderr + iOut.stderr).includes(FAL_KEY)
+      && FAL.stats.keyOnCdn === 0, { forged, leaks, base1, iIn: iIn.stdout.trim() || iIn.stderr.slice(0, 200), iOut: iOut.stdout.trim() || iOut.stderr.slice(0, 200) });
+  }
 
   // ---------------------------------------------------------------- F14: kind / media_kind cannot leave the project
   const k1 = await op('media_add', { path: path.join(MB, 'outside/secret.txt'), kind: '../../x' });
@@ -604,7 +672,7 @@ try {
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {
   if (browser) await browser.close().catch(() => {});
-  A?.c.kill(); L?.c.kill(); await wait(300);
+  A?.c.kill(); L?.c.kill(); await FAL.close(); await wait(300);
   for (let i = 0; i < 5; i++) { try { fs.rmSync(TMP, { recursive: true, force: true }); break; } catch (e) { await wait(300); } }
 }
 console.log(`\n${n - failed}/${n} security checks passed`);

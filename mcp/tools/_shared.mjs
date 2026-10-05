@@ -89,6 +89,6 @@ export const pinsSchema = z.array(z.object({ n: z.number().optional(), x: z.numb
 // the one MCP server: every mcp/tools/<domain>.mjs registers its tools on it when imported
 export const mcp = new McpServer({ name: 'director-workbench', version: VERSION }, {
   instructions: 'Director Workbench: a time-synced view of a music video project (song, lyrics, script, shots, clips, characters/looks/locations/props, media, notes, approvals, a generation queue and a cost cap). '
-    + 'Start with `status`, then `song_get` / `timeline_query`. All times are integer ms. Never spend money on generation unless a request in the queue is APPROVED by the director (request_update moves it queued -> running -> done with outputs and actual cost). '
+    + 'Start with `status`, then `song_get` / `timeline_query`. All times are integer ms. Never spend money on generation unless a request in the queue is APPROVED by the director (request_run runs approved ones: dry_run first; it moves them queued -> running -> done with outputs and the actual cost). '
     + 'Use ui_focus to show the director what you are talking about in the open page. Read the resource workbench://docs/claude for the full workflow.',
 });

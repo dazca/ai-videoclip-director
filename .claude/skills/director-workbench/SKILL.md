@@ -65,8 +65,9 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
    text, the numbered **pins** ("necklace here, silver") and the sketch PNG / **mask** files, and what waits on whom
    (`to_run`, `to_register`, `waiting_for_director`). Every generation is a `request_create` DRAFT with `asset {type:
    "character", id, tree, from, kind: identity | edit | look}` (`char` is deprecated), refs (for an edit: the node image, the sketch PNG, the mask), the tool and
-   an honest `est_cost`; the director approves it in the page. Run only approved ones (`request_update` queued ->
-   running -> done with outputs and the actual cost), then `character_iteration_add {id, request}`: the image becomes a
+   an honest `est_cost`; the director approves it in the page. Run only approved ones (`request_run`, step 7: the
+   outputs join the tree as nodes by themselves; a run made outside the runner: `request_update` queued -> running ->
+   done with outputs and the actual cost, then `character_iteration_add {id, request}`): the image becomes a
    node; the director compares it with its parent and keeps, branches or reverts it, and approves the identity / a look
    (locks it), all in the page. A look starts from the approved identity; propose new costumes with `look_create`
    (status review). Answer the director's notes and asks with `character_note_add` (`reply_to`, `resolve`). Private
@@ -107,9 +108,18 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
    If `status` says the server is stale, ask for a restart.
    The director approves in Review > Queue (show it with `ui_focus` view "queue"). Only if the owner enabled
    `agent_approvals` may you pass `director_approved: true`, and only when they said so in the conversation.
-7. **Run** only approved requests: `request_update` queued -> running -> (call the provider) -> done with `outputs` and
-   `actual_cost_usd`; on failure rejected + `why`. Outputs become media automatically; attach them to uses with
-   `shot_update` (take, in_ms) and to entities with `entity_upsert`.
+7. **Run** only approved requests, with the workbench runner (the same one as the page's **Run** / **Run all approved**
+   buttons in Review > Queue): first `request_run {ids, dry_run: true}` and tell the director the plan (generator,
+   model, takes, estimate, cap); then `request_run {ids}` (returns at once; `wait_for {request, until: ["done",
+   "failed"]}`) or `request_run {ids, wait: true}`. It refuses drafts (you cannot approve), re-checks the cap, writes
+   `gen/<request>/<id>_<take>.png` + `job.json`, records the actual cost once, registers the media and adds the outputs
+   to the request's asset tree as nodes the director keeps or picks (`linked` on the request). A `failed` request (why)
+   can be run again: outputs that exist are skipped and a submitted job is polled, not paid twice. The generator per
+   kind is the director's (Settings > Generator: fal by default; "Open in another app" exports a prompt pack and the
+   request waits for its results; `generators_get`). The fal key is in the user's environment: never ask for it, print
+   it or write it anywhere. Video is not in the runner yet (D3b): run it outside and report it with `request_update`
+   queued -> running -> done with `outputs` and `actual_cost_usd` (or `failed` / rejected + `why`). From a shell:
+   `node <workbench>/tools/run.mjs --project <p> <ids> [--dry-run]`.
 8. **Review**: set `review`, pin a note explaining what changed, `ui_focus` with `preview` to show it. The director
    approves or requests changes; answer their notes with `note_resolve` + reply.
 9. **Render**: the final render is a media item of kind `render` and the song's `audio.render`; snapshot first.
@@ -117,7 +127,8 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
 ## Never
 
 - Never call a paid API (image, video, voice, music) without an APPROVED request whose `est_cost` fits the cap.
-  `costs_get` before proposing; the tools refuse queueing above the cap. Record the real cost when done.
+  `costs_get` before proposing; the tools refuse queueing above the cap. Record the real cost when done. Prefer
+  `request_run` (it enforces all of this) to calling a provider yourself.
 - Never approve on the director's behalf, never mark their notes resolved without doing what they asked.
 - Never touch PRIVATE files (crops of real photos, anything under a `private/` folder or flagged private) beyond
   reading them locally for the director; never copy them into exports, the demo, the template or a shared repo.

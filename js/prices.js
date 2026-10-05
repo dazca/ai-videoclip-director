@@ -46,3 +46,19 @@ export function priceRows({ date } = {}) {
   for (const [m, P] of Object.entries(PRICES)) for (const t of Object.keys(P.usd)) { const p = price(m, t, { date }); out.push({ model: m, name: P.name, endpoint: P.endpoint, tier: t, usd: p.usd, list_usd: P.usd[t], unit: P.unit, verified: P.verified, ...(p.promo_until ? { promo_until: p.promo_until } : {}), note: P.note }); }
   return out;
 }
+
+// which model a generation request asks for (the runner and the Queue read it): the recipe's model, else the tool /
+// endpoint it names, else nb2 (a shot-video kind: H3 Max)
+export function modelOf(req) {
+  const m = req?.recipe?.model; if (m && PRICES[m]) return m;
+  const t = String(req?.tool || '').toLowerCase();
+  for (const [k, P] of Object.entries(PRICES)) if (t && (t === P.endpoint || t === k)) return k;
+  if (/seedream/.test(t)) return 'seedream5';
+  if (/motion-control/.test(t)) return 'klingmc';
+  if (/kling/.test(t)) return 'kling3pro';
+  if (/minimax|h3/.test(t)) return 'h3max';
+  if (req?.kind === 'shot-video') return 'h3max';
+  return 'nb2';
+}
+// the generator kind a request needs (Settings > Generator picks one generator per kind): image, video or motion
+export const genKindOf = (req) => { const m = modelOf(req); return m === 'klingmc' ? 'motion' : PRICES[m].unit === 's' ? 'video' : 'image'; };

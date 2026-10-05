@@ -198,6 +198,8 @@ export async function verifyScenery({ browser, BASE, DATA, OUT, post, writeHeade
   const dawn = (await agent('variant_create', { type: 'location', id: 'the-pier', axes: { angle: 'wide', tod: 'dawn' }, scenes: ['sc04'] })).body;
   await click('.chrow[data-ent=the-pier]'); await click('.chtabs [data-tab=scenes]');
   await until(() => document.querySelectorAll('.asuse[data-scene]').length === 2);
+  // the page reloads the entity after the agent's write (SSE): wait for its proposal to show, not a fixed delay
+  await until(() => document.querySelector('.asuse[data-scene=sc04] select')?.value === 'wide-dawn');
   const before = await pg.evaluate(() => [...document.querySelectorAll('.asuse[data-scene]')].map(r => ({ s: r.dataset.scene, v: r.querySelector('select').value, who: r.querySelector('.who, .dim:not(.asut)')?.textContent })));
   await pg.select('.asusesel[data-scene=sc03]', 'reverse-night-rain');
   const E6 = await fileUntil('entities/locations/the-pier.json', (j) => j.uses?.sc03?.variant === 'reverse-night-rain');

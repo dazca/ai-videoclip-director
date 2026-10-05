@@ -1,7 +1,12 @@
-// Generation queue: data/<project>/requests.json. The page only writes DRAFT requests and approvals; the agent picks up
-// approved ones, sets queued/running, and writes back status done + outputs (or rejected). Cost cap shown on top.
-//   {id, kind, target, prompt, refs[], est_cost, status: draft|approved|queued|running|done|rejected, by, at, outputs?[],
-//    warnings?[] (request_create's: e.g. a look sheet with no approved identity), recipe? (the photoreal blocks)}
+// Generation queue: data/<project>/requests.json. The director decides here: Approve / Reject per row (or tick drafts:
+// Approve selected · $X), Unapprove, Back to draft. An approved request runs with Run · $X (or Run all approved (N) · $X):
+// the local server's runner (lib/run.mjs, POST /api/op/request_run), the same one an agent's request_run uses; its
+// progress arrives as SSE {run} (store.runs) and the row follows queued -> running -> done (outputs, the nodes it added)
+// or failed (why, Retry). The generator per kind is Settings > Generator ("Open in another app": Export prompt pack,
+// Copy prompt, Collect results). Cost cap shown on top.
+//   {id, kind, target, prompt, refs[], est_cost, takes?, status: draft|approved|queued|running|done|failed|rejected, by, at,
+//    outputs?[], warnings?[] (request_create's: e.g. a look sheet with no approved identity), recipe? (the photoreal
+//    blocks), generator?, linked?, handoff?, last_run?}
 // "+ New request": a draft request from the page. "Apply photoreal recipe" builds the prompt from editable blocks
 // (references + identity lock, subject + wardrobe, action, place, light, camera, texture, medium, the avoid guard) for
 // the chosen model (js/recipe.js, templates/photoreal_recipe.json, docs/PHOTOREAL.md); the estimate comes from the one
@@ -10,9 +15,8 @@ import { store, toast } from '../js/store.js';
 import { fmt } from '../js/timeline.js';
 import { esc, mediaAttr } from '../core/esc.js';
 import { buildRecipe, FIELDS, MODELS, FRAMINGS } from '../js/recipe.js';
-import { PRICES, estimateWith } from '../js/prices.js';
-const ORDER = ['draft', 'approved'];
-const CLS = { draft: '', approved: 's-approved', queued: 's-review', running: 's-review', done: 's-locked', rejected: 's-changes' };
+import { PRICES, estimateWith, genKindOf } from '../js/prices.js';
+const CLS = { draft: '', approved: 's-approved', queued: 's-review', running: 's-review', done: 's-locked', failed: 's-changes', rejected: 's-changes' };
 let RECIPE = null;
 const loadRecipe = async () => (RECIPE ||= await fetch('/templates/photoreal_recipe.json').then(r => (r.ok ? r.json() : {})).catch(() => ({})));
 
@@ -45,6 +49,28 @@ export default {
         ${F.recipe && F.built.negative_prompt ? `<div class="dim">negative prompt: ${esc(F.built.negative_prompt)}</div>` : ''}
         <div class="qfrow"><span>est <b>$${Number(e?.usd || 0).toFixed(2)}</b> <span class="dim">${esc(e?.why || '')}</span></span><span class="sp"></span><button data-q="add" class="pri">Add draft request</button></div>`;
     };
+    // the generator per kind (Settings > Generator; settings.json generators, default fal) and the runner's live progress
+    const genOf = (r) => (['draft', 'approved', 'failed'].includes(r.status) ? null : r.generator || r.handoff?.generator) || store.settings?.generators?.[genKindOf(r)] || 'fal';
+    const sel = new Set();   // ticked draft rows (Approve / Reject selected)
+    const money = (x) => `$${(Number(x) || 0).toFixed(2)}`;
+    const thumbs = (list, cls = '') => list.map(p => { const img = /\.(png|jpe?g|webp|gif)$/i.test(String(p)); return `<a class="qthumb ${cls}" href="${mediaAttr(p)}" target="_blank" title="${esc(p)}">${img ? `<img src="${mediaAttr(p)}" alt="" loading="lazy">` : ''}<span>${esc(String(p).split('/').pop())}</span></a>`; }).join('');
+    const PHASE = { running: 'started', upload: 'uploading refs', submit: 'submitted', queued: 'in the provider queue', retrying: 'retrying the status', take_done: 'take done', skip: 'output exists: skipped', take_failed: 'take failed', refused: 'refused', handed_off: 'pack exported' };
+    const progress = (r) => {
+      const x = store.runs?.[r.id]; if (!x) return r.status === 'queued' ? 'queued' : 'running…';
+      const tk = x.takes ? ` · take ${Math.min((x.take ?? 0) + 1, x.takes)}/${x.takes}` : '';
+      return `${x.phase === 'running' && x.s != null ? 'generating' : PHASE[x.phase] || x.phase}${x.s != null ? ` · ${x.s} s` : ''}${tk}${x.error || x.why ? ': ' + (x.error || x.why) : ''}`;
+    };
+    const actions = (r) => {
+      const gen = genOf(r), runLbl = gen === 'openwith' ? 'Export prompt pack' : `Run · ${money(r.est_cost)}`;
+      if (r.status === 'draft') return `<button data-x="approve" class="pri" title="approve: it may then run and spend up to its estimate">Approve</button><button data-x="reject">Reject</button>`;
+      if (r.status === 'approved') return `${r.last_run?.status === 'refused' ? `<span class="qwhy" title="${esc(r.last_run.why)}">last run refused: ${esc(r.last_run.why.slice(0, 120))}</span>` : ''}<button data-x="run" class="pri run" title="run it now with ${esc(gen)} (Settings › Generator); the cap is checked again">${runLbl}</button><button data-x="unapprove" title="back to draft">Unapprove</button><button data-x="reject">Reject</button>`;
+      if (r.status === 'queued' || (r.status === 'running' && !r.handoff)) return `<span class="qprog">⟳ ${esc(progress(r))}</span>`;
+      if (r.status === 'running' && r.handoff) return `<span class="qprog">handed off: pack in <code>${esc(r.handoff.pack || '')}</code>; save the images in <code>${esc(r.handoff.results || '')}</code></span><button data-x="copy">Copy prompt</button><button data-x="run" class="pri">Collect results</button>`;
+      if (r.status === 'failed') return `<span class="qwhy" title="${esc(r.why || '')}">✕ ${esc(String(r.why || 'failed').slice(0, 140))}</span><button data-x="run" class="pri" title="run again (outputs that exist are skipped; a submitted job is polled, not paid twice)">Retry · ${money(r.est_cost)}</button><button data-x="reject">Reject</button>`;
+      if (r.status === 'done') { const L = r.linked; return `<span class="qdone">✓ ${money(r.actual_cost_usd)} spent${L ? ` · ${L.nodes?.length ? `node${L.nodes.length > 1 ? 's' : ''} ${esc(L.nodes.join(', '))}` : ''}${L.proposals?.length ? ` proposed ${esc(L.proposals.join(', '))}` : ''} in ${esc(L.id)} ${esc(L.tree || '')}: keep or pick` : ''}</span>${L ? '<button data-x="stage" title="keep or pick them in the stage">Open in stage</button>' : ''}`; }
+      if (r.status === 'rejected') return `<button data-x="redraft">Back to draft</button>`;
+      return '';
+    };
     const render = () => {
       const items = store.requests?.items || [];
       const by = {}; for (const r of items) by[r.status] = (by[r.status] || 0) + 1;
@@ -52,20 +78,26 @@ export default {
       const pending = items.filter(r => ['approved', 'queued', 'running'].includes(r.status)).reduce((s, r) => s + (Number(r.est_cost) || 0), 0);
       const drafts = items.filter(r => r.status === 'draft').reduce((s, r) => s + (Number(r.est_cost) || 0), 0);
       const cap = Number(store.costs?.cap_usd) || 0, pct = cap ? Math.min(100, (spent + pending) / cap * 100) : 0;
+      const approved = items.filter(r => r.status === 'approved'), apUsd = approved.reduce((s, r) => s + (Number(r.est_cost) || 0), 0);
+      for (const id of [...sel]) if (!items.some(r => r.id === id && r.status === 'draft')) sel.delete(id);
+      const selUsd = items.filter(r => sel.has(r.id)).reduce((s, r) => s + (Number(r.est_cost) || 0), 0);
       $list.innerHTML = `<div class="bar">spent $${spent.toFixed(2)} + approved/queued $${pending.toFixed(2)} (drafts $${drafts.toFixed(2)}) of cap $${cap} <span class="dim">(all sources: Costs)</span>
         <div class="meter"><i style="width:${pct}%"></i></div>
-        ${['', 'draft', 'approved', 'queued', 'running', 'done', 'rejected'].map(s => `<a data-f="${s}" class="${s === filter ? 'picked' : ''}">${s || 'all'}${s ? ' ' + (by[s] || 0) : ' ' + items.length}</a>`).join(' · ')}
-        · <a data-q="new" class="qnew">+ New request</a>
-        <span class="dim"> · the agent runs approved requests only; right-click a shot / clip / cast chip / card to add one</span></div>
-        ${items.length ? `<table class="tbl"><tr><th>status</th><th>kind</th><th>target</th><th>prompt draft</th><th>$ est</th><th>refs / outputs</th><th>at</th><th></th></tr>
-        ${items.filter(r => !filter || r.status === filter).slice().reverse().map(r => { const t = timeOf(r.target); return `<tr data-id="${esc(r.id)}" data-sel="request:${esc(r.id)}" class="${(r.warnings || []).length ? 'warn' : ''}">
-          <td><span class="chip ${CLS[r.status] || ''}" data-x="cycle" title="click: draft ⇄ approved">${esc(r.status)}</span></td><td>${esc(r.kind)}${r.recipe ? ' <span class="qrec" title="built from the photoreal recipe (its blocks are stored with the request)">recipe</span>' : ''}</td>
+        ${['', 'draft', 'approved', 'queued', 'running', 'done', 'failed', 'rejected'].map(s => `<a data-f="${s}" class="${s === filter ? 'picked' : ''}">${s || 'all'}${s ? ' ' + (by[s] || 0) : ' ' + items.length}</a>`).join(' · ')}
+        · <a data-q="new" class="qnew">+ New request</a></div>
+        <div class="qacts"><button data-q="runall" class="pri"${approved.length ? '' : ' disabled'} title="run every approved request (up to 2 at once; the cap is checked for each)">Run all approved (${approved.length}) · ${money(apUsd)}</button>
+        ${sel.size ? `<span class="qselt">${sel.size} selected · ${money(selUsd)}</span><button data-q="approvesel" class="pri">Approve selected</button><button data-q="rejectsel">Reject selected</button>` : '<span class="dim">tick drafts to approve or reject several at once</span>'}
+        <span class="dim">· nothing runs or is paid until you approve it; Run uses the generator in Settings › Generator · right-click a shot / clip / cast chip / card to add a request</span></div>
+        ${items.length ? `<table class="tbl"><tr><th></th><th>status</th><th>kind</th><th>target</th><th>prompt</th><th>$ est</th><th>refs → outputs</th><th>at</th><th>actions</th></tr>
+        ${items.filter(r => !filter || r.status === filter).slice().reverse().map(r => { const t = timeOf(r.target); return `<tr data-id="${esc(r.id)}" data-sel="request:${esc(r.id)}" class="q-${esc(r.status)}${(r.warnings || []).length ? ' warn' : ''}">
+          <td>${r.status === 'draft' ? `<input type="checkbox" data-x="pick"${sel.has(r.id) ? ' checked' : ''} title="select">` : ''}</td>
+          <td><span class="chip ${CLS[r.status] || ''}">${esc(r.status)}</span></td><td>${esc(r.kind)}${r.recipe ? ' <span class="qrec" title="built from the photoreal recipe (its blocks are stored with the request)">recipe</span>' : ''}<div class="dim">${esc(genOf(r))}</div></td>
           <td>${t != null ? `<a data-t="${Number(t) || 0}">${esc(r.target)} ${fmt(t)}</a>` : esc(r.target || '')}</td>
-          <td><textarea data-x="prompt" rows="1" ${['draft', 'approved'].includes(r.status) ? '' : 'disabled'}>${esc(r.prompt)}</textarea>${(r.warnings || []).length ? `<div class="chreqw">${r.warnings.map(w => `<span>⚠ ${esc(w)}</span>`).join('')}</div>` : ''}</td>
-          <td><input data-x="cost" type="number" step="0.05" min="0" value="${Number(r.est_cost) || 0}" style="width:4.5em"></td>
-          <td class="refs">${(r.refs || []).map(p => `<a href="${mediaAttr(p)}" target="_blank">${esc(String(p).split('/').pop())}</a>`).join(' ')}${(r.outputs || []).map(p => ` <a class="picked" href="${mediaAttr(p)}" target="_blank">→ ${esc(String(p).split('/').pop())}</a>`).join('')}</td>
+          <td><textarea data-x="prompt" rows="3" ${['draft', 'approved'].includes(r.status) ? '' : 'readonly'}>${esc(r.prompt)}</textarea>${(r.warnings || []).length ? `<div class="chreqw">${r.warnings.map(w => `<span>⚠ ${esc(w)}</span>`).join('')}</div>` : ''}</td>
+          <td><input data-x="cost" type="number" step="0.01" min="0" value="${Number(r.est_cost) || 0}" style="width:4.5em"${['draft', 'approved'].includes(r.status) ? '' : ' disabled'}></td>
+          <td class="refs">${thumbs(r.refs || [])}${(r.outputs || []).length ? `<span class="qarrow">→</span>${thumbs(r.outputs, 'out')}` : ''}</td>
           <td class="dim">${esc((r.at || '').replace('T', ' ').slice(5, 16))}</td>
-          <td><button data-x="reject" title="reject">✕</button></td></tr>`; }).join('')}</table>` : '<p class="dim">no requests yet</p>'}`;
+          <td class="qbtns">${actions(r)}</td></tr>`; }).join('')}</table>` : '<p class="dim">no requests yet</p>'}`;
     };
     render();
     const addRequest = async () => {
@@ -78,8 +110,17 @@ export default {
         if (F.built.warnings.length) extra.warnings = F.built.warnings;
       }
       const r = await store.addRequest({ kind: F.kind.trim() || 'generate', target: F.target.trim() || null, prompt: F.prompt, refs, est_cost: Number(e?.usd || 0), extra });
-      toast(`draft request ${r.id} (${r.kind}) · est $${Number(r.est_cost).toFixed(2)} · approve it here, then the agent runs it`);
+      toast(`draft request ${r.id} (${r.kind}) · est $${Number(r.est_cost).toFixed(2)} · approve it, then Run it here (or let the agent run it)`);
       Object.assign(F, { open: false, prompt: '', recipe: false, fields: {}, blocks: {}, built: null }); renderForm();
+    };
+    // Run (one request) / Run all approved: the local server's runner (lib/run.mjs); progress comes back through its SSE
+    const run = async (ids) => {
+      try {
+        const j = await store.runRequests(ids, { all: !ids });
+        for (const x of j.refused || []) toast(`${x.id} not run: ${x.why}`);
+        if (j.started?.length) toast(`running ${j.started.map(x => x.id).join(', ')} · est $${(j.est_total_usd || 0).toFixed(2)}`);
+        else if (!(j.refused || []).length) toast('nothing to run');
+      } catch (er) { toast(`run failed: ${er.message}`); }
     };
     el.addEventListener('click', async (e) => {
       const q = e.target.closest('[data-q]')?.dataset.q;
@@ -90,12 +131,18 @@ export default {
       if (q === 'add') return addRequest();
       const f = e.target.closest('a[data-f]'); if (f) { filter = f.dataset.f; render(); return; }
       const a = e.target.closest('a[data-t]'); if (a) return ctx.goto(Number(a.dataset.t));
+      if (q === 'runall') return run(null);
+      if (q === 'approvesel' || q === 'rejectsel') { const ids = [...sel]; sel.clear(); for (const id of ids) await store.setRequest(id, { status: q === 'approvesel' ? 'approved' : 'rejected' }); toast(`${ids.length} request${ids.length > 1 ? 's' : ''} ${q === 'approvesel' ? 'approved' : 'rejected'}`); return; }
       const row = e.target.closest('tr[data-id]'); if (!row) return;
       const id = row.dataset.id, r = store.requests?.items?.find(x => x.id === id), x = e.target.dataset.x;
       if (!r) return;
-      if (x === 'cycle' && ORDER.includes(r.status)) store.setRequest(id, { status: ORDER[(ORDER.indexOf(r.status) + 1) % ORDER.length] });
-      else if (x === 'cycle' && r.status === 'rejected') store.setRequest(id, { status: 'draft' });
-      if (x === 'reject') store.setRequest(id, { status: 'rejected' });
+      if (x === 'pick') { if (e.target.checked) sel.add(id); else sel.delete(id); render(); return; }
+      if (x === 'approve') return store.setRequest(id, { status: 'approved' });
+      if (x === 'unapprove' || x === 'redraft') return store.setRequest(id, { status: 'draft' });
+      if (x === 'reject') return store.setRequest(id, { status: 'rejected', ...(r.status !== 'draft' ? { why: 'rejected by the director in Review > Queue' } : {}) });
+      if (x === 'run') return run([id]);
+      if (x === 'copy') { try { await navigator.clipboard.writeText(r.prompt || ''); toast('prompt copied: paste it in the other app'); } catch (er) { toast('copy failed: the prompt is in ' + (r.handoff?.pack || 'the pack') + '/prompt.txt'); } return; }
+      if (x === 'stage' && r.linked) { const L = r.linked; await window.WB.stages?.open(L.type === 'character' ? 'characters' : 'scenery'); (L.type === 'character' ? window.WB.characters : window.WB.scenery)?.open?.(L.id); return; }
       if (!x) window.WB.selection.set(['request:' + id]);
     });
     // the form: typing updates the state; a field or a block rebuilds the prompt (an edited block wins)
@@ -124,8 +171,10 @@ export default {
     // never re-render under the director's cursor (focused field, or mid-click); a skipped render runs once focus has
     // left the pane and the click is over, so the agent's status changes still show up
     let stale = false, down = false;
-    const flush = () => { if (stale && !down && !$list.contains(document.activeElement)) { stale = false; render(); } };
-    store.on((w) => { if (w !== 'requests' && w !== 'all') return; stale = true; flush(); });
+    // (a focused button or checkbox is no reason to wait: only a field being typed in is)
+    const typing = () => { const a = document.activeElement; return $list.contains(a) && a.matches('textarea, input:not([type=checkbox])'); };
+    const flush = () => { if (stale && !down && !typing()) { stale = false; render(); } };
+    store.on((w) => { if (!['requests', 'all', 'runs', 'settings', 'costs'].includes(w)) return; stale = true; flush(); });
     el.addEventListener('focusout', () => setTimeout(flush));
     $list.addEventListener('pointerdown', () => { down = true; });
     document.addEventListener('pointerup', () => { if (down) { down = false; setTimeout(flush); } }, true);

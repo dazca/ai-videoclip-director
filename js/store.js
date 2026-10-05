@@ -72,6 +72,7 @@ export const store = {
   project: PROJECT,
   song: null, events: null, energy: null, script: null, shots: null, uses: null, costs: null,
   notes: null, approvals: null, requests: null, overrides: null, settings: null, entities: [], media: [], mediaById: {}, mediaByPath: {}, peaks: {},
+  runs: {},                       // request id -> the runner's last progress event (SSE {run}), shown in the Queue
   listeners: new Set(),
   onMutate: null,                 // set by core/history.js: (entry) => void
   on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
@@ -107,7 +108,9 @@ export const store = {
     try { await this._reload(files); } catch (e) { if (retry) { await new Promise(r => setTimeout(r, 250)); return this.reload(files, retry - 1); } console.warn('reload failed', files, e); }
   },
   async _reload(files) {
-    if (files.includes('*')) files = [...files.filter(f => f !== '*'), ...Object.keys(WRITABLE)];   // unknown change: re-check the shared state
+    // unknown change (Windows dropped the names when its watch buffer overflowed): the lost events may have been any
+    // file (costs, media, an entity), so read everything again
+    if (files.includes('*')) { await this.loadAll(); this.emit('all'); return; }
     if (files.some(f => FULL.test(f))) { await this.loadAll(); this.emit('all'); return; }
     for (const file of files) {
       // our own saves come back here too: apply only when the file differs from what the page has (agent edit, restore)
@@ -125,9 +128,10 @@ export const store = {
       // after a reconnect (server restart) re-read everything: changes made while disconnected sent no event
       es.onopen = () => { if (opened) { this.reload(['song.json']); document.dispatchEvent(new CustomEvent('wb:reconnect')); } opened = true; };
       es.onmessage = (ev) => {
-        const { project, file, ui } = JSON.parse(ev.data);
+        const { project, file, ui, run } = JSON.parse(ev.data);
         if (project !== PROJECT && project !== '*') return;
         if (ui) { document.dispatchEvent(new CustomEvent('wb:ui', { detail: ui })); return; }   // live UI channel (an agent's ui_focus)
+        if (run) { this.runs[run.id] = run; this.emit('runs'); return; }   // the request runner's progress (lib/run.mjs)
         pending.add(file); clearTimeout(timer);
         timer = setTimeout(() => { const f = [...pending]; pending = new Set(); this.reload(f); }, 150);   // a restore touches many files: one reload
       };
@@ -163,7 +167,13 @@ export const store = {
   },
   editNote(id, text) { return this.mutate('notes.json', (d) => { const x = d.notes.find(n => n.id === id); if (x) x.text = text; }, { label: 'edit note ' + id }); },
   deleteNotes(ids) { return this.mutate('notes.json', (d) => { d.notes = d.notes.filter(n => !ids.includes(n.id)); }, { label: `delete ${ids.length} note(s)` }); },
-  // ---- generation requests (the page never calls paid APIs; the agent picks up approved ones)
+  // ---- generation requests (the page never calls a paid API itself: Run asks the local server's runner, lib/run.mjs,
+  // which runs only requests the director approved; an agent's request_run uses the same runner)
+  async runRequests(ids, { dry_run = false, all = false } = {}) {
+    const r = await postJSON('/api/op/request_run', { ...(all ? { all: true } : { ids }), dry_run, by: 'page' });
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j;
+  },
+  async generators() { const r = await postJSON('/api/op/generators_get', {}); return r.ok ? r.json() : null; },
   addRequest(r) {
     const id = `r${Date.now().toString(36)}`;
     const item = { id, kind: r.kind, target: r.target || null, prompt: r.prompt || '', refs: r.refs || [], est_cost: r.est_cost ?? 0, status: 'draft', by: 'director', at: nowIso(), ...(r.extra || {}) };

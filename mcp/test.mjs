@@ -40,6 +40,12 @@ for (const [f, t] of [['roots/a.txt', 'public'], ['refs/face.jpg', 'private ref'
 fs.writeFileSync(path.join(TMP, 'config.json'), JSON.stringify({ media_roots: ['roots/', 'refs/'], private_media: '^refs/', agent_approvals: true }));
 Object.assign(process.env, { WORKBENCH_DATA: DATA, WORKBENCH_MEDIA_BASE: MB, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: PROJECT });
 delete process.env.WB_TOKEN; delete process.env.WB_HOST; delete process.env.WB_AGENT_APPROVALS;
+// the request runner (section 15) talks to a MOCK fal only (tools/mock-fal.mjs; WB_FAL_BASE counts only with WB_TEST=1):
+// never the real one. The key is a random sentinel the test then greps for in every file, response and log.
+const { startMockFal } = await import('../tools/mock-fal.mjs');
+const FAL_KEY = `fal-test-${crypto.randomBytes(9).toString('hex')}`;
+const FAL = await startMockFal({ key: FAL_KEY, polls: 2 });
+Object.assign(process.env, { WB_TEST: '1', WB_FAL_BASE: FAL.url, FAL_KEY, WB_RUN_POLL_MS: '40' });
 const S = await import('../lib/store.mjs');   // after the env: the same data folder and config as the server
 
 const walk = (dir, rel = '') => { const out = []; for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) { const r = rel ? `${rel}/${e.name}` : e.name; if (e.isDirectory()) out.push(...walk(dir, r)); else out.push(r); } return out; };
@@ -54,6 +60,7 @@ try {
 // ---------------------------------------------------------------- the workbench server
 srv = spawn(process.execPath, [path.join(WB, 'serve.mjs'), String(PORT)], { stdio: 'pipe', env: process.env });
 srv.stderr.on('data', d => process.stderr.write('server: ' + d));
+let srvLog = ''; srv.stdout.on('data', d => { srvLog += d; }); srv.stderr.on('data', d => { srvLog += d; });
 await new Promise((ok, bad) => { srv.stdout.once('data', ok); srv.once('exit', (c) => bad(new Error('server exited ' + c))); });
 // the per-run write token, read the way the page and the MCP server get it: from the served page
 const TOKEN = /<meta name="wb-token" content="([^"]+)">/.exec(await (await fetch(`${URL_}/?project=${PROJECT}`)).text())?.[1];
@@ -114,7 +121,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     'script_get', 'scenes_update', 'scene_note_add', 'scene_note_resolve', 'intake_get', 'intake_answer', 'sketch_save', 'sketch_get', 'sketch_list',
     'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve', 'character_get', 'character_iteration_add', 'character_note_add', 'look_create',
     'asset_get', 'asset_iteration_add', 'asset_note_add', 'variant_create',
-    'storyboard_get', 'shots_update', 'shot_note_add', 'shot_note_resolve', 'gaps_get'];
+    'storyboard_get', 'shots_update', 'shot_note_add', 'shot_note_resolve', 'gaps_get', 'request_run', 'generators_get'];
   check('tools/list has every tool', EXPECT.every(t => tools.includes(t)), { count: tools.length, missing: EXPECT.filter(t => !tools.includes(t)) });
   const schemaOk = (await mcp.listTools()).tools.every(t => t.description?.length > 40 && t.inputSchema?.type === 'object');
   check('every tool has a description and a JSON schema', schemaOk);
@@ -822,7 +829,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
 
   // a stale server: a copy of the code where lib/ops/core.mjs differs (it does not know media_update) on its own port
   const OLD = path.join(TMP, 'oldcode'), P2 = PORT + 1;
-  for (const p of ['serve.mjs', 'index.html', 'dock.html', 'app.js', 'app.css', 'lib', 'js', 'tabs', 'core', 'templates']) fs.cpSync(path.join(WB, p), path.join(OLD, p), { recursive: true });
+  for (const p of ['serve.mjs', 'index.html', 'dock.html', 'app.js', 'app.css', 'lib', 'generators', 'js', 'tabs', 'core', 'templates']) fs.cpSync(path.join(WB, p), path.join(OLD, p), { recursive: true });
   const sf = path.join(OLD, 'lib', 'ops', 'core.mjs'); fs.writeFileSync(sf, fs.readFileSync(sf, 'utf8').replace('  media_update(p, {', '  media_update_was(p, {'));
   const old = spawn(process.execPath, [path.join(OLD, 'serve.mjs'), String(P2)], { stdio: 'pipe', env: process.env });
   try {
@@ -849,12 +856,119 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   check('mcp/client.mjs from another folder: costs_get prints JSON (exit 0); cost_record works as a runner hook; an unknown tool exits 1',
     c1o.code === 0 && typeof cj?.total_spent_usd === 'number' && c2o.code === 0 && /"recorded": true/.test(c2o.o) && c3o.code === 1, { c1: c1o.code, c2: c2o.o.slice(0, 80), c3: [c3o.code, (c3o.o + c3o.e).slice(0, 120)] });
 }
+// 15. the request runner (ROADMAP_v4 D3a + D9: lib/run.mjs, generators/, request_run, generators_get) on the MOCK fal
+{
+  const texts = [];
+  const callT = async (name, args = {}) => { const r = await mcp.callTool({ name, arguments: args }); const t = (r.content || []).map(c => c.text).join('\n'); texts.push(t); let j; try { j = JSON.parse(r.content?.[0]?.text || ''); } catch (e) { j = r.content?.[0]?.text; } return r.isError ? { error: t } : j; };
+  const approveP = async (rid) => { const cur = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')); cur.items.find(r => r.id === rid).status = 'approved'; return post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur }); };
+  const reqOf = (id) => JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')).items.find(r => r.id === id);
+  const costsF = () => JSON.parse(fs.readFileSync(path.join(D, 'costs.json'), 'utf8'));
+  const setCap = (usd) => { const c = costsF(); c.cap_usd = usd; fs.writeFileSync(path.join(D, 'costs.json'), JSON.stringify(c)); };
+  setCap(100);
+  const gi = await callT('generators_get');
+  check('generators_get: fal is the default for every kind, the key found in the environment (its source only), openwith ready, comfyui not configured',
+    gi.selected?.image === 'fal' && gi.selected.video === 'fal' && gi.fal_key?.found === true && /FAL_KEY/.test(gi.fal_key.source) && gi.generators?.find(g => g.id === 'comfyui')?.ready === false && gi.generators.find(g => g.id === 'openwith')?.ready === true,
+    { selected: gi.selected, key: gi.fal_key, gens: gi.generators?.map(g => [g.id, g.ready]) });
+
+  // a fresh character for the tree link (the earlier sections approve Bo's identity)
+  await callT('entity_upsert', { kind: 'character', id: 'runa', fields: { name: 'Runa' } });
+  const a = await callT('request_create', { kind: 'identity', target: 'character:runa', prompt: 'mcp runner: Runa identity sheet', refs: ['media/still/bo_face.jpg'], est_cost: 0.24, takes: 2, tool: 'fal-ai/nano-banana-2/edit', asset: { type: 'character', id: 'runa', tree: 'identity', from: null, kind: 'identity' } });
+  const s0 = { ...FAL.stats }, cost0 = costsF().items.length;
+  const draftRun = await callT('request_run', { ids: [a.id] });
+  check('request_run refuses a draft (nothing started, nothing called): only the director approves', a.takes === 2 && draftRun.started?.length === 0 && /draft/.test(draftRun.refused?.[0]?.why || '') && FAL.stats.submits === s0.submits && reqOf(a.id).status === 'draft',
+    { a: a.error || a.takes, draftRun });
+  await approveP(a.id);
+  const dry = await callT('request_run', { ids: [a.id], dry_run: true });
+  check('dry_run: the plan (fal, nb2 edit, 2 takes, $0.24 within the approved $0.24, the cap fits, gen/<id>/) and nothing called, written, spent or moved',
+    dry.dry_run === true && dry.items?.[0]?.ok && dry.items[0].generator === 'fal' && dry.items[0].tool === 'fal-ai/nano-banana-2/edit' && dry.items[0].takes === 2 && dry.items[0].est_usd === 0.24 && dry.items[0].cap.fits
+    && JSON.stringify(FAL.stats) === JSON.stringify(s0) && costsF().items.length === cost0 && reqOf(a.id).status === 'approved' && !fs.existsSync(path.join(D, 'gen', a.id)), { item: dry.items?.[0], stats: FAL.stats });
+
+  // the run: approved -> queued -> running -> done; outputs, job.json, media, one cost item, nodes in Runa's identity tree
+  const run = await callT('request_run', { ids: [a.id], wait: true });
+  const ra = reqOf(a.id), job = JSON.parse(fs.readFileSync(path.join(D, 'gen', a.id, 'job.json'), 'utf8'));
+  const media = JSON.parse(fs.readFileSync(path.join(D, 'media.json'), 'utf8')).items.filter(m => m.request === a.id || m.job === a.id);
+  const runa = JSON.parse(fs.readFileSync(path.join(D, 'entities', 'characters', 'runa.json'), 'utf8'));
+  const statuses = ra.log.map(l => l.status).join('>');
+  check('request_run (wait): queued -> running -> done; gen/<id>/<id>_0.png and _1.png + job.json; 2 submits with the uploaded ref (fal storage), the key sent to the queue only; media registered; the outputs joined Runa\'s identity tree as nodes (the director keeps or picks)',
+    ra.status === 'done' && /approved>queued>running>done$/.test(statuses) && ra.outputs?.length === 2 && ra.outputs.every(o => fs.existsSync(path.join(D, o))) && /gen\/.+_0\.png$/.test(ra.outputs[0])
+    && FAL.stats.submits === s0.submits + 2 && FAL.stats.uploads >= 1 && FAL.bodies.at(-1).body.image_urls?.[0]?.startsWith(FAL.url + '/cdn/ref') && FAL.stats.keyOnCdn === 0 && FAL.stats.unauthorised === 0
+    && job.takes.length === 2 && job.takes.every(t => t.status === 'done' && t.handle?.request_id) && media.length === 2 && ra.linked?.nodes?.length === 2 && runa.iter?.nodes?.filter(n => n.request === a.id).length === 2,
+    { status: ra.status, statuses, outputs: ra.outputs, stats: FAL.stats, linked: ra.linked, run: run.results || run.error });
+  const items = costsF().items.filter(x => x.request === a.id || x.id === a.id || x.job === a.id);
+  const rec = await callT('cost_record', { usd: 0.24, via: 'falgen', job: a.id });
+  const cs = await callT('costs_get');
+  check('the actual cost is recorded once (costs.json item = the request, via runner, $0.24); a runner hook recording the same job again is not added; the merged total counts it once',
+    items.length === 1 && items[0].usd === 0.24 && items[0].via === 'runner' && ra.actual_cost_usd === 0.24 && (rec.recorded === false || /409/.test(rec.error || '')) && costsF().items.filter(x => x.request === a.id || x.job === a.id).length === 1
+    && Math.abs(cs.spent_usd - +costsF().items.reduce((s, x) => s + x.usd, 0).toFixed(2)) < 0.005, { items, rec: rec.recorded ?? rec.error });
+  const again = await callT('request_run', { ids: [a.id] });
+  check('a done request is not run again', again.started?.length === 0 && /done/.test(again.refused?.[0]?.why || '') && FAL.stats.submits === s0.submits + 2, again);
+
+  // re-run safe: take 0 exists already -> only take 1 is submitted
+  const b = await callT('request_create', { kind: 'shot-still', target: 'shot:s2-wall', prompt: 'mcp runner: the wall at dusk', refs: [], est_cost: 0.24, takes: 2, tool: 'fal-ai/nano-banana-2/edit' });
+  await approveP(b.id);
+  fs.mkdirSync(path.join(D, 'gen', b.id), { recursive: true }); fs.writeFileSync(path.join(D, 'gen', b.id, `${b.id}_0.png`), Buffer.from(tinyPngB64(4, 4), 'base64'));
+  const s1 = FAL.stats.submits;
+  const rb = await callT('request_run', { ids: [b.id], wait: true }), rbq = reqOf(b.id), jb = JSON.parse(fs.readFileSync(path.join(D, 'gen', b.id, 'job.json'), 'utf8'));
+  check('re-run safe: an output that exists is skipped (1 submit for 2 takes; text-to-image: no refs -> fal-ai/nano-banana-2); the request is done with both outputs; a shot target links the media to the shot',
+    FAL.stats.submits === s1 + 1 && FAL.bodies.at(-1).endpoint === 'fal-ai/nano-banana-2' && !FAL.bodies.at(-1).body.image_urls && rbq.status === 'done' && rbq.outputs?.length === 2 && jb.takes[0].skipped === true
+    && JSON.parse(fs.readFileSync(path.join(D, 'media.json'), 'utf8')).items.some(m => m.request === b.id && (m.shots || []).includes('s2-wall')), { submits: FAL.stats.submits - s1, status: rbq.status, res: rb.results || rb.error });
+
+  // the cap at run time: approved while it fitted, the cap lowered since -> refused (402), nothing called, still approved
+  const c = await callT('request_create', { kind: 'identity', prompt: 'mcp runner: over the cap', refs: [], est_cost: 0.12, tool: 'fal-ai/nano-banana-2/edit' });
+  await approveP(c.id);
+  const spentNow = (await callT('costs_get')).total_spent_usd; setCap(spentNow + 0.05);
+  const s2 = FAL.stats.submits;
+  const rc2 = await callT('request_run', { ids: [c.id], wait: true });
+  check('the cap is re-checked at run time: over it -> refused (402), nothing submitted, the request stays approved',
+    rc2.results?.[0]?.status === 'refused' && /cap/.test(rc2.results[0].why) && FAL.stats.submits === s2 && reqOf(c.id).status === 'approved', rc2.results || rc2.error);
+  setCap(100);
+  // an estimate above what was approved is refused (seedream with 3 refs at 1 take costs more than the $0.01 approved)
+  const d = await callT('request_create', { kind: 'identity', prompt: 'mcp runner: underpriced', refs: ['media/still/bo_face.jpg'], est_cost: 0.01, tool: 'bytedance/seedream/v5/pro/edit' });
+  await approveP(d.id);
+  const rd = await callT('request_run', { ids: [d.id], dry_run: true });
+  check('the generator\'s estimate must not exceed the approved est_cost (seedream $0.135 > $0.01: refused, re-approve)', rd.items?.[0]?.ok === false && /approved/.test(rd.items[0].why), rd.items?.[0]);
+
+  // a provider failure -> failed (why); a retry (same approval) runs it again
+  FAL.mode = 'fail-submit';
+  const e = await callT('request_create', { kind: 'identity', prompt: 'mcp runner: will fail first', refs: [], est_cost: 0.12, tool: 'fal-ai/nano-banana-2/edit' });
+  await approveP(e.id);
+  const re1 = await callT('request_run', { ids: [e.id], wait: true }), fe = reqOf(e.id), costFailed = costsF().items.filter(x => x.request === e.id).length;
+  FAL.mode = 'ok';
+  const re2 = await callT('request_run', { ids: [e.id], wait: true }), fe2 = reqOf(e.id);
+  check('a failed run: status failed with why (the provider\'s error, key-free), no cost; Retry runs it again on the same approval (done, one cost item)',
+    fe.status === 'failed' && /422/.test(fe.why || '') && costFailed === 0 && fe2.status === 'done' && costsF().items.filter(x => x.request === e.id).length === 1,
+    { first: [fe.status, fe.why], second: fe2.status, r1: re1.results?.[0]?.status });
+
+  // "Open in another app" (Settings > Generator: image = openwith): a prompt pack, handed off; results come back at $0
+  let st0 = { rev: 0, keybindings: {} }; try { st0 = JSON.parse(fs.readFileSync(path.join(D, 'settings.json'), 'utf8')); } catch (er) { /* none yet */ }
+  fs.writeFileSync(path.join(D, 'settings.json'), JSON.stringify({ ...st0, generators: { image: 'openwith' } }));
+  const f = await callT('request_create', { kind: 'identity', prompt: 'mcp runner: made elsewhere', refs: ['media/still/bo_face.jpg'], est_cost: 0.12, tool: 'fal-ai/nano-banana-2/edit' });
+  await approveP(f.id);
+  const s3 = FAL.stats.submits;
+  const rf1 = await callT('request_run', { ids: [f.id], wait: true }), ff = reqOf(f.id), pack = path.join(D, 'gen', f.id, 'pack');
+  fs.writeFileSync(path.join(D, 'gen', f.id, 'results', 'made-in-krita.png'), Buffer.from(tinyPngB64(6, 6), 'base64'));
+  const rf2 = await callT('request_run', { ids: [f.id], wait: true }), ff2 = reqOf(f.id);
+  check('openwith: a prompt pack (prompt.txt = the prompt, refs/01_*, README) and the request handed off (running); results/ -> run again -> done at $0; no fal call',
+    rf1.results?.[0]?.status === 'running' && !!ff.handoff?.pack && fs.readFileSync(path.join(pack, 'prompt.txt'), 'utf8') === 'mcp runner: made elsewhere' && fs.readdirSync(path.join(pack, 'refs')).length === 1 && /results/.test(fs.readFileSync(path.join(pack, 'README.md'), 'utf8'))
+    && ff2.status === 'done' && ff2.actual_cost_usd === 0 && ff2.outputs?.length === 1 && FAL.stats.submits === s3, { r1: rf1.results, r2: rf2.results, h: ff.handoff });
+  fs.writeFileSync(path.join(D, 'settings.json'), JSON.stringify(st0));
+  const cmf = await callT('request_create', { kind: 'identity', prompt: 'x', refs: [], est_cost: 0.12, tool: 'fal-ai/nano-banana-2/edit' });
+  await approveP(cmf.id);
+  fs.writeFileSync(path.join(D, 'settings.json'), JSON.stringify({ ...st0, generators: { image: 'comfyui' } }));
+  const rcm = await callT('request_run', { ids: [cmf.id], dry_run: true });
+  fs.writeFileSync(path.join(D, 'settings.json'), JSON.stringify(st0));
+  check('comfyui (a stub): refused "not configured"', rcm.items?.[0]?.ok === false && /not configured/.test(rcm.items[0].why), rcm.items?.[0]);
+
+  // the key never appears: not in any file of the project / media base, any tool response, or the server log
+  const leaks = walk(TMP).filter(fl => { try { return fs.readFileSync(path.join(TMP, fl)).includes(FAL_KEY); } catch (er) { return false; } });
+  check('the fal key never appears in a file (job.json, requests, costs, media, settings), a tool response or the server log', !leaks.length && !texts.some(t => t.includes(FAL_KEY)) && !srvLog.includes(FAL_KEY) && texts.length > 10, { leaks, responses: texts.length });
+}
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {
   // ---------------------------------------------------------------- clean up whatever happened
   await mcp?.close().catch(() => {});
   if (browser) await browser.close().catch(() => {}); sse.stop?.();
-  srv?.kill(); await wait(300);
+  srv?.kill(); await FAL.close(); await wait(300);
   for (let i = 0; i < 5; i++) { try { fs.rmSync(TMP, { recursive: true, force: true }); break; } catch (e) { await wait(300); } }
 }
 const origAfter = hashAll(ORIG);
