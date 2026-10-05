@@ -661,3 +661,4 @@ Rules for the loop:
   (the first-run onboarding: song / lyrics only / the demo, Connect Claude, where the data lives, the system check; `core/i18n.js` with
   English, Catalan and Spanish for the onboarding and the main chrome, Settings › language; error states: server down, stale code, no
   ffmpeg, no fal key (Help › System check…), a project that cannot load); verify v31, tools/security-pairing.mjs, test:mcp section 31.
+- 2026-10-05 (end of loop): done also E1–E10, F1–F10, C5, D3b/D3c, D4, D6–D8, G2 (S8), G4, G5, G6, G7 (local helper + pairing), G8, reviews #1–#3 with fixes, the scripted no-agent walk-through (v28). Open, waiting on Dani: G1 hosted demo + G3 storage backends (director.azemar.eu go/no-go), D9 real ComfyUI generator (local generation wanted?), the three composition-roundtrip decisions (docs/COMPOSITION_ROUNDTRIP.md).
