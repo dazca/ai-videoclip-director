@@ -167,8 +167,8 @@ $top.addEventListener('click', (e) => {
 $panes.addEventListener('click', (e) => { const s = e.target.closest('.subnav [data-sub]'); if (s) show(s.dataset.sub); });
 // keep the sub-nav counts fresh
 store.on(() => { const p = pageById(active); if (p?.subs) renderSubnav(p); });
-// the top bar's "N open notes" (every stage and the timeline; the rail has the count per stage)
-function renderOpenNotes() { const a = $top.querySelector('.opennotes'); if (!a || !store.notes) return; const k = store.notes.notes.filter(n => n.status === 'open').length; a.textContent = k ? `${k} open note${k > 1 ? 's' : ''}` : 'no open notes'; a.classList.toggle('none', !k); }
+// the top bar's "N open notes" (every stage and the timeline; the rail has the count per stage; a sent round's ask is not a note)
+function renderOpenNotes() { const a = $top.querySelector('.opennotes'); if (!a || !store.notes) return; const k = store.notes.notes.filter(n => n.status === 'open' && n.ask !== 'round').length; a.textContent = k ? `${k} open note${k > 1 ? 's' : ''}` : 'no open notes'; a.classList.toggle('none', !k); }
 store.on((w) => { if (w === 'notes' || w === 'all') renderOpenNotes(); });
 
 // live UI channel: an agent's ui_focus (MCP) -> POST /api/ui -> SSE -> here. Apply it, then ack so the agent knows a

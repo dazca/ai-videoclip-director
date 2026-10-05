@@ -128,7 +128,7 @@ const watchTimer = new Map();
 fs.watch(DATA_ROOT, { recursive: true }, (_ev, name) => {
   if (!name) { clearTimeout(watchTimer.get('*')); watchTimer.set('*', setTimeout(() => notify('*', ['*']), 80)); return; }   // Windows drops names when its event buffer overflows
   const f = name.replace(/\\/g, '/');
-  if (f.endsWith('.tmp') || f.includes('/.snapshots') || f.includes('/thumbs/')) return;
+  if (f.endsWith('.tmp') || f.includes('/.snapshots') || f.includes('/.history') || f.includes('/thumbs/')) return;
   const i = f.indexOf('/'); if (i < 0) return;
   clearTimeout(watchTimer.get(f));
   watchTimer.set(f, setTimeout(() => notify(f.slice(0, i), [f.slice(i + 1)]), 80));
@@ -177,7 +177,7 @@ function readBody(req, limit) {
 // malformed file is refused (400). A shot's approval is approvals.json (stamped above), never storyboard.json.
 // notes.json (v2, one list for every stage and the timeline): new notes and replies are stamped by "director", via
 // "page" (round = the current round); an existing note keeps its author, via, created, target, round, legacy link and
-// absorbed_in, and an agent's note keeps its words (only the director's own text can be edited); a status change is
+// absorbed_in and change (the round's link to what the agent changed), and an agent's note keeps its words (only the director's own text can be edited); a status change is
 // stamped closed_by director / via page; legacy_seen only grows (a deleted migrated note never comes back); anything that
 // is not a v2 doc (an old page saving the v1 list) is refused (400: reload).
 function stampPage(name, data, cur) {
@@ -271,9 +271,9 @@ function stampPage(name, data, cur) {
     data.notes = data.notes.map(n => {
       const c = cn.get(n.id), cr = new Map((c?.replies || []).map(r => [r.id, r]));
       const replies = (Array.isArray(n.replies) ? n.replies : []).map((r, k) => { const o = cr.get(r.id); return o ? { ...o } : { id: typeof r.id === 'string' && r.id ? r.id.slice(0, 60) : `${n.id}.${k + 1}`, text: String(r.text).slice(0, 8000), by: 'director', via: 'page', at }; });
-      if (!c) { const { legacy: _l, absorbed_in: _a, closed_via: _v, ...x } = n; return { ...x, by: 'director', via: 'page', created: at, round: cur.round || 1, absorbed_in: null, replies, ...(n.status !== 'open' ? { closed_by: 'director', closed_via: 'page', closed_at: at } : {}) }; }
+      if (!c) { const { legacy: _l, absorbed_in: _a, closed_via: _v, change: _c, ...x } = n; return { ...x, by: 'director', via: 'page', created: at, round: cur.round || 1, absorbed_in: null, replies, ...(n.status !== 'open' ? { closed_by: 'director', closed_via: 'page', closed_at: at } : {}) }; }
       const out = { ...n, by: c.by, via: c.via, created: c.created, target: c.target, round: c.round, replies, text: c.via === 'agent' ? c.text : n.text };
-      for (const k of ['legacy', 'absorbed_in', 'reply_to']) { if (c[k] !== undefined) out[k] = c[k]; else delete out[k]; }
+      for (const k of ['legacy', 'absorbed_in', 'reply_to', 'change']) { if (c[k] !== undefined) out[k] = c[k]; else delete out[k]; }
       if (n.status !== c.status) { if (n.status === 'open') { delete out.closed_by; delete out.closed_via; delete out.closed_at; } else Object.assign(out, { closed_by: 'director', closed_via: 'page', closed_at: at }); }
       else for (const k of ['closed_by', 'closed_via', 'closed_at']) { if (c[k] !== undefined) out[k] = c[k]; else delete out[k]; }
       return out;
@@ -347,6 +347,8 @@ http.createServer(async (req, res) => {
         // stages 4 and 5: the director's acts (base, keep / branch / revert, approving the root or a variant, the variant
         // a scene uses) and reference uploads are the page's only, the same way
         if (name === 'character_act' || name === 'asset_act' || name === 'ref_upload') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
+        // review rounds and revisions: sending a round, closing and restoring a revision are the director's (page only)
+        if (name === 'round_send' || name === 'revision_close' || name === 'revision_restore') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
         delete body.import_ok;   // only a local script calling lib/store.mjs directly may import approved looks
         return json(res, 200, await S.ops[name](project, body));
       }
@@ -385,15 +387,16 @@ http.createServer(async (req, res) => {
     let f;
     const m = /^\/data\/([^/]+)\/(.+)$/i.exec(p);
     if (m) {
-      if (!S.validId(m[1]) || m[2].toLowerCase().split('/').includes('.snapshots')) { res.writeHead(403); return res.end(); }
+      // dot-folders (.snapshots, the git mirror .history) and dot-files are never served
+      if (!S.validId(m[1]) || m[2].split('/').some(x => x.startsWith('.'))) { res.writeHead(403); return res.end(); }
       const pd = path.join(DATA_ROOT, m[1]);
       f = S.inside(pd, m[2]); if (!f) { res.writeHead(403); return res.end(); }
       const rel = S.relTo(pd, f);
       if (priv(rel, [m[1]]) || priv(`data/${m[1]}/${rel}`, [])) { res.writeHead(403); return res.end('private: local only'); }
       // notes.json: the old note stores are migrated into it (v2) on its first read
       if (m[2] === 'notes.json' && fs.existsSync(path.join(pd, 'song.json'))) { try { S.notesDoc(m[1]); } catch (e) { /* a broken file is served as it is */ } }
-      // a writable state file that does not exist yet reads as null (the page uses its default; first save creates it)
-      if (S.WRITABLE.has(m[2]) && !fs.existsSync(f)) return json(res, 200, null);
+      // a writable state file (or revisions.json) that does not exist yet reads as null (the page uses its default)
+      if ((S.WRITABLE.has(m[2]) || m[2] === 'revisions.json') && !fs.existsSync(f)) return json(res, 200, null);
       // a remote (LAN) client reads the project's JSON without private paths or items flagged private (media.json,
       // entities with private refs and iteration nodes, requests built on private photos)
       if (!isLocal(req) && /\.json$/i.test(f) && fs.existsSync(f)) {

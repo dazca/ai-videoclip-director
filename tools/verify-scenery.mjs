@@ -157,6 +157,7 @@ export async function verifyScenery({ browser, BASE, DATA, OUT, post, writeHeade
   await click('.chcmpbar [data-a=branch]');
   await fileUntil('entities/locations/the-pier.json', (j) => j.iter.nodes.find(x => x.id === n4.node.id)?.choice === 'branch');
   await pg.evaluate((id) => window.WB.scenery.node(id, 'view'), n3.node.id); await wait(300);
+  await until(() => document.querySelectorAll('.chtree .chstrip').length >= 2);   // the branch re-renders the tree (a race otherwise)
   await shot('v8_variant_tree_night', '.chlooks');
   const vt = await pg.evaluate(() => ({ cards: [...document.querySelectorAll('.chlooks .chlook[data-look]')].map(c => c.dataset.look), strips: [...document.querySelectorAll('.chtree .chstrip')].map(s => [...s.querySelectorAll('.chnode')].map(n => n.dataset.node)), approve: document.querySelector('.chbar [data-a=approve]')?.textContent }));
   check('variant (page): the axes reverse / night / rain make variant reverse-night-rain (draft, from the page); "Request variant sheet" starts from the approved base (from n02, its image first, kind location-variant); its node roots the variant tree (from_identity n02); a further take kept as a branch; the bar offers "Approve variant"',

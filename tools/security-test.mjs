@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Security regressions for the workbench server, the data layer and the page (audit F01-F15, NV1, NV2, the guided flow
-// stages 1-6, notes.json v2 (target validation, the director's notes, stored payloads in every Notes column); the exporter's
+// stages 1-6, notes.json v2 (target validation, the director's notes, stored payloads in every Notes column), review rounds
+// and revisions (the page-only send / close / restore, the change link, the index, snapshots never served); the exporter's
 // F07/F08/F12 are in tools/security-exporter.mjs). Runs on a SCRATCH copy of data/demo with scratch media and config,
 // on free ports; never touches data/. Uses headless Chromium when one is found (tools/chrome.mjs), else skips the
 // browser checks.   node tools/security-test.mjs   (npm run test:security runs both files)
@@ -488,6 +489,45 @@ try {
       { v1save: v1save.status, badT: badT.status, badS: badS.status, badId: badId.status, seen: [seen0, after.legacy_seen.length] });
   }
 
+  // ---------------------------------------------------------------- review rounds and revisions (SPEC v4 §2): the director's acts
+  {
+    const asPage = (name, body = {}) => post(`/api/op/${name}?project=${P}`, body, { origin: A.base });
+    const foreign = (name, body = {}) => post(`/api/op/${name}?project=${P}`, body, { origin: 'http://evil.example' });
+    const tries = {}, offline = {};
+    for (const name of ['round_send', 'revision_close', 'revision_restore']) {
+      tries[name] = [(await op(name, { id: 'R1' })).status, (await op(name, { id: 'R1', via: 'page' })).status, (await foreign(name, { id: 'R1' })).status];
+      try { S.ops[name](P, { id: 'R1' }); offline[name] = 200; } catch (e) { offline[name] = e.code; }
+    }
+    const revSave = await post(`/api/save/revisions.json?project=${P}`, { base_rev: 0, data: { v: 1, rounds: [], revisions: [{ id: 'R9' }] } }, { origin: A.base });
+    check('rounds: sending a round, closing and restoring a revision are the page\'s only: the agent surface (also with a claimed via "page"), a foreign Origin and offline get 403; revisions.json is not a page save (403)',
+      Object.values(tries).every(a => a[0] === 403 && a[1] === 403 && a[2] === 403) && Object.values(offline).every(s => s === 403) && revSave.status === 403, { tries, offline, revSave: revSave.status });
+    // a round in flight: the agent's change link is checked, a page save cannot forge it (nor absorbed_in, nor the round)
+    await pageSave('notes.json', (d) => { d.notes.push({ id: 'sec-rn', target: { stage: 'lyrics', kind: 'stage' }, text: 'sec: round note', status: 'open', replies: [] }); });
+    const sent = await asPage('round_send');
+    const badFile = await op('round_absorb', { note: 'sec-rn', change: { stage: 'lyrics', file: '../../workbench.config.json', summary: 'x' } });
+    const badStage = await op('round_absorb', { note: 'sec-rn', change: { stage: 'nowhere', summary: 'x' } });
+    const noSum = await op('round_absorb', { note: 'sec-rn', change: { stage: 'lyrics' } });
+    const okAbs = await op('round_absorb', { note: 'sec-rn', change: { stage: 'lyrics', file: 'lyrics.json', summary: 'sec: done' } });
+    const round0 = readP('notes.json').round;
+    const forge = await pageSave('notes.json', (d) => {
+      const x = d.notes.find(n => n.id === 'sec-rn'); x.absorbed_in = 'R99'; x.change = { stage: 'final', summary: 'forged' }; x.round = 42; d.round = 77;
+      d.notes.push({ id: 'sec-rn2', target: { stage: 'lyrics', kind: 'stage' }, text: 'sec: new', status: 'absorbed', absorbed_in: 'R98', change: { stage: 'lyrics', summary: 'forged too' }, replies: [] });
+    });
+    const NF = readP('notes.json'), x1 = NF.notes.find(n => n.id === 'sec-rn'), x2 = NF.notes.find(n => n.id === 'sec-rn2');
+    check('rounds: round_absorb checks the change (a path out of the project, an unknown stage, no summary: 400); a page save of notes.json keeps the server\'s absorbed_in, change and round (a new note gets none of them)',
+      sent.status === 200 && badFile.status === 400 && badStage.status === 400 && noSum.status === 400 && okAbs.status === 200 && forge.status === 200
+      && x1.absorbed_in === 'R1' && x1.change?.summary === 'sec: done' && x1.round !== 42 && NF.round === round0 && x2 && x2.absorbed_in == null && !x2.change,
+      { badFile: badFile.status, badStage: badStage.status, noSum: noSum.status, x1: x1 && [x1.absorbed_in, x1.change?.summary, x1.round], round: [round0, NF.round], x2: x2 && [x2.absorbed_in, x2.change] });
+    // revisions: the index is the server's, snapshots and the git mirror are never served, restore takes known ids only
+    const cl = await asPage('revision_close', { summary: '<img src=x onerror="window.__rv=1">' });
+    const snapGet = await st(`/data/${P}/.snapshots/${cl.body?.snapshot}/notes.json`), histGet = await st(`/data/${P}/.history/.git/config`), dotGet = await st(`/data/${P}/.meta.json`);
+    const rsBad = await asPage('revision_restore', { id: '../x' }), rsNo = await asPage('revision_restore', { id: 'R7' });
+    const cmpBad = await op('revision_compare', { a: '../../x', b: 'now' }), cmpOk = await op('revision_compare', { a: 'R0', b: 'R1' });
+    check('revisions: closing works from the page (R1); .snapshots, .history and dot files under /data are never served (403); a restore or a compare of an unknown / malformed revision is refused (404 / 400); the compare is read only for the agent (200)',
+      cl.status === 200 && cl.body.id === 'R1' && !fs.existsSync(path.join(D, '.history')) && snapGet === 403 && histGet === 403 && dotGet === 403 && rsBad.status === 404 && rsNo.status === 404 && cmpBad.status === 400 && cmpOk.status === 200,
+      { cl: cl.status, snapGet, histGet, dotGet, rsBad: rsBad.status, rsNo: rsNo.status, cmpBad: cmpBad.status, cmpOk: cmpOk.status });
+  }
+
   // ---------------------------------------------------------------- F09: the EDL extractor's server (source check: it needs the owner's render page)
   const edl = fs.readFileSync(path.join(WB, 'importers/azemar_extract_edl.mjs'), 'utf8');
   check('F09 EDL extractor server: 127.0.0.1, decode in try/catch, confined to ROOT', /listen\(\d+, '127\.0\.0\.1'/.test(edl) && /try \{ p = inside\(ROOT,/.test(edl) && /if \(!p\) \{ r\.writeHead\(403\)/.test(edl));
@@ -676,6 +716,27 @@ try {
     check('F02 stored payloads in notes.json v2 (note text, author, replies, a word-range quote) render as text in every Notes column, the timeline notes column and Review > Notes',
       nInert && !nv.length && made.length === targets.length && cells >= 7 && tl >= 1, { nInert, made, cells, tl, nv: nv.slice(0, 2) });
     await npg.close();
+    // rounds and revisions: payloads in a note, the agent's change summary and reply, its round summary and a revision
+    // summary render as text on the rail (the round chip and its tooltips) and in Review › Compare
+    const V = (n) => `<img src=x onerror="window.__rv=${n}">`;
+    await pageSave('notes.json', (d) => { d.notes.push({ id: 'sec-rx', target: { stage: 'script', kind: 'scene', id: 'sc02' }, text: V(10), status: 'open', replies: [] }); });
+    await post(`/api/op/round_send?project=${P}`, {}, { origin: A.base });
+    await op('round_absorb', { note: 'sec-rx', change: { stage: 'script', file: 'scenes.json', version: 'v9', summary: V(11) } });
+    await op('round_finish', { summary: V(12) });
+    const rpg = await browser.newPage(); const rvv = [];
+    rpg.on('console', m => { if (/Content Security Policy|Refused to/i.test(m.text())) rvv.push(m.text()); });
+    await rpg.goto(`${A.base}/?project=${P}`, { waitUntil: 'domcontentloaded' });
+    await rpg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 });
+    const railOk = await rpg.evaluate(() => document.querySelector('#rail .rnd')?.dataset.phase === 'finished');
+    await post(`/api/op/revision_close?project=${P}`, { summary: V(13) }, { origin: A.base });
+    await wait(800);
+    await rpg.evaluate(() => window.WB.app.show('compare')); await wait(900);
+    const shown = await rpg.evaluate(async () => { await window.WB.compare.select('R1', 'R2'); return { notes: window.WB.compare.data()?.notes?.length, rows: document.querySelectorAll('.cmpb .cmprow').length, list: document.querySelectorAll('.cmpl [data-rid]').length }; });
+    await wait(300);
+    const rInert = await rpg.evaluate(() => window.__rv === undefined && !document.querySelector('#rail img, .cmp img[src="x"], img[src="x"]'));
+    check('F02 stored payloads in a round (a note, the agent\'s change summary and round summary, a revision summary) render as text on the rail and in Review › Compare',
+      rInert && !rvv.length && railOk && shown.notes >= 1 && shown.rows >= 1 && shown.list >= 2, { rInert, railOk, shown, rvv: rvv.slice(0, 2) });
+    await rpg.close();
   }
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {

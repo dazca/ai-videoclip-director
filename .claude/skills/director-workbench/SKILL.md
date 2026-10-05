@@ -23,6 +23,28 @@ formats and how to add features.
    when you did what a note asks, `notes_status {id, status: "absorbed", reply: "line 7 rewritten in v4"}`; write your
    own on the row it is about (`notes_add {target: {stage, kind, id, w?, t?, pin?}, text}`). Never dismiss the director's
    notes (refused) and never absorb one you did not act on. Confirm the plan before large changes.
+5. `round_get`: has the director **sent a review round**? If `status` is "sent", that round is your job first (see
+   "Review rounds" below); "collecting" means they are still writing notes.
+
+## Review rounds (the director's notes, absorbed in one go)
+
+The director collects notes in every stage, then clicks **Send round to Claude** on the stage rail: every open note of
+theirs goes to you as ONE ask (a note `to: "agent"`, `ask: "round"`), and the notes they write after that wait for the
+next round. Work it like this:
+1. `round_get`: the round's notes grouped by stage, each with `content` (what it points at: the lyric line and version,
+   the scene with its beats, the breakdown item, the node image, the shot, the lyric at a timeline time) and
+   `becomes` (the revision it will be, e.g. "R3").
+2. Apply each note with the normal stage tools (`lyrics_update`, `scenes_update`, `breakdown_update`, `shots_update`,
+   `node_import_propose`, `request_create` drafts, ...). Each save is a new version; never approve anything.
+3. Per note: `round_absorb {note, change: {stage, file, version, summary}}` when you did it ("line 7 rewritten",
+   "scene sc04 split in two", file "lyrics.json", version "v4"): the compare view links the change to the note.
+   `round_reply {note, text}` when you cannot or need a decision (the note stays open for the director).
+   The rail shows the director your progress live (absorbed / replied / left).
+4. `round_finish {summary}` once every note is absorbed or replied: what you changed, what is left.
+5. The director reviews and clicks **Close revision R<n>**: an immutable project-wide snapshot + an entry in
+   `revisions.json`. They compare revisions (Review › Compare) and restore one if they want. Sending a round, closing
+   and restoring a revision are theirs only (no tool; 403). `revisions_get` lists the revisions; `compare: ["R2", "R3"]`
+   (or "R0" = before the first round, "now") gives the per-stage diff with the notes behind each change.
 
 ## The workflow (one stage at a time, the director signs off each)
 
@@ -124,6 +146,8 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
 - Never call a paid API (image, video, voice, music) without an APPROVED request whose `est_cost` fits the cap.
   `costs_get` before proposing; the tools refuse queueing above the cap. Record the real cost when done.
 - Never approve on the director's behalf, never mark their notes resolved without doing what they asked.
+- Never `round_absorb` a note you did not apply, and never call `round_finish` before every note of the round is
+  absorbed or replied. A round is not an approval: closing the revision is the director's.
 - Never touch PRIVATE files (crops of real photos, anything under a `private/` folder or flagged private) beyond
   reading them locally for the director; never copy them into exports, the demo, the template or a shared repo.
 - Never edit timing by moving pixels: times are integer ms in the JSON; layout follows.
