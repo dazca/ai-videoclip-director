@@ -19,7 +19,8 @@
 // (v12, tools/verify-runner.mjs) the request runner on a mock fal: the Queue's Approve / Reject / Run, live progress, outputs
 // as nodes, Settings > Generator, (v14, tools/verify-proposals.mjs) proposals (SPEC v4 §3), (v13, tools/verify-rounds.mjs) rounds,
 // revisions and compare (SPEC v4 §2) and the Notes column's width, and (v15, tools/verify-final.mjs) stage 7, final approvals
-// (the list, the checklist, costs, the lock).
+// (the list, the checklist, costs, the lock), and (v16, tools/verify-takes.mjs) take selection (D6: the takes of a shot, in / out,
+// the pick, alternatives, A/B, the agent's proposals, the timeline clip column, Final's picked takes).
 //   node tools/verify.mjs [--project <id>] [outDir]     (default project: the server's default; npm run verify = demo)
 // Copies data/<project> (and data/_template) into a scratch data folder under the OS temp dir and starts serve.mjs
 // on free ports with WORKBENCH_DATA = that folder, so nothing under data/ is written and several runs (or a running
@@ -438,7 +439,7 @@ try {
   await pg.evaluate(() => window.WB.app.closePage('p:media')); await frames();
   await pg.evaluate(() => window.WB.app.show('media')); await frames();
   const back = await pg.evaluate(() => ({ tabs: [...document.querySelectorAll('#top nav [data-tab]')].length, cells: [...document.querySelectorAll('.pgwrap[data-page=assets] [data-media]')].filter(e => e.offsetParent !== null).length }));
-  check('review sub-views + custom page (New page / close)', JSON.stringify(rsubs) === '["Approvals","Queue","Notes","Compare","Costs"]' && queueShown && custom.tabs.includes('p:media') && custom.cells >= Math.min(100, MEDIA_N) && back.tabs === 3 && back.cells >= Math.min(100, MEDIA_N), { rsubs, queueShown, custom, afterClose: back });
+  check('review sub-views + custom page (New page / close)', JSON.stringify(rsubs) === '["Approvals","Queue","Takes","Notes","Compare","Costs"]' && queueShown && custom.tabs.includes('p:media') && custom.cells >= Math.min(100, MEDIA_N) && back.tabs === 3 && back.cells >= Math.min(100, MEDIA_N), { rsubs, queueShown, custom, afterClose: back });
   await pg.evaluate(() => window.WB.app.show('timeline')); await frames();
   v2.commands = await pg.evaluate(() => window.WB.commands.list().length);
   v2.conflicts = await pg.evaluate(() => window.WB.keymap.conflicts());
@@ -1206,6 +1207,13 @@ catch (e) { v14.checks.aborted = blockFailed('v14', e); v14.pass = false; }
 const v15 = report.v15 = { checks: {} };
 try { const { verifyFinal } = await import('./verify-final.mjs'); Object.assign(v15, await verifyFinal({ browser, OUT })); }
 catch (e) { v15.checks.aborted = blockFailed('v15', e); v15.pass = false; }
+// ---------------------------------------------------------------- v16: take selection (ROADMAP_v4 D6): placeholder takes (ffmpeg) of a shot, takes_get,
+// take_propose (the agent never picks), the Shot panel's cards (hover-scrub), in / out handles snapped to frames, Pick -> a new
+// storyboard version with shot.clip, alternatives, A/B in the dock, the timeline clip column, Final's count, Review › Takes:
+// tools/verify-takes.mjs (also runnable alone). Screenshots v16_*.png.
+const v16 = report.v16 = { checks: {} };
+try { const { verifyTakes } = await import('./verify-takes.mjs'); Object.assign(v16, await verifyTakes({ browser, OUT })); }
+catch (e) { v16.checks.aborted = blockFailed('v16', e); v16.pass = false; }
 // write path: approve/needs-changes + a note, on another scratch copy (_verify, its own server), then a stale-rev POST must get 409
 try {
   const TMP = path.join(DATA, '_verify');
@@ -1235,8 +1243,8 @@ report.project = P;
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 1));
 const w = report.writes || {};
 const writesOk = w.noteSaved && w.noteShownInColumn && w.staleStatus === 409 && w.newState !== undefined && w.newState !== w.stateBefore && w.approvalsRev > w.approvalsRevBefore;
-console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· v7 (characters stage):', report.v7?.pass ? 'all PASS' : 'FAIL', '· v8 (scenery stage):', report.v8?.pass ? 'all PASS' : 'FAIL', '· v9 (storyboard stage):', report.v9?.pass ? 'all PASS' : 'FAIL', '· v10 (dogfood frictions):', report.v10?.pass ? 'all PASS' : 'FAIL', '· v11 (notes everywhere):', report.v11?.pass ? 'all PASS' : 'FAIL', '· v12 (request runner):', report.v12?.pass ? 'all PASS' : 'FAIL', '· v13 (rounds, revisions, compare):', report.v13?.pass ? 'all PASS' : 'FAIL', '· v14 (proposals):', report.v14?.pass ? 'all PASS' : 'FAIL', '· v15 (final approvals):', report.v15?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
-process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && report.v7?.pass && report.v8?.pass && report.v9?.pass && report.v10?.pass && report.v11?.pass && report.v12?.pass && report.v13?.pass && report.v14?.pass && report.v15?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
+console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· v7 (characters stage):', report.v7?.pass ? 'all PASS' : 'FAIL', '· v8 (scenery stage):', report.v8?.pass ? 'all PASS' : 'FAIL', '· v9 (storyboard stage):', report.v9?.pass ? 'all PASS' : 'FAIL', '· v10 (dogfood frictions):', report.v10?.pass ? 'all PASS' : 'FAIL', '· v11 (notes everywhere):', report.v11?.pass ? 'all PASS' : 'FAIL', '· v12 (request runner):', report.v12?.pass ? 'all PASS' : 'FAIL', '· v13 (rounds, revisions, compare):', report.v13?.pass ? 'all PASS' : 'FAIL', '· v14 (proposals):', report.v14?.pass ? 'all PASS' : 'FAIL', '· v15 (final approvals):', report.v15?.pass ? 'all PASS' : 'FAIL', '· v16 (take selection):', report.v16?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
+process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && report.v7?.pass && report.v8?.pass && report.v9?.pass && report.v10?.pass && report.v11?.pass && report.v12?.pass && report.v13?.pass && report.v14?.pass && report.v15?.pass && report.v16?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
 await browser.close();
 for (const c of procs) c.kill();
 await new Promise(r => setTimeout(r, 300));   // let the servers release the scratch folder; cleanup() removes it on exit

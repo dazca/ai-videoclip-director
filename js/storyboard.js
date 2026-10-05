@@ -5,7 +5,9 @@
 //                   notes: [Note]}
 //   Shot  {id "sh03", scene: "sc02" | null, t0, t1, kind, title, text, camera, sketch: id | null, beats: [beat ids],
 //          cast: [entity ids], locations: [ids], props: [ids], variants: {<entity id>: <variant / look id> | null},
-//          gen: "still" | "video" | null, clips: [clip use ids], thumb?, section?}
+//          gen: "still" | "video" | null, clips: [clip use ids], thumb?, section?,
+//          clip?: the director's picked take {request, take, file, media, kind, in_ms, out_ms, note, alt[], by, via, at}
+//          (js/takes.js; written only by the page's take_act, carried forward by every other save)}
 //          t0 < t1 are integer ms of the song; the shots of a scene TILE it (the first starts with the scene, each next one
 //          where the previous ends, the last ends with the scene); boundaries snap to the beat grid (song.json grid).
 //          kind: wide | medium | close | insert | performance | xp-desktop (or any short lower-case word: older shots.json
@@ -23,6 +25,7 @@ import { currentScript, gaps as scriptGaps, span } from './scenes.js';
 import { currentBreakdown } from './breakdown.js';
 import * as A from './assets.js';
 import * as P from './prices.js';
+import { shapeClip } from './takes.js';
 
 export const SHOT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 export const SCENE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
@@ -126,9 +129,10 @@ export function cleanShot(s, song, { snap } = {}) {
   const gen = s.gen == null || s.gen === '' ? null : String(s.gen);
   if (gen && !GENS.includes(gen)) throw new Error(`shot ${id}: gen is still or video`);
   const thumb = typeof s.thumb === 'string' && THUMB_RE.test(s.thumb) && !s.thumb.split('/').includes('..') ? s.thumb : null;
+  let clip = null; if (s.clip != null) { try { clip = shapeClip(s.clip, `shot ${id}: clip`); } catch (e) { throw new Error(e.message); } }
   return { id, scene, t0, t1, kind, title: String(s.title ?? '').slice(0, 300), text: String(s.text ?? '').slice(0, 8000), camera: String(s.camera ?? '').slice(0, 2000), sketch,
     beats: list('beats', BEAT_RE, 200), cast: list('cast', ENT_ID, 40), locations: list('locations', ENT_ID, 40), props: list('props', ENT_ID, 40), variants, gen,
-    clips: list('clips', CLIP_RE, 100), ...(thumb ? { thumb } : {}), ...(s.section ? { section: String(s.section).slice(0, 60) } : {}) };
+    clips: list('clips', CLIP_RE, 100), ...(thumb ? { thumb } : {}), ...(s.section ? { section: String(s.section).slice(0, 60) } : {}), ...(clip ? { clip } : {}) };
 }
 // the shots of each scene tile it: sorted by start; the first starts with the scene, each one ends where the next starts,
 // the last ends with the scene. Shots of an unknown scene (or none) are left as they are. Returns warnings; throws when a
@@ -173,6 +177,7 @@ export function checkBoard(d) {
       if (s.variants != null && (typeof s.variants !== 'object' || Array.isArray(s.variants) || Object.entries(s.variants).some(([k, x]) => !ENT_ID.test(k) || (x != null && (typeof x !== 'string' || !ENT_ID.test(x)))))) throw new Error(`storyboard.json: ${v.id}/${s.id}: variants must be {<entity id>: <variant id> | null}`);
       if (s.gen != null && !GENS.includes(s.gen)) throw new Error(`storyboard.json: ${v.id}/${s.id}: gen is still or video`);
       if (s.thumb != null && (typeof s.thumb !== 'string' || !THUMB_RE.test(s.thumb) || s.thumb.split('/').includes('..'))) throw new Error(`storyboard.json: ${v.id}/${s.id}: bad thumb path`);
+      if (s.clip != null) shapeClip(s.clip, `storyboard.json: ${v.id}/${s.id}: clip`);
     }
   }
   if (d.versions.length && !vids.has(d.current)) throw new Error('storyboard.json: current must name a version');
@@ -347,7 +352,7 @@ const clock = (ms) => { const s = Math.max(0, ms) / 1000, m = Math.floor(s / 60)
 export function boardText(v) {
   return [...(v?.shots || [])].sort(byTime).map(s => [`[${s.scene || '-'} ${s.id} ${clock(s.t0)}–${clock(s.t1)} ${s.kind}${s.gen ? ' ' + s.gen : ''}] ${s.title || ''}`, ...(s.text ? [s.text] : []), ...(s.camera ? [`camera: ${s.camera}`] : []),
     ...([...s.cast || [], ...s.locations || [], ...s.props || []].length ? [`with: ${[...s.cast || [], ...s.locations || [], ...s.props || []].map(x => x + (s.variants && Object.hasOwn(s.variants, x) ? `(${s.variants[x] || 'root'})` : '')).join(', ')}`] : []),
-    ...(s.sketch ? [`frame: ${s.sketch}`] : [])].join('\n')).join('\n\n');
+    ...(s.sketch ? [`frame: ${s.sketch}`] : []), ...(s.clip?.file ? [`take: ${s.clip.request || s.clip.file.split('/').pop()}.${s.clip.take ?? '?'}${s.clip.out_ms != null ? ` ${(s.clip.in_ms / 1000).toFixed(2)}–${(s.clip.out_ms / 1000).toFixed(2)} s` : ''}`] : [])].join('\n')).join('\n\n');
 }
 export function shotChanges(a, b) {
   const X = new Map((a?.shots || []).map(s => [s.id, s])), Y = new Map((b?.shots || []).map(s => [s.id, s]));

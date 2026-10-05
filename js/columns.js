@@ -196,21 +196,27 @@ export function makeColumns(tl, store) {
       }, act: seekAct, refresh: onBoard(refreshChips),
       dblclick(c, t) { if (!tl.player.video) tl.player.toggleVideo(); tl.seek(t); } },
 
-    // ---------------------------------------------------------------- world clips (EDL uses: clip, take, in-point)
+    // ---------------------------------------------------------------- world clips (EDL uses: clip, take, in-point) + the picked takes
+    // a storyboard shot with a picked take (shot.clip, D6) shows it over the shot's time: ★ take, in–out, its frame; the
+    // EDL uses that shot lists are then hidden (the pick supersedes them)
     { id: 'clips', title: 'world clips', kind: 'text', w: 76, mode: 'follow', stripColor: '#93c2a2',
       build(c) {
+        const picked = store.boardShots().filter(s => s.clip?.file), hide = new Set(picked.flatMap(s => s.clips || []));
+        const items = [...store.uses.filter(u => !hide.has(u.id)), ...picked.map(s => ({ pick: true, s, id: s.id, t0: s.t0, t1: s.t1 }))].sort((a, b) => a.t0 - b.t0 || a.t1 - b.t1);
         // pack overlapping uses into sub-lanes, per overlap cluster (a lone clip keeps the full width)
         const list = []; let cluster = [], cEnd = -1, lanes = [];
         const flush = () => { for (const u of cluster) u.nLanes = lanes.length; cluster = []; lanes = []; };
-        for (const u0 of store.uses) {
+        for (const u0 of items) {
           if (u0.t0 >= cEnd) { flush(); cEnd = -1; }
           let k = lanes.findIndex(end => end <= u0.t0); if (k < 0) { k = lanes.length; lanes.push(0); } lanes[k] = u0.t1;
           const u = { ...u0, lane: k }; cluster.push(u); list.push(u); cEnd = Math.max(cEnd, u0.t1);
         }
         flush();
-        addItems(c, list, (u) => `<div class="use loc-${esc(u.location)}" data-act="seek" data-sel="use:${esc(u.id)}" data-t="${num(u.t0)}" title="${esc(u.clip)} take ${esc(u.take)} · in ${(num(u.in_ms) / 1000).toFixed(2)} s · ${fmt(u.t0, true)}–${fmt(u.t1, true)} · ${esc(u.label)}"><div class="cap">${chip('use:' + u.id, '')}<b>${esc(u.clip)}</b>.${esc(u.take)} <i>+${(num(u.in_ms) / 1000).toFixed(1)}</i></div><img loading="lazy" src="${esc(mediaUrl(u.thumb))}" alt=""></div>`);
+        const pickHtml = ({ s }) => { const k = s.clip, m = store.mediaById?.[k.media] || store.mediaByPath?.[k.file], nm = `${k.request || m?.job || 'take'}.${k.take ?? '?'}`;
+          return `<div class="use pick" data-act="seek" data-sel="shot:${esc(s.id)}" data-t="${num(s.t0)}" title="${esc(`${s.id}: picked take ${nm} (${k.file})${k.out_ms != null ? ` · in ${(k.in_ms / 1000).toFixed(2)} s → out ${(k.out_ms / 1000).toFixed(2)} s` : ' · still'} · ${fmt(s.t0, true)}–${fmt(s.t1, true)}${k.note ? '\n' + k.note : ''}${(k.alt || []).length ? '\n' + k.alt.map(a => `alt for ${fmt(a.t, true)}: ${a.note}`).join('\n') : ''}`)}"><div class="cap"><b>★${k.request || m?.job ? 't' + esc(k.take ?? '?') : esc(nm)}</b> <i>${k.out_ms != null ? `${(k.in_ms / 1000).toFixed(1)}–${(k.out_ms / 1000).toFixed(1)}` : 'still'}</i>${(k.alt || []).length ? `<i class="alt">+${k.alt.length}</i>` : ''}</div>${m?.thumb ? `<img loading="lazy" src="${esc(mediaUrl(m.thumb))}" alt="">` : ''}</div>`; };
+        addItems(c, list, (u) => u.pick ? pickHtml(u) : `<div class="use loc-${esc(u.location)}" data-act="seek" data-sel="use:${esc(u.id)}" data-t="${num(u.t0)}" title="${esc(u.clip)} take ${esc(u.take)} · in ${(num(u.in_ms) / 1000).toFixed(2)} s · ${fmt(u.t0, true)}–${fmt(u.t1, true)} · ${esc(u.label)}"><div class="cap">${chip('use:' + u.id, '')}<b>${esc(u.clip)}</b>.${esc(u.take)} <i>+${(num(u.in_ms) / 1000).toFixed(1)}</i></div><img loading="lazy" src="${esc(mediaUrl(u.thumb))}" alt=""></div>`);
         c.items.forEach((it) => { it.el.style.left = `${it.x.lane / it.x.nLanes * 100}%`; it.el.style.width = `${100 / it.x.nLanes}%`; it.el.style.right = 'auto'; });
-      }, act: seekAct, refresh: refreshChips },
+      }, act: seekAct, refresh: onBoard(refreshChips) },
 
     // ---------------------------------------------------------------- cast per shot
     { id: 'cast', title: 'cast', kind: 'text', w: 40, mode: 'follow', stripColor: '#ff7ab8',

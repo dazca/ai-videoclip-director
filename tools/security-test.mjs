@@ -705,6 +705,50 @@ try {
     fs.writeFileSync(path.join(D, 'proposals.json'), JSON.stringify(pj));
   }
 
+  // ---------------------------------------------------------------- take selection (D6): the pick is the director's (page only); in / out stay
+  // inside the take's duration; the take must be registered media of the project (and a take of that shot); a page save of
+  // storyboard.json and the agent's shots_update cannot set or change a pick
+  {
+    const asPage = (body) => post(`/api/op/take_act?project=${P}`, body, { origin: A.base });
+    const pick = { act: 'pick', shot: 's2-wall', media: 'C1_1', in_ms: 500, out_ms: 1500, note: '<img src=x onerror="window.__tk=1">' };
+    const tries = [(await op('take_act', pick)).status, (await op('take_act', { ...pick, via: 'page' })).status, (await post(`/api/op/take_act?project=${P}`, pick, { origin: 'http://evil.example' })).status];
+    try { S.ops.take_act(P, pick); tries.push(200); } catch (e) { tries.push(e.code); }
+    const noTool = !fs.readFileSync(path.join(WB, 'mcp', 'tools', 'takes.mjs'), 'utf8').includes("registerTool('take_act'");
+    const sb0 = readP('storyboard.json');
+    check('take selection: an agent cannot pick a take (take_act over the agent surface, with a claimed via "page", from a foreign Origin, offline: 403; no MCP tool); storyboard.json untouched',
+      tries.every(s => s === 403) && noTool && readP('storyboard.json').rev === sb0.rev, { tries, noTool });
+    const rng = {
+      past_end: (await asPage({ ...pick, out_ms: 3001 })).status, negative_in: (await asPage({ ...pick, in_ms: -40 })).status, in_after_out: (await asPage({ ...pick, in_ms: 1500, out_ms: 1500 })).status,
+      not_a_number: (await asPage({ ...pick, out_ms: 'end' })).status, still_with_range: (await asPage({ ...pick, media: undefined, file: 'media/still/I1.jpg', in_ms: 100, out_ms: 500 })).status,
+      alt_outside_song: (await asPage({ ...pick, alt: [{ media: 'C1_0', t: 10 ** 9, note: 'x' }] })).status,
+      propose_past_end: (await op('take_propose', { shot: 's2-wall', media: 'C1_1', in_ms: 0, out_ms: 999999, why: 'x' })).status,
+    };
+    check('take selection: in / out must stay inside the take\'s duration (past the end, negative, in >= out, not a number, a range on a still, an alternative outside the song: 400; take_propose too)',
+      Object.values(rng).every(s => s === 400) && readP('storyboard.json').rev === sb0.rev, rng);
+    const reg = {
+      unregistered: (await asPage({ ...pick, media: undefined, file: 'media/clip/not-there.mp4' })).status,
+      traversal: (await asPage({ ...pick, media: undefined, file: '../_template/song.json' })).status,
+      outside: (await asPage({ ...pick, media: undefined, file: path.join(MB, 'roots', 'a.txt') })).status,
+      a_render: (await asPage({ ...pick, media: 'demo-v1' })).status, audio: (await asPage({ ...pick, media: 'demo-song', in_ms: 0, out_ms: 1000 })).status,
+      not_this_shot: (await asPage({ ...pick, media: 'C2_0', in_ms: 0, out_ms: 1000 })).status,
+      alt_unregistered: (await asPage({ ...pick, alt: [{ file: 'media/clip/nope.mp4', t: 1000 }] })).status,
+      propose_unregistered: (await op('take_propose', { shot: 's2-wall', file: 'media/clip/nope.mp4', why: 'x' })).status,
+      bad_shot: (await asPage({ ...pick, shot: '../x' })).status,
+    };
+    check('take selection: the take must be registered media of the project and a take of that shot (unregistered, a traversal, a path outside, a render, audio, another shot\'s take, an unregistered alternative: 4xx; take_propose too)',
+      Object.values(reg).every(s => s === 400 || s === 404) && readP('storyboard.json').rev === sb0.rev, reg);
+    const ok = await asPage(pick), sbP = readP('storyboard.json'), clipNow = sbP.versions.find(v => v.id === sbP.current).shots.find(s => s.id === 's2-wall').clip;
+    // a page save that forges a pick (another take, another range) keeps the server's; the agent's shots_update cannot set one either
+    const forged = await pageSave('storyboard.json', (d) => { const v = structuredClone(d.versions.find(x => x.id === d.current)); v.id = 'v99'; v.n = 99; const s = v.shots.find(x => x.id === 's2-wall'); s.clip = { ...s.clip, file: 'media/clip/C1_0.mp4', media: 'C1_0', in_ms: 0, out_ms: 3000 }; const o = v.shots.find(x => x.id === 's3-grid'); o.clip = { file: 'render/demo-v1.mp4', in_ms: 0, out_ms: 100 }; d.versions.push(v); d.current = 'v99'; });
+    const sbF = readP('storyboard.json'), vF = sbF.versions.find(v => v.id === sbF.current);
+    const agentClip = await op('shots_update', { upsert: [{ id: 's3-grid', clip: { file: 'media/clip/C2_0.mp4', in_ms: 0, out_ms: 1000 } }] });
+    const sbA = readP('storyboard.json'), vA = sbA.versions.find(v => v.id === sbA.current);
+    check('take selection: the page picks (200, a new version, approvals untouched); a page save of storyboard.json cannot forge a pick (the server\'s is kept, a forged one on another shot dropped); the agent\'s shots_update ignores a clip (warning)',
+      ok.status === 200 && clipNow?.file === 'media/clip/C1_1.mp4' && clipNow.via === 'page' && forged.status === 200 && vF.shots.find(s => s.id === 's2-wall').clip?.file === 'media/clip/C1_1.mp4' && vF.shots.find(s => s.id === 's2-wall').clip.in_ms === 500
+      && !vF.shots.find(s => s.id === 's3-grid').clip && agentClip.status === 200 && !vA.shots.find(s => s.id === 's3-grid').clip && (agentClip.body?.warnings || []).some(w => /clip ignored/.test(w)),
+      { ok: ok.status, forged: forged.status, kept: vF.shots.find(s => s.id === 's2-wall').clip?.file, s3: vF.shots.find(s => s.id === 's3-grid').clip, agent: agentClip.status });
+  }
+
   // ---------------------------------------------------------------- final approvals (stage 7): the director approves and locks; a locked
   // project refuses every agent write (409) over HTTP (op, save, restore) and offline, while the page and the reads still work
   {
@@ -968,6 +1012,15 @@ try {
     check('F02 proposals: hostile titles, whys and texts render as text in the strips; an SVG with script written by hand into proposals/ is only an <img> (strip and large view) and never runs',
       ppInert && ppCards >= 3 && !ppv.length, { ppInert, ppCards, ppv: ppv.slice(0, 2) });
     await ppg.close();
+    // take selection: the pick's hostile note (and the shot's takes) render as text in the Shot panel and the timeline clip column
+    const tpg = await browser.newPage();
+    await tpg.goto(`${A.base}/?project=${P}`, { waitUntil: 'domcontentloaded' });
+    await tpg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 });
+    await tpg.evaluate(() => window.WB.stages.open('storyboard')); await wait(600);
+    await tpg.evaluate(() => window.WB.storyboard.focus('s2-wall')); await wait(800);
+    const tk = await tpg.evaluate(() => ({ inert: window.__tk === undefined && !document.querySelector('.tkw img[src="x"], .col-clips img[src="x"]'), note: document.querySelector('.tkw .tknote')?.value || '', cards: document.querySelectorAll('.tkw .tkc').length }));
+    check('F02 take selection: a hostile note on the pick renders as text (the Shot panel\'s takes, the note field) and never runs', tk.inert && /onerror/.test(tk.note) && tk.cards >= 2, tk);
+    await tpg.close();
   }
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {

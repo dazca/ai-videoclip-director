@@ -10,7 +10,9 @@
 // row; Alt+N notes the selected shot. Right-click: + Add › shot / note (undoable).
 // "Shots from beats" proposes one shot per scene beat or group of beats (js/storyboard.js shotsFromBeats). Edits collect
 // in a draft (kept in this browser) until "Save version" (Ctrl+Enter): every save is a new version in storyboard.json.
-// MCP: storyboard_get, shots_update, shot_note_add / shot_note_resolve, gaps_get. Format: js/storyboard.js.
+// Takes (D6, tabs/takes.js): the Shot panel shows the shot's takes; the director picks one with in / out, a note and
+// alternatives (take_act, page only: a new version on the saved shot; the draft carries the saved picks along).
+// MCP: storyboard_get, shots_update, shot_note_add / shot_note_resolve, gaps_get, takes_get / take_propose. Format: js/storyboard.js.
 import { store, prefs, toast, esc, PROJECT, postJSON, mediaUrl } from '../js/store.js';
 import { fmt } from '../js/timeline.js';
 import { commands } from '../core/commands.js';
@@ -24,6 +26,7 @@ import { NotesColumn } from '../core/notescol.js';
 import { history } from '../core/history.js';
 import { stripHtml, register as registerProposals, offerPrepare } from '../core/proposals.js';
 import * as PR from '../js/proposals.js';
+import { mountTakes } from './takes.js';
 
 const WB = () => window.WB;
 const visible = () => WB()?.app?.active() === 'stage' && WB().stages?.current() === 'storyboard';
@@ -73,7 +76,7 @@ class Board {
           sub: (n) => n.target.kind === 'shot' ? n.target.id : '',
           targetAt: (x) => { const c = x.closest?.('[data-shot]'); return c ? shotT(c.dataset.shot) : sc ? sceneT(sc) : null; } }; }).filter(Boolean),
       current: () => this.sel && this.shot(this.sel) ? shotT(this.sel) : null });
-    store.on((w) => { if (['board', 'scenes', 'all', 'approvals', 'requests', 'breakdown', 'costs', 'proposals'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
+    store.on((w) => { if (['board', 'scenes', 'all', 'approvals', 'requests', 'breakdown', 'costs', 'proposals', 'takes'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
     this.render();
   }
   // a draft edit from "+ Add" (a shot) and the other structural edits: one undo step (Ctrl+Z puts the draft back)
@@ -95,10 +98,16 @@ class Board {
     this.draft = d && d.base === (this.doc?.current || null) && Array.isArray(d.shots) ? d.shots : structuredClone(this.cur?.shots || []);
     this.base = this.doc?.current || null;
   }
+  // the picked takes (shot.clip) are the saved version's (take_act writes them): the draft always carries them as they are
+  syncPicks() { const m = new Map((this.cur?.shots || []).filter(x => x.clip).map(x => [x.id, x.clip])); for (const d of this.draft) { if (m.has(d.id)) d.clip = structuredClone(m.get(d.id)); else delete d.clip; } }
   syncBase() {
     if (this.base === (this.doc?.current || null) || this.busy) return;
+    const strip = (l) => this.sorted(l).map(({ clip: _c, ...x }) => x), old = this.doc?.versions.find(v => v.id === this.base);
     if (!this.dirtyAgainst(this.base)) this.draft = structuredClone(this.cur?.shots || []);
-    else toast(`storyboard: a new version (${this.doc.current}) arrived while you have unsaved edits; save makes yours the next version`);
+    else {
+      this.syncPicks();   // a pick (take_act) is its own version: the unsaved edits stay, with the new pick
+      if (!SB.sameShots(strip(old?.shots), strip(this.cur?.shots))) toast(`storyboard: a new version (${this.doc.current}) arrived while you have unsaved edits; save makes yours the next version`);
+    }
     this.base = this.doc?.current || null; this.saveDraft();
   }
   sorted(l) { return [...(l || [])].sort(SB.byTime); }
@@ -179,7 +188,7 @@ class Board {
     for (const mode of [this.snap, 'beats', 'off']) { const x = SB.snapGrid(want, this.song, mode), mm = mode === 'off' ? 250 : mode === 'bars' ? SB.barMs(this.song) : SB.beatMs(this.song); if (x - s.t0 >= mm * 0.99 && s.t1 - x >= mm * 0.99) { t = x; break; } }
     if (t == null) return toast(`${id} is too short to split (${secs(s.t1 - s.t0)})`);
     const nid = SB.nextShotId(this.doc, this.draft), bt = (b) => this.beatT(s.scene, b) ?? s.t0;
-    if (this.undoable(`split ${id}: ${nid}`, () => this.edit((d) => { d.push({ ...structuredClone(s), id: nid, t0: t, title: '', text: '', camera: '', sketch: null, clips: [], beats: s.beats.filter(b => bt(b) >= t) }); s.beats = s.beats.filter(b => bt(b) < t); s.t1 = t; }))) { this.select(nid); toast(`${id} split at ${clk(t)}: ${nid}`); return nid; }
+    if (this.undoable(`split ${id}: ${nid}`, () => this.edit((d) => { const ns = { ...structuredClone(s), id: nid, t0: t, title: '', text: '', camera: '', sketch: null, clips: [], beats: s.beats.filter(b => bt(b) >= t) }; delete ns.clip; d.push(ns); s.beats = s.beats.filter(b => bt(b) < t); s.t1 = t; }))) { this.select(nid); toast(`${id} split at ${clk(t)}: ${nid}`); return nid; }
   }
   neighbours(s) { const g = s.scene && this.scene(s.scene) ? this.inScene(s.scene) : this.orphans(), i = g.indexOf(s); return { g, i, prev: g[i - 1] || null, next: g[i + 1] || null }; }
   merge(id) {
@@ -423,6 +432,7 @@ class Board {
     const frame = s.sketch ? `<img src="${esc(this.skUrl(s.sketch))}" alt="" loading="lazy">` : s.thumb ? `<img src="${esc(mediaUrl(s.thumb))}" alt="" loading="lazy">` : `<span class="sbnofr" data-a="draw" title="draw the frame">no frame · draw</span>`;
     const chips = assets.map(a => `<span class="sbch k-${a.type}${a.approved ? ' ok' : ''}${a.missing ? ' miss' : ''}" title="${esc(`${a.type} ${a.name}${a.variant ? ' · ' + a.variant_name : ''}${a.source === 'shot' ? ' (this shot)' : ''} · ${a.approved ? 'approved' : a.why}`)}"><i>${TL[a.type]}</i>${esc(a.name)}${a.variant ? `<em>${esc(a.variant_name)}</em>` : ''}</span>`).join('');
     const last = reqs[reqs.length - 1];
+    const pk = s.clip?.file ? `<span class="sbrq pick" title="${esc(`picked take ${s.clip.file}${s.clip.out_ms != null ? ` ${(s.clip.in_ms / 1000).toFixed(2)}–${(s.clip.out_ms / 1000).toFixed(2)} s` : ''}${s.clip.note ? ' · ' + s.clip.note : ''}`)}">★ ${esc(s.clip.request || store.mediaById?.[s.clip.media]?.job || 'take')}.${esc(s.clip.take ?? '?')}${s.clip.out_ms != null ? ` ${((s.clip.out_ms - s.clip.in_ms) / 1000).toFixed(1)}s` : ''}</span>` : '';
     const rq = (s.clips || []).length ? `<span class="sbrq clip" title="${esc(s.clips.join(' '))}">clip ${esc(String(s.clips[0]).split('@')[0])}${s.clips.length > 1 ? ' +' + (s.clips.length - 1) : ''}</span>`
       : last ? `<span class="sbrq s-${esc(last.status)}" title="${esc(`${last.id} ${last.kind} · ${last.status} · est ${usd(last.est_cost)}`)}">${esc(String(last.kind).replace('shot-', ''))} · ${esc(last.status)}</span>`
       : `<span class="sbrq none" title="no generation request or clip yet">no request · ${est.gen} ~${usd(est.usd)}</span>`;
@@ -431,7 +441,7 @@ class Board {
       + `<div class="sbfr${s.sketch ? ' skf' : ''}">${frame}<span class="sbg" title="${est.gen === 'video' ? 'a video shot' : 'a still'}">${est.gen === 'video' ? '▶' : '▣'}</span>${(() => { const ps = PR.setsFor(store.proposals, { stage: 'storyboard', kind: 'shot', id: s.id }), it = ps.flatMap(x => x.items).filter(i => i.status !== 'dismissed'), pk = it.find(PR.isPicked); return it.length ? `<span class="ppbadge${pk ? ' pk' : ''}" title="${esc(`${it.length} frame proposal(s)${pk ? ` · picked “${pk.title}”` : ''}: select the shot to choose`)}">◇${pk ? '✓' : it.filter(i => i.status === 'open').length}</span>` : ''; })()}</div>`
       + `<div class="sbtx">${esc(s.title && s.text && !s.text.startsWith(s.title) ? `${s.title}: ${s.text}` : s.text || s.title) || '<i class="dim">no action yet</i>'}</div>`
       + (s.camera ? `<div class="sbcam" title="${esc(s.camera)}">⌖ ${esc(s.camera)}</div>` : '')
-      + `<div class="sbchips">${chips || '<span class="dim">no cast / location</span>'}</div><div class="sbft">${rq}</div></div>`;
+      + `<div class="sbchips">${chips || '<span class="dim">no cast / location</span>'}</div><div class="sbft">${pk}${rq}</div></div>`;
   }
   placeSketch() {
     if (!this.sk) return;
@@ -459,6 +469,8 @@ class Board {
     }
     const list = this.$('.sbside .lylist'), keep = list.scrollTop;
     list.innerHTML = this.side === 'gaps' ? this.gapsHtml(g) : this.side === 'versions' ? this.versionsHtml() : this.shotHtml();
+    const th = this.side === 'shot' && this.sel && list.querySelector('.tkhost');
+    if (th) mountTakes(th, { shot: this.sel });
     list.scrollTop = keep;
   }
   shotHtml() {
@@ -496,6 +508,7 @@ class Board {
       + `<div class="sbiadd">${need.map(x => `<a data-add="${esc(x.type)}:${esc(x.id)}" title="the scene needs it (breakdown)">+ ${esc(store.entityById?.[x.id]?.name || x.id)}</a>`).join('')}<select class="sbin-add"><option value="">+ add…</option>${['character', 'location', 'prop'].map(t => { const l = avail.filter(e => e.kind === t); return l.length ? `<optgroup label="${A.TYPE[t].Titles}">${l.map(e => `<option value="${t}:${esc(e.id)}">${esc(e.name || e.id)}</option>`).join('')}</optgroup>` : ''; }).join('')}</select></div>`;
     // requests (drafts approved here) and the next one this shot needs
     const reqs = this.reqs(s.id), openR = reqs.some(r => OPEN_REQ.includes(r.status)), saved = !!this.cur?.shots.some(x => x.id === s.id), q = est.items[0];
+    h += `<div class="scbh">takes <span class="dim">pick one: in / out, a note, alternatives</span></div><div class="tkhost"></div>`;
     h += `<div class="scbh">generation</div>${(s.clips || []).length ? `<div class="sbreq s-done"><b>clip</b><span class="sbrqs">${esc(s.clips.join(' '))}</span><span class="dim">in the world clips column</span></div>` : ''}` + reqs.map(r => `<div class="sbreq s-${esc(r.status)}" data-r="${esc(r.id)}"><b>${esc(String(r.kind).replace('shot-', ''))}</b><span class="dim">${esc(r.id)}</span><span class="sbrqs">${esc(r.status)}</span><span class="dim">${usd(r.est_cost)}${r.actual_cost_usd != null ? ' / ' + usd(r.actual_cost_usd) : ''}</span>${r.status === 'draft' ? `<button data-a="reqok" class="pri" title="approve: the agent may run it and spend up to the estimate (page only)">Approve</button><button data-a="reqno">Reject</button>` : ''}</div>`).join('')
       + `<div class="sbiact"><button data-a="reqgen" class="pri"${openR || !saved ? ' disabled' : ''} title="${esc(!saved ? 'save the storyboard first' : openR ? 'a request is open' : `a DRAFT request (nothing runs or is paid until you approve it): ${q.tool}, ${q.why}`)}">Request ${esc(q.kind.replace('shot-', ''))} · est ${usd(q.usd)}</button>${est.items.length > 1 ? `<span class="dim">then the video ${usd(est.items[1].usd)}</span>` : ''}</div>`;
     h += `<div class="sbiact"><button data-a="split" title="cut on the beat grid at the playhead (inside the shot) or the middle">Split at beat</button><button data-a="merge"${next && next.scene === s.scene ? '' : ' disabled'}>Merge with next</button><button data-a="mvl"${prev && prev.scene === s.scene ? '' : ' disabled'} title="swap with the previous shot">◂ Move</button><button data-a="mvr"${next && next.scene === s.scene ? '' : ' disabled'} title="swap with the next shot">Move ▸</button><button data-a="note" title="a note on this shot (Alt+N)">✉ Note</button><button data-a="del">Delete</button></div>`;

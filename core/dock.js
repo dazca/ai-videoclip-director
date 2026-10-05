@@ -5,7 +5,8 @@
 // kept in sync over a BroadcastChannel · geometry remembered in localStorage.
 //   WB.dock.open() / close() / toggle() / isOpen() / show(source) / el / body   (interface from Part A, kept)
 //   WB.dock.hover(source) / unhover() / film() / pin(on?) / popout() / setCorner(c) / current() / mode()
-//   source = { kind: 'film'|'shot'|'use'|'compare'|'media'|'entity'|'look'|'image'|'video', id?, src?, title?, t?, in_ms? }
+//   source = { kind: 'film'|'shot'|'use'|'compare'|'ab'|'media'|'entity'|'look'|'image'|'video', id?, src?, title?, t?, in_ms? }
+//            'ab' = two takes side by side in lockstep (D6 take selection): {kind: 'ab', a, b (media ids), ain, aout, bin, bout (ms)}
 //            (Part A's item.preview sends {kind:'clip'|'shot'|'entity', title, src}: resolved by id / name)
 import { store, mediaUrl, prefs, PROJECT, isPrivatePath } from '../js/store.js';
 
@@ -41,6 +42,7 @@ export function titleOf(s) {
   if (s.kind === 'use') { const u = store.uses.find(x => x.id === s.id); return u ? `${u.clip}.${u.take} +${(u.in_ms / 1000).toFixed(2)} s · ${fmt(u.t0)}` : s.id; }
   if (s.kind === 'shot') { const x = store.shots.find(y => y.id === s.id); return x ? `${x.id} · ${fmt(x.t0)}–${fmt(x.t1)}` : s.id; }
   if (s.kind === 'compare') return `${s.id}: takes side by side`;
+  if (s.kind === 'ab') return `A/B · ${store.mediaById[s.a]?.label || s.a} | ${store.mediaById[s.b]?.label || s.b}`;
   if (s.kind === 'media') { const m = store.mediaById[s.id]; return m ? m.label : s.id; }
   if (s.kind === 'entity') return store.entityById?.[s.id]?.name || s.id;
   if (s.kind === 'look') { const [e, l] = s.id.split('/'); return `${store.entityById?.[e]?.name || e} · ${store.entityById?.[e]?.looks?.find(x => x.id === l)?.name || l}`; }
@@ -72,6 +74,11 @@ function renderSource(s) {
     const using = new Set(store.uses.filter(u => u.clip === s.id).map(u => u.take));
     const from = s.in_ms ?? store.uses.find(u => u.clip === s.id)?.in_ms ?? 0;
     return `<div class="cmp n${takes.length}">${takes.map(m => `<div class="ct${using.has(m.take) ? ' on' : ''}" data-media="${esc(m.id)}">${vid(m.path, { from, to: from + 2500, cls: 'sync' })}<b>take ${esc(m.take)}${using.has(m.take) ? ' · in use' : ''}</b></div>`).join('')}</div>`;
+  }
+  if (s.kind === 'ab') {
+    const side = (id, from, to, k) => { const m = store.mediaById[id]; if (!m) return `<div class="ct"><span class="dim">no ${esc(k)}</span></div>`; const isV = /\.(mp4|webm|mov)$/i.test(m.path);
+      return `<div class="ct" data-media="${esc(m.id)}">${isV ? vid(m.path, { from, to, cls: 'sync' }) : img(m.path)}<b>${esc(k)} · ${esc(m.job != null ? `${m.job}.${m.take ?? '?'}` : m.label)}${isV && to ? ` · ${(from / 1000).toFixed(2)}–${(to / 1000).toFixed(2)} s` : ''}</b></div>`; };
+    return `<div class="cmp n2 ab">${side(s.a, Number(s.ain) || 0, s.aout == null ? null : Number(s.aout), 'A')}${side(s.b, Number(s.bin) || 0, s.bout == null ? null : Number(s.bout), 'B')}</div>`;
   }
   if (s.kind === 'media') {
     const m = store.mediaById[s.id]; if (!m) return miss(s);

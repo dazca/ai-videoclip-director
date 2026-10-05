@@ -307,7 +307,10 @@ function stampPage(name, data, cur, fromPage = true) {
   if (name === 'storyboard.json') {
     try { checkBoard(data); } catch (e) { throw new S.WbError(400, e.message); }
     const cv = new Map((cur.versions || []).map(v => [v.id, v])), cn = new Map((cur.notes || []).map(n => [n.id, n]));
-    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, created: at, ...(v.via === 'import' && !cur.versions ? {} : { by: 'director', via: 'page' }) });
+    // the picked takes (shot.clip) are written only by take_act: a new version from a page save keeps the server's picks
+    const picks = new Map(((cur.versions || []).find(v => v.id === cur.current)?.shots || []).filter(x => x.clip).map(x => [x.id, x.clip]));
+    const keepPicks = (shots) => shots.map(x => { const { clip: _c, ...r } = x; return picks.has(x.id) ? { ...r, clip: picks.get(x.id) } : r; });
+    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, shots: keepPicks(v.shots), created: at, ...(v.via === 'import' && !cur.versions ? {} : { by: 'director', via: 'page' }) });
     data.notes = (data.notes || []).filter(n => n && typeof n === 'object').map(n => {
       const c = cn.get(n.id), cr = new Map((c?.replies || []).map(r => [r.id, r]));
       const replies = (Array.isArray(n.replies) ? n.replies : []).filter(r => r && typeof r === 'object').map(r => cr.get(r.id) ? { ...r, by: cr.get(r.id).by, via: cr.get(r.id).via, at: cr.get(r.id).at } : { ...r, by: 'director', via: 'page', at });
@@ -385,6 +388,8 @@ http.createServer(async (req, res) => {
         if (name === 'proposal_act' || name === 'proposals_local' || name === 'proposals_add') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
         // stage 7: locking / unlocking the project for render are the director's (page only)
         if (name === 'final_lock' || name === 'final_unlock') body.via = fromPage ? 'page' : 'agent';
+        // take selection (D6): picking a take, its in / out and alternatives are the director's (page only)
+        if (name === 'take_act') body.via = fromPage ? 'page' : 'agent';
         if (!fromPage) S.lockGate(project, name, body);   // a locked project refuses every agent write, proposals included
         delete body.import_ok;   // only a local script calling lib/store.mjs directly may import approved looks
         return json(res, 200, await S.ops[name](project, body));
@@ -432,8 +437,8 @@ http.createServer(async (req, res) => {
       if (priv(rel, [m[1]]) || priv(`data/${m[1]}/${rel}`, [])) { res.writeHead(403); return res.end('private: local only'); }
       // notes.json: the old note stores are migrated into it (v2) on its first read
       if (m[2] === 'notes.json' && fs.existsSync(path.join(pd, 'song.json'))) { try { S.notesDoc(m[1]); } catch (e) { /* a broken file is served as it is */ } }
-      // a writable state file (or revisions.json / proposals.json, the server's) that does not exist yet reads as null (the page uses its default)
-      if ((S.WRITABLE.has(m[2]) || m[2] === 'revisions.json' || m[2] === 'proposals.json') && !fs.existsSync(f)) return json(res, 200, null);
+      // a writable state file (or revisions.json / proposals.json / takes.json, the server's) that does not exist yet reads as null (the page uses its default)
+      if ((S.WRITABLE.has(m[2]) || m[2] === 'revisions.json' || m[2] === 'proposals.json' || m[2] === 'takes.json') && !fs.existsSync(f)) return json(res, 200, null);
       // a remote (LAN) client reads the project's JSON without private paths or items flagged private (media.json,
       // entities with private refs and iteration nodes, requests built on private photos)
       if (!isLocal(req) && /\.json$/i.test(f) && fs.existsSync(f)) {
