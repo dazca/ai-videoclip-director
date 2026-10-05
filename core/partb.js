@@ -30,14 +30,14 @@ export const HOVER_DELAY = 220;
 document.addEventListener('pointerover', (e) => {
   if (e.pointerType === 'touch') return;
   const el = e.target.closest?.(HOVER_SEL);
-  if (!el && hoverEl && !hoverEl.offsetParent) { hoverEl = null; clearTimeout(hoverTimer); dock.unhover(); }   // its tab was switched away
+  if (!el && hoverEl && (!hoverEl.offsetParent || hoverEl.closest('.pgwrap.bg'))) { hoverEl = null; clearTimeout(hoverTimer); dock.unhover(); }   // its tab was switched away
   if (!el || el.closest('.dock, .pop, .pal, .lookform')) return;
   if (el === hoverEl) return;
   hoverEl = el; clearTimeout(hoverTimer); clearTimeout(leaveTimer);
   if (!dock.isOpen() && !(dock.popped && !dock.popped.closed)) return;
   hoverTimer = setTimeout(() => { const s = hoverSource(el); if (s) dock.hover(s); }, HOVER_DELAY);
 });
-setInterval(() => { if (hoverEl && !hoverEl.offsetParent) { hoverEl = null; clearTimeout(hoverTimer); dock.unhover(); } }, 300);   // its tab was switched away
+setInterval(() => { if (hoverEl && (!hoverEl.offsetParent || hoverEl.closest('.pgwrap.bg'))) { hoverEl = null; clearTimeout(hoverTimer); dock.unhover(); } }, 300);   // its tab was switched away
 document.addEventListener('pointerout', (e) => {
   if (!hoverEl || hoverEl.contains(e.relatedTarget)) return;
   const was = hoverEl; hoverEl = null; clearTimeout(hoverTimer);

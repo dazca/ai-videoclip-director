@@ -23,6 +23,7 @@ import * as SC from '../js/scenes.js';
 import * as SB from '../js/storyboard.js';
 import * as A from '../js/assets.js';
 import { NotesColumn } from '../core/notescol.js';
+import { TimeAxis } from '../core/timemode.js';
 import { history } from '../core/history.js';
 import { stripHtml, register as registerProposals, offerPrepare } from '../core/proposals.js';
 import * as PR from '../js/proposals.js';
@@ -66,7 +67,7 @@ class Board {
     this.wire();
     // the Notes column: one row per scene (its shots' notes tagged with the shot id); the top row: the whole storyboard
     const sceneT = (id) => ({ stage: 'storyboard', kind: 'scene', id }), shotT = (id) => ({ stage: 'storyboard', kind: 'shot', id });
-    this.nc = new NotesColumn({ stage: 'storyboard', scroller: this.$('.sblist'), active: () => !this.compare,
+    this.nc = new NotesColumn({ stage: 'storyboard', scroller: this.$('.sblist'), active: () => !this.compare, fixed: () => !!this.ta?.on,
       top: { label: 'notes on the whole storyboard', targets: [{ stage: 'storyboard', kind: 'stage', id: null }] },
       rows: () => [...this.el.querySelectorAll('.sblist > .sbscene')].map(e => {
         const sc = e.dataset.scene, shots = sc ? this.inScene(sc) : this.orphans(), ids = new Set(shots.map(s => s.id));
@@ -76,6 +77,10 @@ class Board {
           sub: (n) => n.target.kind === 'shot' ? n.target.id : '',
           targetAt: (x) => { const c = x.closest?.('[data-shot]'); return c ? shotT(c.dataset.shot) : sc ? sceneT(sc) : null; } }; }).filter(Boolean),
       current: () => this.sel && this.shot(this.sel) ? shotT(this.sel) : null });
+    // Time view (core/timemode.js): each scene a row on the timeline's axis (its header a band on the left), its shots
+    // stacked down it at their own times; gaps as rows too; shots outside the script after the end
+    this.ta = new TimeAxis({ stage: 'storyboard', scroller: this.$('.sblist'), nc: this.nc, rows: () => this.timeRows(), onApply: () => this.nc.schedule('place'), noSeek: '.sbcard, .sbsh, .sbskslot' });
+    document.addEventListener('wb:timemode', (e) => { if (e.detail.stage === 'storyboard' && !this.typing()) this.render(); });
     store.on((w) => { if (['board', 'scenes', 'all', 'approvals', 'requests', 'breakdown', 'costs', 'proposals', 'takes'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
     this.render();
   }
@@ -116,6 +121,15 @@ class Board {
   saveDraft() { if (this.dirty) prefs.set(DKEY, { base: this.base, shots: this.draft }); else prefs.set(DKEY, null); }
   shot(id) { return id ? this.draft.find(s => s.id === id) || null : null; }
   inScene(id) { return this.draft.filter(s => s.scene === id).sort(SB.byTime); }
+  timeRows() {
+    if (this.compare) return [];
+    return [...this.el.querySelectorAll('.sblist > .sbscene, .sblist > .sbgaprow')].map(e => {
+      if (e.dataset.gap) { const [t0, t1] = e.dataset.gap.split(',').map(Number); return { el: e, t0, t1 }; }
+      const sc = this.scene(e.dataset.scene); if (!sc) return { el: e, t0: null };
+      const subs = [...e.querySelectorAll('.sbcard[data-shot]')].map(c => { const s = this.shot(c.dataset.shot); return s ? { el: c, t0: Math.max(sc.t0, s.t0), t1: Math.min(sc.t1, s.t1) } : null; }).filter(Boolean);
+      return { el: e, t0: sc.t0, t1: sc.t1, subs };
+    });
+  }
   orphans() { const ids = new Set(this.scenes.map(s => s.id)); return this.draft.filter(s => !ids.has(s.scene)).sort(SB.byTime); }
   // a change to the draft: fn(draft); the shots of every scene are tiled again, the list re-sorted; a failure undoes it
   edit(fn, { render = true } = {}) {
@@ -389,6 +403,7 @@ class Board {
     this.renderBar();
     if (this.compare) this.renderDiff(); else this.renderList();
     this.renderSide();
+    this.ta?.apply();
   }
   renderBar() {
     const v = this.cur, scs = this.scenes, boarded = scs.filter(sc => this.inScene(sc.id).length).length, g = this.gapsNow(), cv = SB.costView(store.costs, store.requests);
@@ -407,8 +422,9 @@ class Board {
       list.innerHTML = `<div class="scempty"><b>No scenes yet.</b> The storyboard cuts the script's scenes into shots: draft the script first (<a data-stage="script">stage 2</a>).</div>` + (orph.length ? this.groupHtml(null, orph) : '');
       return this.placeSketch();
     }
+    const tmo = !!this.ta?.on;   // Time view: a gap row seeks on click; its link opens the script
     const rows = [...scs.map(sc => ({ t0: sc.t0, sc })), ...SC.gaps(scs, dur, 1000).map(([a, b]) => ({ t0: a, gap: [a, b] }))].sort((x, y) => x.t0 - y.t0);
-    list.innerHTML = rows.map(r => r.gap ? `<div class="sbgaprow" data-go="gap:${r.gap[0]}" title="no scene covers this stretch: open the script"><span>unscripted ${SC.span(r.gap[0], r.gap[1])} · ${secs(r.gap[1] - r.gap[0])}</span><a>script ›</a></div>` : this.groupHtml(r.sc, this.inScene(r.sc.id))).join('')
+    list.innerHTML = rows.map(r => r.gap ? `<div class="sbgaprow" data-gap="${r.gap[0]},${r.gap[1]}"${tmo ? '' : ` data-go="gap:${r.gap[0]}"`} title="no scene covers this stretch: open the script"><span>unscripted ${SC.span(r.gap[0], r.gap[1])} · ${secs(r.gap[1] - r.gap[0])}</span><a data-go="gap:${r.gap[0]}">script ›</a></div>` : this.groupHtml(r.sc, this.inScene(r.sc.id))).join('')
       + (orph.length ? this.groupHtml(null, orph) : '');
     this.placeSketch();
   }

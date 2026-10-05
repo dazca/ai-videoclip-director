@@ -17,6 +17,7 @@ import * as F from '../js/flow.js';
 import * as SC from '../js/scenes.js';
 import * as BD from '../js/breakdown.js';
 import { NotesColumn } from '../core/notescol.js';
+import { TimeAxis, isTime, setMode } from '../core/timemode.js';
 import { history } from '../core/history.js';
 
 const WB = () => window.WB;
@@ -42,13 +43,19 @@ class Workspace {
     this.wire();
     // the Notes column: one row per item (with its editor when open; in the matrix, per row); scene notes in the top row
     const itemT = (id) => ({ stage: 'breakdown', kind: 'item', id });
-    this.nc = new NotesColumn({ stage: 'breakdown', scroller: this.$('.bdbody'), active: () => !this.compare,
+    this.nc = new NotesColumn({ stage: 'breakdown', scroller: this.$('.bdbody'), active: () => !this.compare, fixed: () => !!this.ta?.on,
       top: () => ({ label: 'notes on the whole breakdown (and on scenes)', targets: [{ stage: 'breakdown', kind: 'stage', id: null }, ...(this.scene ? [{ stage: 'breakdown', kind: 'scene', id: this.scene }] : [])],
         match: (n) => n.target.kind === 'stage' || n.target.kind === 'scene', sub: (n) => n.target.kind === 'scene' ? n.target.id : '' }),
-      rows: () => [...this.el.querySelectorAll('.bdbody .bdrow[data-item], .bdbody tr.bdmxr[data-item]')].map(e => {
+      rows: () => this.ta?.on ? [...this.el.querySelectorAll('.bdbody .bdtmr[data-scene]')].map(e => ({ el: e, targets: [{ stage: 'breakdown', kind: 'scene', id: e.dataset.scene }] }))
+        : [...this.el.querySelectorAll('.bdbody .bdrow[data-item], .bdbody tr.bdmxr[data-item]')].map(e => {
         const ed = e.nextElementSibling?.matches('.bded') ? e.nextElementSibling : null;
         return { ...(ed ? { els: [e, ed] } : { el: e }), targets: [itemT(e.dataset.item)] }; }),
       current: () => this.open && this.item(this.open) ? itemT(this.open) : this.scene ? { stage: 'breakdown', kind: 'scene', id: this.scene } : null });
+    // Time view (core/timemode.js): the matrix turned on its side, one row per scene on the timeline's axis (ordered and
+    // sized by time), one narrow column per item
+    this.ta = new TimeAxis({ stage: 'breakdown', scroller: this.$('.bdbody'), nc: this.nc, onApply: () => this.nc.schedule('place'), noSeek: '.bdtc, .bdtml, .bdtmh',
+      rows: () => this.compare ? [] : [...this.el.querySelectorAll('.bdbody .bdtmr[data-scene]')].map(e => { const s = this.scenes.find(x => x.id === e.dataset.scene); return s ? { el: e, t0: s.t0, t1: s.t1 } : null; }).filter(Boolean) });
+    document.addEventListener('wb:timemode', (e) => { if (e.detail.stage === 'breakdown' && !this.typing()) this.render(); });
     store.on((w) => { if (['breakdown', 'scenes', 'all'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
     this.render();
   }
@@ -240,8 +247,9 @@ class Workspace {
     for (const id of [...this.sel]) if (!this.item(id)) this.sel.delete(id);
     if (this.open && !this.item(this.open)) this.open = null;
     this.renderBar(); this.renderSel();
-    if (this.compare) this.renderDiff(); else if (this.view === 'matrix') this.renderMatrix(); else this.renderList();
+    if (this.compare) this.renderDiff(); else if (isTime('breakdown')) this.renderTime(); else if (this.view === 'matrix') this.renderMatrix(); else this.renderList();
     this.renderSide();
+    this.ta?.apply();
   }
   shown() {
     return this.draft.filter(i => (this.kind === 'all' || i.kind === this.kind) && (this.showDropped || !i.dropped) && (!this.scene || i.links.some(l => l.scene === this.scene)));
@@ -254,7 +262,7 @@ class Workspace {
     this.$('.bdbar').innerHTML = `<span class="bdinfo">${ver}<span class="dim"> · ${counts.map(([k, n]) => `<a data-kind="${k}" title="${n} ${BD.KIND_LABEL[k]} (click: only these)" class="bdcnt${this.kind === k ? ' on' : ''}">${dot(k)}${n}</a>`).join(' ') || '0 items'}</span></span>`
       + (this.scene ? `<span class="bdscf" title="only the items this scene needs">in <b>${esc(this.scene)}</b>${sc?.title ? ' ' + esc(sc.title) : ''} <a data-a="unscene" title="all scenes">×</a></span>` : '') + '<span class="sp"></span>'
       + (this.dirty ? `<span class="unsaved">unsaved edits</span><input class="lymsg" placeholder="what changed (optional)" spellcheck="false" value="${esc(msg)}"><button data-a="save" class="pri" title="Ctrl+Enter: a new version">Save version</button><button data-a="drdiff" title="compare the current version with your edits">diff</button><button data-a="discard">Discard</button>` : '')
-      + `<span class="bdvw"><a data-view="list" class="${this.view === 'list' ? 'on' : ''}">List</a><a data-view="matrix" class="${this.view === 'matrix' ? 'on' : ''}" title="items x scenes: click a cell to link / unlink">Matrix</a></span>`
+      + (isTime('breakdown') ? '' : `<span class="bdvw"><a data-view="list" class="${this.view === 'list' ? 'on' : ''}">List</a><a data-view="matrix" class="${this.view === 'matrix' ? 'on' : ''}" title="items x scenes: click a cell to link / unlink">Matrix</a></span>`)
       + `<select class="bdkind" title="kind">${['all', ...BD.KINDS].map(k => `<option value="${k}"${k === this.kind ? ' selected' : ''}>${k === 'all' ? 'all kinds' : BD.KIND_LABEL[k]}</option>`).join('')}</select>`
       + `<label class="dim" title="show dropped items (greyed; restorable)"><input type="checkbox" class="bddrop"${this.showDropped ? ' checked' : ''}>dropped</label>`
       + `<button data-a="add" title="a new item">+ item</button><button data-a="suggest" title="a first list from the scene text, beats and the intake (who, where): capitalised names, garments, objects, effects">Suggest from script</button><button data-a="extract" title="writes an ask for the agent: extract the breakdown from the script">Ask the agent to extract</button><button data-a="versions" class="${this.side === 'versions' ? 'on' : ''}" title="the versions panel: diff any two, restore">Versions ${this.doc.versions.length}</button>`;
@@ -325,6 +333,20 @@ class Workspace {
     const foot = `<tr class="bdmxf"><td class="bdmxn dim">items per scene</td>${scenes.map(s => `<td>${items.filter(i => !i.dropped && i.links.some(l => l.scene === s.id)).length || ''}</td>`).join('')}<td></td></tr>`;
     body.innerHTML = `<div class="bdmxw"><table class="bdmx"><thead>${head}</thead><tbody>${rows}${foot}</tbody></table></div>`;
   }
+  // the Time view: scenes (rows, on the timeline's axis: core/timemode.js) x items (columns); a cell links / unlinks
+  renderTime() {
+    const body = this.$('.bdbody'), items = this.shown(), scenes = [...this.scenes].sort((a, b) => a.t0 - b.t0);
+    if (!items.length || !scenes.length) { this.renderList(); return; }
+    const cols = `grid-template-columns: var(--bdl) repeat(${items.length}, 20px) 24px`, NL = String.fromCharCode(10);
+    const head = `<div class="bdtmh" style="${cols}"><span class="bdtml dim">${scenes.length} scenes × ${items.length} items</span>${items.map(it => `<span class="bdtmi${it.dropped ? ' dropped' : ''}${this.sel.has(it.id) ? ' sel' : ''}" data-icol="${esc(it.id)}" title="${esc(`${it.id} · ${BD.KIND_ONE[it.kind]} · ${it.name}${it.description ? NL + it.description : ''}${NL}click: open it in the list`)}">${dot(it.kind)}<span>${esc(it.name)}</span></span>`).join('')}<span class="bdtmi dim" title="items per scene">Σ</span></div>`;
+    const rows = scenes.map(s => {
+      const n = items.filter(i => !i.dropped && i.links.some(l => l.scene === s.id)).length;
+      return `<div class="bdtmr${this.scene === s.id ? ' on' : ''}" data-scene="${esc(s.id)}" style="${cols}"><span class="bdtml bdsc" data-scene="${esc(s.id)}" title="${esc(`${s.id} · ${SC.span(s.t0, s.t1)} · ${s.title}${NL}click: only this scene's items`)}"><b>${esc(s.id)}</b> ${esc(s.title || '')} <i>${SC.span(s.t0, s.t1)}</i></span>`
+        + items.map(it => { const l = it.links.find(x => x.scene === s.id); return `<span class="bdtc${l ? ' on' : ''}${it.dropped ? ' dropped' : ''}" data-tc="${esc(it.id)}" data-scene="${esc(s.id)}" title="${esc(`${it.name} · ${s.id} ${s.title}${l ? `${NL}linked${l.beats.length ? ' (beats ' + l.beats.join(', ') + ')' : ''}${l.note ? ': ' + l.note : ''}${NL}click: unlink` : `${NL}click: link`}`)}">${l ? (l.beats.length || '●') : ''}</span>`; }).join('')
+        + `<span class="bdtmt">${n || ''}</span></div>`;
+    }).join('');
+    body.innerHTML = `<div class="bdtm">${head}${rows}</div>`;
+  }
   renderDiff() {
     const { a, b } = this.compare, va = this.doc.versions.find(v => v.id === a), vb = b === 'draft' ? { id: 'draft', items: this.draft, message: 'your unsaved edits' } : this.doc.versions.find(v => v.id === b);
     if (!va || !vb) { this.compare = null; return this.renderList(); }
@@ -382,6 +404,8 @@ class Workspace {
       const kc = t.closest('.bdcnt[data-kind]'); if (kc) { this.kind = this.kind === kc.dataset.kind ? 'all' : kc.dataset.kind; return this.render(); }
       const en = t.closest('[data-ent]'); if (en) return this.showEntity(en.dataset.ent);
       // matrix: a cell toggles the link, a scene header filters, a row name selects
+      const tc = t.closest('.bdtc'); if (tc) { const id = tc.dataset.tc, on = this.toggle(id, tc.dataset.scene); toast(`${this.item(id).name} ${on ? '+' : '−'} ${tc.dataset.scene}`); return; }
+      const ic = t.closest('[data-icol]'); if (ic) { setMode('breakdown', 'list'); this.view = 'list'; prefs.set('bdView', 'list'); return this.focus(ic.dataset.icol); }
       const cell = t.closest('td.bdc'); if (cell && iid) { const on = this.toggle(iid, cell.dataset.scene); toast(`${this.item(iid).name} ${on ? '+' : '−'} ${cell.dataset.scene}`); return; }
       const sh = t.closest('th.bdmxs, .bdsc[data-scene]'); if (sh) { this.scene = this.scene === sh.dataset.scene ? null : sh.dataset.scene; return this.render(); }
       if (iid && t.closest('.bded')) {

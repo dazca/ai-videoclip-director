@@ -12,6 +12,7 @@ import { store, esc, mediaUrl, isPrivatePath, postJSON, prefs, toast } from '../
 import { fmt } from '../js/timeline.js';
 import { NotesColumn } from '../core/notescol.js';
 import * as FN from '../js/final.js';
+import { isTime } from '../core/timemode.js';
 
 const WB = () => window.WB;
 const nowIso = () => new Date().toISOString().slice(0, 19);
@@ -34,6 +35,8 @@ export class FinalList {
       rows: () => [...this.el.querySelectorAll('.fnlist .fnrow[data-key]')].map(e => { const r = this.byKey?.get(e.dataset.key), nx = e.nextElementSibling?.classList.contains('fnchg') ? e.nextElementSibling : null; return r ? (nx ? { els: [e, nx], targets: r.targets } : { el: e, targets: r.targets }) : null; }).filter(Boolean),
       current: () => { const f = this.el.querySelector('.fnrow.on'); return f ? this.byKey?.get(f.dataset.key)?.targets[0] || null : null; } });
     el.addEventListener('click', (e) => this.click(e));
+    // the stage's Time view (core/timemode.js; the Final stage only, not Review › Approvals): rows grouped by song section
+    if (panels) document.addEventListener('wb:timemode', (e) => { if (e.detail.stage === 'final') this.render(); });
     el.addEventListener('change', (e) => this.change(e));
     el.addEventListener('keydown', (e) => {
       if (!e.target.matches('.fnchg input')) return;
@@ -86,7 +89,15 @@ export class FinalList {
     if (this.o.panels) this.$('.fntop').innerHTML = this.checklistHtml(v) + this.costsHtml(v.costs);
     const gs = FN.GROUPS.map(g => ({ g, rs: rows.filter(r => r.group === g.id) })).filter(x => x.rs.length);
     const on = this.el.querySelector('.fnrow.on')?.dataset.key;
-    this.$('.fnlist').innerHTML = gs.length ? gs.map(({ g, rs }) => {
+    const tm = this.o.panels && isTime('final');
+    this.tgroups = tm ? this.timeGroups(rows) : null;
+    this.$('.fnlist').classList.toggle('fntime', tm);
+    if (tm) this.$('.fnlist').innerHTML = this.tgroups.length ? this.tgroups.map((g, i) => {
+      const all = g.rs.every(r => this.sel.has(r.key));
+      return `<div class="fngh fntg" data-tg="${i}"><input type="checkbox" data-tsel="${i}"${all ? ' checked' : ''} title="select these rows"><b>${esc(g.label)}</b>${g.t0 != null ? `<a data-t="${g.t0}" title="show in the timeline">${fmt(g.t0)}–${fmt(g.t1)}</a>` : ''}<span class="dim">${g.rs.length}</span></div>`
+        + g.rs.map(r => this.rowHtml(r, r.key === on, true)).join('');
+    }).join('') : `<div class="scempty">${v.counts.total ? 'Nothing matches the filters.' : 'Nothing left to approve.'}</div>`;
+    else this.$('.fnlist').innerHTML = gs.length ? gs.map(({ g, rs }) => {
       const all = rs.every(r => this.sel.has(r.key));
       return `<div class="fngh" data-g="${g.id}"><input type="checkbox" data-gsel="${g.id}"${all ? ' checked' : ''} title="select the ${esc(g.title.toLowerCase())} rows"><b>${g.n} · ${esc(g.title)}</b><span class="dim">${rs.length}</span>${g.id !== 'requests' && g.id !== 'storyboard' ? `<a data-gostage="${g.id}" title="open the stage">open ›</a>` : g.id === 'storyboard' ? '<a data-gostage="storyboard" title="open the stage">open ›</a>' : '<a data-goview="queue" title="Review › Queue">queue ›</a>'}</div>`
         + rs.map(r => this.rowHtml(r, r.key === on)).join('');
@@ -94,12 +105,22 @@ export class FinalList {
     if (this.chg) { const i = this.$('.fnchg input'); if (i) { i.value = this.chg.text || ''; if (document.activeElement !== i) i.focus({ preventScroll: true }); } }
     this.renderConfirm();
   }
-  rowHtml(r, on) {
+  // the Time view: the song's sections in time order, each with the rows that sit in it (by their time); rows without a
+  // song time (an asset tree, a request without a shot) in a last group
+  timeGroups(rows) {
+    const secs = [...(store.song?.sections || [])].sort((a, b) => a.t0 - b.t0).map(s => ({ label: store.secLabel(s), t0: s.t0, t1: s.t1, rs: [] }));
+    const none = { label: 'no song time', t0: null, rs: [] };
+    for (const r of rows) { if (r.t0 == null) { none.rs.push(r); continue; } (secs.find(g => r.t0 >= g.t0 && r.t0 < g.t1) || secs[secs.length - 1] || none).rs.push(r); }
+    for (const g of secs) g.rs.sort((a, b) => a.t0 - b.t0);
+    return [...secs, none].filter(g => g.rs.length);
+  }
+  rowHtml(r, on, tm = false) {
     const t = r.t0 != null ? `<a class="fnt" data-t="${r.t0}" title="show in the timeline">${fmt(r.t0)}</a>` : '<span class="fnt"></span>';
     const th = r.thumb ? `<img class="fnth" src="${esc(mediaUrl(r.thumb))}" alt="" loading="lazy">` : `<span class="fnth fnk-${esc(r.kind)}">${esc(r.kind === 'tree' ? r.type?.[0] || 'a' : r.kind === 'request' ? '$' : r.kind[0])}</span>`;
     const ap = r.act?.approve, chgOpen = this.chg?.key === r.key;
     return `<div class="fnrow${on ? ' on' : ''}${this.sel.has(r.key) ? ' picked' : ''}" data-key="${esc(r.key)}"${r.kind === 'shot' ? ` data-shot="${esc(r.id)}" data-sel="shot:${esc(r.id)}"` : ''}>`
       + `<input type="checkbox" data-sel-row${this.sel.has(r.key) ? ' checked' : ''}${ap ? '' : ' disabled title="cannot be approved here yet"'}>${th}${t}`
+      + (tm ? `<i class="fnsg" title="stage">${esc(FN.GROUPS.find(g => g.id === r.group)?.title || r.group)}</i>` : '')
       + `<span class="fntx" title="${esc(`${r.title}${r.sub ? '\n' + r.sub : ''}`)}"><b>${esc(r.title)}</b> <span class="dim">${esc(r.sub || '')}</span></span>`
       + `<span class="chip s-${esc(r.st)}" title="${esc(r.status)}">${esc(r.status)}</span>`
       + `<span class="fnwhy" title="${esc(r.why)}">${esc(r.why)}</span>`
@@ -135,6 +156,7 @@ export class FinalList {
     const t = e.target;
     if (t.matches('[data-f]')) { const k = t.dataset.f; this.f[k] = t.type === 'checkbox' ? t.checked : t.value; prefs.set(this.pf + { group: 'Group', st: 'St', notes: 'Notes' }[k], this.f[k]); return this.render(); }
     if (t.matches('[data-sel-row]')) { const k = t.closest('.fnrow').dataset.key; t.checked ? this.sel.add(k) : this.sel.delete(k); return this.render(); }
+    if (t.matches('[data-tsel]')) { const rs = (this.tgroups?.[Number(t.dataset.tsel)]?.rs || []).filter(r => r.act?.approve); for (const r of rs) t.checked ? this.sel.add(r.key) : this.sel.delete(r.key); return this.render(); }
     if (t.matches('[data-gsel]')) { const rs = this.rowsShown().filter(r => r.group === t.dataset.gsel && r.act?.approve); for (const r of rs) t.checked ? this.sel.add(r.key) : this.sel.delete(r.key); return this.render(); }
   }
   async click(e) {

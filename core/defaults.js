@@ -13,6 +13,7 @@ import { PAGES } from '../tabs/registry.js';
 import { columnAt, visibleColumn, columns as noteColumns } from './notescol.js';
 import { noteTime } from '../js/notes.js';
 import { currentScript } from '../js/scenes.js';
+import { axisAt } from './timemode.js';
 
 const REPO_URL = 'https://github.com/dazca/ai-videoclip-director';
 
@@ -336,6 +337,9 @@ export function contextArgs(target, clientX, clientY) {
   // the stage rail (core/rail.js) and a stage workspace (tabs/stage.js)
   const st = target.closest('#rail [data-stage]');
   if (st?.dataset.stage) { names.push('stage'); args.stageId = st.dataset.stage; return { names, args }; }
+  // a stage in its Time view (core/timemode.js): "+ Add at m:ss" first, at the time under the pointer (as on the timeline)
+  const ax = axisAt(target);
+  if (ax?.on && !target.closest('.nclayer, .ncstage')) { args.t = ax.timeAt(clientY); args.tmAxis = ax; names.push('tmadd'); }
   // the stage workspaces' rows: a lyric line / section tag (tabs/lyrics.js), a gap of the script, a storyboard scene, the
   // breakdown, and the Notes column (core/notescol.js) row under the pointer ("+ note here")
   const ly = target.closest('.lyws .lyl[data-line]');
