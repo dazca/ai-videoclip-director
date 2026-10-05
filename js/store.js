@@ -17,6 +17,7 @@ import { normRevisions } from './revisions.js';
 import { normProposals } from './proposals.js';
 import { normTakes } from './takes.js';
 import { normChecks } from './checks.js';
+import { normEvents } from './events.js';
 const QP = new URLSearchParams(location.search).get('project');
 export const PROJECT = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/.test(QP || '') ? QP : 'demo';
 export const DATA = `data/${PROJECT}/`;
@@ -69,7 +70,7 @@ const NORM = {
   'stages.json': (s, v) => normStages(v, projectFacts({ song: s.song, script: s.script, shots: s.shots, entities: s.entities, lyrics: s.lyrics, scenes: s.scenes, breakdown: s.breakdown, storyboard: s.board, notes: s.notes })),
   'notes.json': (s, v) => N.isV2(v) ? v : { ...N.migrate({ notes: v, lyrics: s.lyrics, scenes: s.scenes, breakdown: s.breakdown, board: s.board, entities: s.entities }), derived: true },
 };
-const FULL = /^(song|events|energy|script|shots|costs|media)\.json$|^entities\//;
+const FULL = /^(song|energy|script|shots|costs|media)\.json$|^entities\//;
 // PRIVATE files (e.g. crops of real photos): shown only in the local page (lock badge), never exported (see
 // core/projects.js exporter). Always thumbs/priv_* and any path with a private/ folder, plus the server's private_media rule.
 export let PRIVATE_RE = /(^|\/)thumbs\/priv_|(^|\/)private\//;
@@ -78,7 +79,7 @@ const nowIso = () => new Date().toISOString().slice(0, 19);
 
 export const store = {
   project: PROJECT,
-  song: null, events: null, energy: null, script: null, shots: null, uses: null, costs: null,
+  song: null, eventsDoc: null, energy: null, script: null, shots: null, uses: null, costs: null,
   notes: null, revisions: null, proposals: null, takes: null, checks: null, approvals: null, requests: null, overrides: null, settings: null, entities: [], media: [], mediaById: {}, mediaByPath: {}, peaks: {},
   runs: {},                       // request id -> the runner's last progress event (SSE {run}), shown in the Queue
   listeners: new Set(),
@@ -90,9 +91,12 @@ export const store = {
 
   async loadAll() {
     try { const r = await fetch('/api/config', { cache: 'no-cache' }); if (r.ok) { Object.assign(config, await r.json()); if (config.private_re) PRIVATE_RE = new RegExp(config.private_re, 'i'); } } catch (e) { /* static hosting */ }
-    const [song, events, energy, script, shots, costs, index] = await Promise.all(
-      ['song.json', 'events.json', 'energy.json', 'script.json', 'shots.json', 'costs.json', 'entities/index.json'].map(f => getJSON(f)));
-    Object.assign(this, { song, events, energy, script, shots: shots.shots, uses: shots.uses, costs });
+    const [song, energy, script, shots, costs, index] = await Promise.all(
+      ['song.json', 'energy.json', 'script.json', 'shots.json', 'costs.json', 'entities/index.json'].map(f => getJSON(f)));
+    Object.assign(this, { song, energy, script, shots: shots.shots, uses: shots.uses, costs });
+    // events.json (named sync points, E1, js/events.js): the server writes it (the page acts through events_act /
+    // retime_apply), the page reads it; an importer's old array reads as v2
+    this.eventsDoc = normEvents(await getJSON('events.json', null).catch(() => null));
     await Promise.all(Object.entries(WRITABLE).map(async ([f, [field, d]]) => {
       const v = await getJSON(f, d);
       if (this._saving[f]) this._missed.add(f); else this[field] = v;   // a save is in flight: re-read it after
@@ -134,6 +138,7 @@ export const store = {
       if (WRITABLE[file]) { const [field, d] = WRITABLE[file]; let v = await getJSON(file, d); if (NORM[file]) v = NORM[file](this, v); if (this._saving[file]) { this._missed.add(file); continue; } if (JSON.stringify(v) !== JSON.stringify(this[field])) { this[field] = v; this.emit(field); } }
       else if (file === 'proposals.json') { const v = normProposals(await getJSON(file, null).catch(() => null)); if (JSON.stringify(v) !== JSON.stringify(this.proposals)) { this.proposals = v; this.emit('proposals'); } }
       else if (file === 'takes.json') { const v = normTakes(await getJSON(file, null).catch(() => null)); if (JSON.stringify(v) !== JSON.stringify(this.takes)) { this.takes = v; this.emit('takes'); } }
+      else if (file === 'events.json') { const v = normEvents(await getJSON(file, null).catch(() => null)); if (JSON.stringify(v) !== JSON.stringify(this.eventsDoc)) { this.eventsDoc = v; this.emit('events'); } }
       else if (file === 'checks.json') { const v = normChecks(await getJSON(file, null).catch(() => null)); if (JSON.stringify(v) !== JSON.stringify(this.checks)) { this.checks = v; this.emit('checks'); } }
       else if (file === 'revisions.json') { const v = normRevisions(await getJSON(file, null).catch(() => null)); if (JSON.stringify(v) !== JSON.stringify(this.revisions)) { this.revisions = v; this.emit('revisions'); } }
       else if (/^peaks\//.test(file)) { const id = file.slice(6, -5); delete this.peaks[id]; await this.loadPeaks([id]); this.emit('peaks'); }
@@ -158,6 +163,8 @@ export const store = {
     } catch (e) { /* static hosting: no live updates */ }
   },
 
+  // ---- the named events (events.json v2): the list the timeline columns and the snap menus read
+  get events() { return this.eventsDoc?.events || []; },
   // ---- the storyboard's shots (storyboard.json, else shots.json): the timeline shots / cast / status columns
   boardShots() { return this.board ? boardShots(this.board) : [...(this.shots || [])]; },
   // ---- approvals

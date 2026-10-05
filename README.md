@@ -389,7 +389,7 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
 | ruler | lane | on | bar number + mm:ss at downbeats, beat ticks, section colour band, amber density tint = local stretch |
 | sections | text, follow | on | label, energy, world %, overload target; click = loop |
 | lyrics | text, drive | on | one row per **visual line**; each visual line is a warp knot at its first word's onset; karaoke word highlight; dotted = low-confidence word; left stripe = voice (male/female/both/system) |
-| events | text, drive | on | stops, drops, counts, silences, beats, spoken cues |
+| events | text, follow | on | the named sync points (`events.json`, E1; `js/eventscol.js`): kind icon, name, ⚓n = boundaries anchored to it; an agent's proposed event dashed with ✓ (accept); a measured one shows "→ m:ss.mmm" and a ghost row at the measured time. Drag an event = set where it really landed (measured); double-click = edit, an empty spot = "+ Named event here"; right-click = its menu |
 | wave | lane | on | mix waveform, faint downbeat lines (they spread apart where text is dense) |
 | stems | lane | hidden | vocals, backing, bass, drums |
 | energy | lane | on | RMS (24 fps) + amber target overload ladder 0-10 per section |
@@ -402,6 +402,28 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
 | cost | text, drive | hidden | $ per generation job at its first use, running Σ / cap |
 | notes | text, drive | on | every note with a time (notes.json v2): the timeline's, and the stages' on a line, scene, beat or shot (tagged); a click on an empty spot types a note at that ms |
 
+### Named sync points and the re-time after the take (E1)
+
+The cuts of a music video land on **named events** (`her_hi_there`, `duet_5_both`, a Stop, a spoken line), not only on
+beats and lines. `events.json` holds them; the timeline's **events** column shows them.
+
+- **Make them**: right-click on the timeline › + Add › **+ Named event here** (or in a stage's Time view), right-click a
+  lyric word › **+ Named event at “word”** (its time, the word as the name), Timeline › **Import events (audio
+  events.json)…** (the first film's `audio/out/final/events.json`: times in seconds; sections skipped, ids kept). An
+  agent's `event_add` is *proposed* (dashed, ✓ accepts it); only accepted events are snap targets.
+- **Snap and anchor**: the script and storyboard **snap** menus offer **events** (the nearest named event within 1 s;
+  the boundary is also anchored to it); the scene card and the shot panel have a **⚓ anchor…** select per boundary. An
+  anchored boundary stores `anchors {t0?, t1?: event id}`, not just a time.
+- **Measure**: after the song take is chosen, drag an event in the events column to where it really landed, or type it
+  / "= playhead" in its dialog (`measured`). Its time stays until the re-time (an anchored event's time is locked).
+- **Re-time after the take…** (Timeline menu, the palette): the measured events and the agent's proposed re-times
+  (`retime_propose`), the **preview** (every anchored boundary and every cut that sits on one, old → new; problems
+  refuse it), and **Apply**: ONE undoable change = a new `scenes.json` version and a new `storyboard.json` version
+  (picks kept), the events at their new times. Ctrl+Z = `retime_undo` (new versions with the old times; the events
+  pending again); Ctrl+Shift+Z re-applies.
+- Accepting, measuring, importing and applying / undoing are the director's (page only: `events_act`, `retime_apply`,
+  `retime_undo`); an agent reads (`events_get`), proposes events (`event_add`) and re-times (`retime_propose`).
+
 ## Files (`data/<project>/`)
 
 All times are **integer milliseconds**. Pixels are never stored. Media paths under one of the configured `media_roots`
@@ -411,7 +433,7 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | file | shape |
 |---|---|
 | `song.json` | `{duration_ms, bpm, beat_ms, bar_ms, grid:{beats[], downbeats[]}, audio:{mix, render, stems[{id,label,audio,peaks}]}, sections[{id,label,t0,t1,energy,world_pct,overload:[lo,hi],transitions}], lines[{id:"verse1/3", section, t0, t1, text, voice, kind, words[{w,t0,t1,p}]}]}` |
-| `events.json` | `[{id, t, kind, note}]` |
+| `events.json` | v2 (E1, the server's: written by the ops, never a page save): `{v: 2, rev, events[{id "her_hi_there", name, t, kind: stop/spoken/voice/cue/custom/section, note, status: accepted/proposed/dismissed, measured?, by, via, at, source_kind?, retimed?[{from, to, at, retime}]}], retimes[{id "rt03", status: proposed/applied/undone/dismissed, moves[{event, from, to}], why, by, via, at, applied_at?, versions?{scenes: [from, to], storyboard: [from, to]}, rows[]}]}`. An importer's old array `[{id, t, kind, note}]` reads as v2 (every event accepted; `drop` / `beat` / `count` -> cue, `silence` -> stop, `line` / `word` -> voice, the original in `source_kind`). Scenes (`scenes.json`) and storyboard shots carry `anchors?{t0?, t1?: event id}`: that boundary follows the event. Logic: `js/events.js` |
 | `energy.json` | `{fps, rms[], onset[]}` (0-1) |
 | `script.json` | `{stages[{name,t0,t1,text}], lines[{id:"s07", t0, t_end?, lyric, mode:"W"|"S"|"B"|"W→S", action, line_id}]}` |
 | `shots.json` | `{shots[{id, t0, t1, section, kind, title, cast[], locations[], clips[use ids], thumb, render_frame_ms}], uses[{id:"G05@20158", clip, take, in_ms, t0, t1, file, start_image, location, thumb, label}]}` |
@@ -579,7 +601,8 @@ small files are served in one read so no handle stays open.
   marks a stage done, sets a scene or breakdown item `ok`, dismisses the director's note or ticks "allow uploading
   private refs", and the ops `take_act`, `media_use`, `media_upload`, `batch_act`, `jobbooks_import`, `asset_act` /
   `character_act` (base / import accept, approvals, constants), `ref_upload`, `breakdown_promote`, `round_send`,
-  `revision_close`, `revision_restore`, `final_lock` / `final_unlock`, `proposal_act`. An agent gets 403 on each
+  `revision_close`, `revision_restore`, `final_lock` / `final_unlock`, `proposal_act`, `events_act`, `retime_apply` /
+  `retime_undo`. An agent gets 403 on each
   ("agents use the MCP tools"), whatever `via` its body claims; an agent's save is stamped `by: "agent", via:
   "agent"`, and `/api/restore` without the page is an agent's restore. Every `/api` write answers `x-wb-client: page |
   agent`. Offline mode is unchanged: the MCP server's file ops run with `via` absent (an agent) and never approve.
@@ -682,6 +705,16 @@ small files are served in one read so no handle stays open.
   or another shot's take: 400 / 404), with 0 <= in < out <= the take's duration (a still: no range) and alternatives inside
   the song; request / take / kind come from the media entry. A page save of `storyboard.json` keeps the server's picks and
   the agent's `shots_update` ignores `clip`; `takes.json` is not a page save.
+- Named events and the re-time (E1, `lib/ops/events.mjs`): `events.json` is the server's (not a page save: 403); `events_act`
+  (add / update / measure / remove / accept / dismiss / import / retime_dismiss), `retime_apply` and `retime_undo` are page only
+  (S9: the page token + this server's Origin + `Sec-Fetch-Site: same-origin`, never the agent token; no MCP tool; 403 to curl with
+  the page token, the agent token, the Origin alone, Sec-Fetch-Site alone, cross-site, a forged Origin with the agent token, a
+  claimed via "page" and offline). An agent's `event_add` is always `proposed` (not a snap target until the director accepts it)
+  and `retime_propose` only records a proposal (nothing moves). Event ids `^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$`, anchors name such
+  ids, times inside the song (400); an anchored event's time is changed only by a re-time and it cannot be removed (409); a
+  re-time that would leave a boundary without length or a shot outside its scene is refused (400 / 409) and writes nothing. An
+  agent's snapshot restore brings an accepted event that is not accepted now back as proposed. Names, notes and whys render
+  escaped (the events column, the event and re-time dialogs; tools/security-test.mjs).
 - Identity checks (D7): `check_add` writes `checks.json` only, never approvals, requests, picks or takes.json, whatever the body
   says; its target (a node, a take of that shot, a registered image / video), the character and the node compared with must exist
   (404; ids checked by shape: 400); each item names one of the character's constants or `likeness`; `checks.json` is not a page

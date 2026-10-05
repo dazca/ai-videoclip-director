@@ -21,6 +21,9 @@ const WB = () => window.WB;
 const READ = 0.3;   // the reading line, as on the timeline (js/timeline.js READ_LINE)
 export const TIME_STAGES = ['lyrics', 'script', 'breakdown', 'storyboard', 'final'];
 export const axes = new Set();
+// fn(axis) after every placement and clear (core/events.js draws the named events on the axis)
+export const axisHooks = new Set();
+const runHooks = (ax) => { for (const f of axisHooks) { try { f(ax); } catch (e) { console.warn('time axis hook', e); } } };
 
 export function mode(stage) { return (prefs.get('timeMode', {}) || {})[stage] === 'time' ? 'time' : 'list'; }
 export const isTime = (stage) => mode(stage) === 'time';
@@ -120,6 +123,7 @@ export class TimeAxis {
     for (const e of this.placed) unplace(e);
     this.placed.clear(); this.rowsNow = []; this.t0s.clear();
     this.sheet.remove(); this.head.remove();
+    runHooks(this);
   }
   apply() {
     this.hook();
@@ -163,6 +167,7 @@ export class TimeAxis {
     if (this.needSync || lost) { this.needSync = false; this.scrollToTime(this.tl.timeAtRead()); }
     this.tick(this.tl.player.time());
     this.o.onApply?.();
+    runHooks(this);
     this.ms = performance.now() - t0;
     // what sits above the axis can still change height (the Notes column's top row un-growing on its next frame): if the
     // origin moved, place again
@@ -180,7 +185,7 @@ commands.register([
   { id: 'stage.noteAtTime', group: 'Stages', title: (c) => `Add a note at ${fmt(c.t ?? 0)} (Notes column)`, hidden: true, when: (c) => !!c.tmAxis?.o.nc,
     run: (c) => { const a = c.tmAxis, nc = a.o.nc; if (!nc.rows.length) nc.render(); const row = a.rowsAt(c.t).map(r => nc.rowAt(r.el)).find(Boolean); return nc.edit(row?.targets[0] || nc.rows[0].targets[0]); } },
 ]);
-menus.contribute('tmadd', [{ label: (c) => `+ Add at ${fmt(c.t ?? 0)}`, submenu: [{ cmd: 'stage.noteAtTime', label: '+ note at this time' }, { cmd: 'timeline.addScene', label: '+ scene here' }, { cmd: 'timeline.addShot', label: '+ shot here' }] }]);
+menus.contribute('tmadd', [{ label: (c) => `+ Add at ${fmt(c.t ?? 0)}`, submenu: [{ cmd: 'stage.noteAtTime', label: '+ note at this time' }, { cmd: 'timeline.addScene', label: '+ scene here' }, { cmd: 'timeline.addShot', label: '+ shot here' }, { cmd: 'events.addHere', label: '+ named event here' }] }]);
 menus.contribute('stage', ['-', 'stage.timeMode']);
 menus.contribute('menubar:View', ['stage.timeMode']);
 window.WB = Object.assign(window.WB || {}, { timeMode: { mode, setMode, toggle, isTime, axes: () => [...axes], STAGES: TIME_STAGES } });

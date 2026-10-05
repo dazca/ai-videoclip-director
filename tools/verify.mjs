@@ -28,7 +28,8 @@
 // tools/verify-video.mjs) D3b video generation on a mock fal (the video form, a failed take retried, takes, motion control), and (v20,
 // tools/verify-batches.mjs) D4 job books, waves and pilot gates (Plan waves, batches with review gates, take-ratio stats, history), and (v21,
 // tools/verify-checks.mjs) D7 identity checks + D2 character constants (the constants editor, the ask when outputs land, check_add, badges), and (v22,
-// tools/verify-composition.mjs) E9 a round trip with the composition (pick a take, export edl.json, a test composition renders it).
+// tools/verify-composition.mjs) E9 a round trip with the composition (pick a take, export edl.json, a test composition renders it), and (v23,
+// tools/verify-events.mjs) E1 named sync points: anchored boundaries and the re-time after the take.
 //   node tools/verify.mjs [--project <id>] [outDir]     (default project: the server's default; npm run verify = demo)
 // Copies data/<project> (and data/_template) into a scratch data folder under the OS temp dir and starts serve.mjs
 // on free ports with WORKBENCH_DATA = that folder, so nothing under data/ is written and several runs (or a running
@@ -1268,6 +1269,15 @@ catch (e) { v21.checks.aborted = blockFailed('v21', e); v21.pass = false; }
 const v22 = report.v22 = { checks: {} };
 try { const { verifyComposition } = await import('./verify-composition.mjs'); Object.assign(v22, await verifyComposition({ browser, OUT })); }
 catch (e) { v22.checks.aborted = blockFailed('v22', e); v22.pass = false; }
+
+// ---------------------------------------------------------------- v23: E1, named sync points and the re-time after the take: the events column,
+// an agent's proposed event accepted in the page, "+ Named event here" / at a lyric word, Import events (seconds), the script and storyboard
+// snap menus with "events", anchored boundaries, measuring (drag, typed, playhead), Re-time after the take (preview, one undoable change,
+// Ctrl+Z, redo), an agent's retime_propose applied by the director (the agent: 403), the Time view markers: tools/verify-events.mjs (also
+// runnable alone). Screenshots v23_*.png.
+const v23 = report.v23 = { checks: {} };
+try { const { verifyEvents } = await import('./verify-events.mjs'); Object.assign(v23, await verifyEvents({ browser, OUT })); }
+catch (e) { v23.checks.aborted = blockFailed('v23', e); v23.pass = false; }
 // write path: approve/needs-changes + a note, on another scratch copy (_verify, its own server), then a stale-rev POST must get 409
 try {
   const TMP = path.join(DATA, '_verify');
@@ -1297,8 +1307,8 @@ report.project = P;
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 1));
 const w = report.writes || {};
 const writesOk = w.noteSaved && w.noteShownInColumn && w.staleStatus === 409 && w.newState !== undefined && w.newState !== w.stateBefore && w.approvalsRev > w.approvalsRevBefore;
-console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· v7 (characters stage):', report.v7?.pass ? 'all PASS' : 'FAIL', '· v8 (scenery stage):', report.v8?.pass ? 'all PASS' : 'FAIL', '· v9 (storyboard stage):', report.v9?.pass ? 'all PASS' : 'FAIL', '· v10 (dogfood frictions):', report.v10?.pass ? 'all PASS' : 'FAIL', '· v11 (notes everywhere):', report.v11?.pass ? 'all PASS' : 'FAIL', '· v12 (request runner):', report.v12?.pass ? 'all PASS' : 'FAIL', '· v13 (rounds, revisions, compare):', report.v13?.pass ? 'all PASS' : 'FAIL', '· v14 (proposals):', report.v14?.pass ? 'all PASS' : 'FAIL', '· v15 (final approvals):', report.v15?.pass ? 'all PASS' : 'FAIL', '· v16 (take selection):', report.v16?.pass ? 'all PASS' : 'FAIL', '· v17 (import media):', report.v17?.pass ? 'all PASS' : 'FAIL', '· v18 (video runner):', report.v18?.pass ? 'all PASS' : 'FAIL', '· v21 (identity checks):', report.v21?.pass ? 'all PASS' : 'FAIL', '· v22 (composition round trip):', report.v22?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
-process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && report.v7?.pass && report.v8?.pass && report.v9?.pass && report.v10?.pass && report.v11?.pass && report.v12?.pass && report.v13?.pass && report.v14?.pass && report.v15?.pass && report.v16?.pass && report.v17?.pass && report.v18?.pass && report.v19?.pass && report.v20?.pass && report.v21?.pass && report.v22?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
+console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· v7 (characters stage):', report.v7?.pass ? 'all PASS' : 'FAIL', '· v8 (scenery stage):', report.v8?.pass ? 'all PASS' : 'FAIL', '· v9 (storyboard stage):', report.v9?.pass ? 'all PASS' : 'FAIL', '· v10 (dogfood frictions):', report.v10?.pass ? 'all PASS' : 'FAIL', '· v11 (notes everywhere):', report.v11?.pass ? 'all PASS' : 'FAIL', '· v12 (request runner):', report.v12?.pass ? 'all PASS' : 'FAIL', '· v13 (rounds, revisions, compare):', report.v13?.pass ? 'all PASS' : 'FAIL', '· v14 (proposals):', report.v14?.pass ? 'all PASS' : 'FAIL', '· v15 (final approvals):', report.v15?.pass ? 'all PASS' : 'FAIL', '· v16 (take selection):', report.v16?.pass ? 'all PASS' : 'FAIL', '· v17 (import media):', report.v17?.pass ? 'all PASS' : 'FAIL', '· v18 (video runner):', report.v18?.pass ? 'all PASS' : 'FAIL', '· v21 (identity checks):', report.v21?.pass ? 'all PASS' : 'FAIL', '· v22 (composition round trip):', report.v22?.pass ? 'all PASS' : 'FAIL', '· v23 (named events + re-time):', report.v23?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
+process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && report.v7?.pass && report.v8?.pass && report.v9?.pass && report.v10?.pass && report.v11?.pass && report.v12?.pass && report.v13?.pass && report.v14?.pass && report.v15?.pass && report.v16?.pass && report.v17?.pass && report.v18?.pass && report.v19?.pass && report.v20?.pass && report.v21?.pass && report.v22?.pass && report.v23?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
 await browser.close();
 for (const c of procs) c.kill();
 await new Promise(r => setTimeout(r, 300));   // let the servers release the scratch folder; cleanup() removes it on exit

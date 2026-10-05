@@ -21,6 +21,7 @@ import { ui } from '../core/palette.js';
 import * as F from '../js/flow.js';
 import * as SC from '../js/scenes.js';
 import * as SB from '../js/storyboard.js';
+import * as EV from '../js/events.js';
 import * as A from '../js/assets.js';
 import { NotesColumn } from '../core/notescol.js';
 import { TimeAxis } from '../core/timemode.js';
@@ -81,7 +82,7 @@ class Board {
     // stacked down it at their own times; gaps as rows too; shots outside the script after the end
     this.ta = new TimeAxis({ stage: 'storyboard', scroller: this.$('.sblist'), nc: this.nc, rows: () => this.timeRows(), onApply: () => this.nc.schedule('place'), noSeek: '.sbcard, .sbsh, .sbskslot' });
     document.addEventListener('wb:timemode', (e) => { if (e.detail.stage === 'storyboard' && !this.typing()) this.render(); });
-    store.on((w) => { if (['board', 'scenes', 'all', 'approvals', 'requests', 'breakdown', 'costs', 'proposals', 'takes', 'checks'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
+    store.on((w) => { if (['board', 'scenes', 'all', 'approvals', 'requests', 'breakdown', 'costs', 'proposals', 'takes', 'checks', 'events'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
     this.render();
   }
   // a draft edit from "+ Add" (a shot) and the other structural edits: one undo step (Ctrl+Z puts the draft back)
@@ -174,7 +175,7 @@ class Board {
   step(d) { const l = this.sorted(this.draft), i = l.findIndex(s => s.id === this.sel), n = l[i < 0 ? 0 : Math.max(0, Math.min(l.length - 1, i + d))]; if (n) this.select(n.id); }
   // ---------------------------------------------------------------- shots: add, split, merge, move, delete, times
   minLen() { return this.snap === 'bars' ? SB.barMs(this.song) : SB.beatMs(this.song); }
-  snapT(t) { return SB.snapGrid(t, this.song, this.snap); }
+  snapT(t) { return SB.snapGrid(t, this.song, this.snap, store.events); }
   beatT(sceneId, bid) { return this.scene(sceneId)?.beats.find(b => b.id === bid)?.t ?? null; }
   needs(sceneId) { const r = { cast: [], locations: [], props: [] }; for (const a of SB.sceneAssets(sceneId, store.breakdown, store.entities)) r[SB.FIELD[a.type]].push(a.id); return r; }
   addShot(sceneId) {
@@ -199,7 +200,7 @@ class Board {
     const tp = this.ctx.timeline?.player.time(), m = this.minLen();
     const want = at ?? (tp != null && tp > s.t0 + m && tp < s.t1 - m ? tp : (s.t0 + s.t1) / 2);
     let t = null;
-    for (const mode of [this.snap, 'beats', 'off']) { const x = SB.snapGrid(want, this.song, mode), mm = mode === 'off' ? 250 : mode === 'bars' ? SB.barMs(this.song) : SB.beatMs(this.song); if (x - s.t0 >= mm * 0.99 && s.t1 - x >= mm * 0.99) { t = x; break; } }
+    for (const mode of [this.snap, 'beats', 'off']) { const x = SB.snapGrid(want, this.song, mode, store.events), mm = mode === 'off' ? 250 : mode === 'bars' ? SB.barMs(this.song) : SB.beatMs(this.song); if (x - s.t0 >= mm * 0.99 && s.t1 - x >= mm * 0.99) { t = x; break; } }
     if (t == null) return toast(`${id} is too short to split (${secs(s.t1 - s.t0)})`);
     const nid = SB.nextShotId(this.doc, this.draft), bt = (b) => this.beatT(s.scene, b) ?? s.t0;
     if (this.undoable(`split ${id}: ${nid}`, () => this.edit((d) => { const ns = { ...structuredClone(s), id: nid, t0: t, title: '', text: '', camera: '', sketch: null, clips: [], beats: s.beats.filter(b => bt(b) >= t) }; delete ns.clip; d.push(ns); s.beats = s.beats.filter(b => bt(b) < t); s.t1 = t; }))) { this.select(nid); toast(`${id} split at ${clk(t)}: ${nid}`); return nid; }
@@ -238,15 +239,32 @@ class Board {
       t0 = this.snapT(t0);
       const lo = (prev ? prev.t0 : 0) + m, hi = s.t1 - m;
       if (!(t0 >= lo && t0 <= hi)) { toast(`from: between ${clk(lo)} and ${clk(hi)}`); return this.render(); }
-      return this.edit(() => { s.t0 = t0; if (prev) prev.t1 = t0; });
+      return this.edit(() => { s.t0 = t0; if (prev) prev.t1 = t0; for (const x of [s, prev]) if (x) EV.reanchor(x, store.events, { snap: this.snap }); });
     }
     if (t1 != null && t1 !== s.t1) {
       if (sc && (!next || next.scene !== s.scene)) { toast('the last shot ends with its scene (change the scene in the script)'); return this.render(); }
       t1 = this.snapT(t1);
       const lo = s.t0 + m, hi = (next ? next.t1 : this.song.duration_ms) - m;
       if (!(t1 >= lo && t1 <= hi)) { toast(`to: between ${clk(lo)} and ${clk(hi)}`); return this.render(); }
-      return this.edit(() => { s.t1 = t1; if (next) next.t0 = t1; });
+      return this.edit(() => { s.t1 = t1; if (next) next.t0 = t1; for (const x of [s, next]) if (x) EV.reanchor(x, store.events, { snap: this.snap }); });
     }
+  }
+  // anchor a cut to a named event (E1): the cut (this shot's edge and its neighbour's) takes the event's time and follows it
+  // when the director re-times after the take; '' removes the anchor (the time stays)
+  setAnchor(id, edge, evId) {
+    const s = this.shot(id); if (!s) return;
+    const e = evId ? store.events.find(x => x.id === evId) : null;
+    if (evId && !e) return toast(`no event ${evId}`);
+    const { prev, next } = this.neighbours(s), o = edge === 't0' ? prev : next;
+    if (e) {
+      const t = e.t, m = SB.beatMs(this.song) / 2;
+      if (edge === 't0' ? !(t < s.t1 - m && (!prev || t > prev.t0 + m)) : !(t > s.t0 + m && (!next || t < next.t1 - m))) { toast(`${e.name} (${clk(t)}) is outside what ${id}'s ${edge === 't0' ? 'start' : 'end'} can reach`); return this.render(); }
+    }
+    const sh = (x, k, v) => { const a = { ...(x.anchors || {}) }; if (v) a[k] = v; else delete a[k]; if (Object.keys(a).length) x.anchors = a; else delete x.anchors; };
+    this.undoable(e ? `anchor ${id} ${edge === 't0' ? 'start' : 'end'} to ${e.id}` : `unanchor ${id} ${edge === 't0' ? 'start' : 'end'}`, () => this.edit(() => {
+      if (e) { s[edge] = e.t; if (o && o.scene === s.scene) o[edge === 't0' ? 't1' : 't0'] = e.t; }
+      sh(s, edge, e?.id); if (o && o.scene === s.scene) sh(o, edge === 't0' ? 't1' : 't0', e?.id);
+    }));
   }
   nudge(id, which, dir) {
     const s = this.shot(id); if (!s) return;
@@ -412,7 +430,7 @@ class Board {
     const ver = v ? `<b>${esc(v.id)}</b> <span class="dim">${esc(v.message || '')}${v.created ? ' · ' + when(v.created) : ''}${v.via === 'agent' ? ' · agent' : ''}</span>` : '<span class="dim">no version yet</span>';
     this.$('.sbbar').innerHTML = `${ver}<span class="dim">· ${nn(this.draft.length, 'shot')} · <span class="${boarded === scs.length && scs.length ? 'okc' : 'gapc'}">${boarded}/${scs.length} scenes boarded</span> · <a data-side="gaps" class="${g.total ? 'gapc' : 'okc'}" title="everything still missing (side panel: Gaps)">${nn(g.total, 'gap')}</a></span><span class="sp"></span>`
       + (this.dirty ? `<span class="unsaved">unsaved edits</span><input class="lymsg" placeholder="what changed (optional)" spellcheck="false" value="${esc(msg)}"><button data-a="save" class="pri" title="Ctrl+Enter: a new version">Save version</button><button data-a="drdiff" title="compare the current version with your edits">diff</button><button data-a="discard">Discard</button>` : '')
-      + `<label class="dim" title="cuts and new times snap to the nearest beat or downbeat of the song grid">snap <select class="sbsnap">${SB.SNAPS.map(x => `<option${x === this.snap ? ' selected' : ''}>${x}</option>`).join('')}</select></label>`
+      + `<label class="dim" title="cuts and new times snap to the nearest beat or downbeat of the song grid, or to a named event (events: the cut is also anchored to it)">snap <select class="sbsnap">${SB.SNAPS.map(x => `<option${x === this.snap ? ' selected' : ''}>${x}</option>`).join('')}</select></label>`
       + `<button data-a="beats" title="one shot per scene beat or group of beats, for every scene without shots (a scene's own “from beats” redoes it)">Shots from beats</button>`
       + `<a class="sbest${over ? ' bad' : ''}" data-side="gaps" title="${esc(`the shots without a request or clip: est ${usd(g.estimate.usd)}; spent ${usd(cv.spent)} + committed ${usd(cv.committed)} + this = ${usd(total)} of the cap ${usd(cv.cap)}`)}">est ${usd(g.estimate.usd)} · ${usd(total)}/${usd(cv.cap)}</a>`;
   }
@@ -498,6 +516,8 @@ class Board {
     const stb = (x, l, t) => `<button data-st="${x}" class="${st === x ? 'on s-' + x : ''}" title="${esc(t)}">${l}</button>`;
     let h = `<div class="sbih"><b>${esc(s.id)}</b>${sc ? `<a data-go="scene:${esc(sc.id)}" title="${esc(sc.text || '')}">${esc(sc.id)} ${esc(sc.title || '')}</a>` : '<span class="dim">outside the script</span>'}<span class="sp"></span>${stb('draft', 'draft', 'not reviewed')}${stb('review', 'review', 'ready for a look')}${stb('changes', 'changes', 'needs changes')}${stb('approved', 'approve', 'the director signs this shot off (page only)')}</div>`;
     h += `<div class="sbif"><label>from <input class="sbin-t0" value="${fmt(s.t0, true)}" spellcheck="false"${first ? ' disabled title="the first shot starts with its scene"' : ''}></label>${first ? '' : '<b data-nudge="t0:-1" title="one beat (bar) earlier">◂</b><b data-nudge="t0:1" title="later">▸</b>'}<label>to <input class="sbin-t1" value="${fmt(s.t1, true)}" spellcheck="false"${lastS ? ' disabled title="the last shot ends with its scene"' : ''}></label>${lastS ? '' : '<b data-nudge="t1:-1">◂</b><b data-nudge="t1:1">▸</b>'}<span class="dim">${secs(s.t1 - s.t0)} · ${SB.bars(this.song, s.t0, s.t1)} bars</span></div>`;
+    // E1: a cut anchored to a named event (the first / last cut is the scene's: anchor it in the script)
+    h += `<div class="sbif sbancs">${first ? (sc?.anchors?.t0 ? `<span class="dim">start ⚓ ${esc(sc.anchors.t0)} (the scene's)</span>` : '') : EV.anchorSelect(s, 't0', store.events, esc, 'sbanc')}${lastS ? (sc?.anchors?.t1 ? `<span class="dim">end ⚓ ${esc(sc.anchors.t1)} (the scene's)</span>` : '') : EV.anchorSelect(s, 't1', store.events, esc, 'sbanc')}</div>`;
     h += `<div class="sbopts">${SB.KINDS.map(k => `<a data-kind="${k}" class="${s.kind === k ? 'on' : ''}">${k}</a>`).join('')}${SB.KINDS.includes(s.kind) ? '' : `<a class="on">${esc(s.kind)}</a>`}<input class="sbin-kind" placeholder="other kind" spellcheck="false"></div>`;
     h += `<div class="sbopts gen"><a data-gen="still" class="${gen === 'still' ? 'on' : ''}" title="one generated frame">▣ still</a><a data-gen="video" class="${gen === 'video' ? 'on' : ''}" title="a start frame, then image-to-video">▶ video</a><span class="dim" title="${esc(est.items.map(x => `${x.kind}: ${usd(x.usd)} ${x.tool} (${x.why})`).join('\n'))}">est ${usd(est.usd)} · ${esc(est.items.map(x => x.kind.replace('shot-', '') + ' ' + usd(x.usd)).join(' + '))}</span></div>`;
     h += `<input class="sbin-title" value="${esc(s.title)}" placeholder="title (short)" spellcheck="false"><textarea class="sbin-text" rows="3" placeholder="the action: what we see in this shot" spellcheck="false">${esc(s.text)}</textarea><textarea class="sbin-cam" rows="2" placeholder="camera / motion: slow push in, handheld, locked-off, whip pan, rack focus…" spellcheck="false">${esc(s.camera)}</textarea>`;
@@ -618,6 +638,7 @@ class Board {
       const t = e.target;
       if (t.matches('.sbsnap')) { this.snap = t.value; prefs.set('boardSnap', t.value); return this.renderBar(); }
       const sid = t.closest('.sbins')?.dataset.shot; if (!sid) return;
+      if (t.matches('.sbanc')) return this.setAnchor(sid, t.dataset.edge, t.value);
       if (t.matches('.sbin-t0, .sbin-t1')) { const v = parseT(t.value); if (v == null) { toast('time: m:ss.mmm or seconds'); return this.render(); } return t.matches('.sbin-t0') ? this.setTimes(sid, v, null) : this.setTimes(sid, null, v); }
       if (t.matches('.sbin-kind')) { const k = t.value.trim().toLowerCase(); if (!SB.KIND_RE.test(k)) { toast('kind: a short lower-case word'); return this.render(); } return this.setField(sid, 'kind', k, true); }
       if (t.matches('.sbin-var')) { t.blur(); return this.setVariant(sid, t.closest('[data-eid]').dataset.eid, t.value); }

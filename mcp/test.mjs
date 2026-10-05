@@ -134,7 +134,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve', 'character_get', 'character_iteration_add', 'character_note_add', 'look_create',
     'asset_get', 'asset_iteration_add', 'asset_note_add', 'variant_create',
     'storyboard_get', 'shots_update', 'shot_note_add', 'shot_note_resolve', 'gaps_get', 'notes_get', 'notes_add', 'notes_status', 'request_run', 'generators_get',
-    'round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get', 'proposals_add', 'proposals_get', 'final_get', 'takes_get', 'take_propose', 'media_scan', 'media_import', 'batches_get', 'waves_propose'];
+    'round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get', 'proposals_add', 'proposals_get', 'final_get', 'takes_get', 'take_propose', 'media_scan', 'media_import', 'batches_get', 'waves_propose', 'events_get', 'event_add', 'retime_propose'];
   check('tools/list has every tool', EXPECT.every(t => tools.includes(t)), { count: tools.length, missing: EXPECT.filter(t => !tools.includes(t)) });
   const schemaOk = (await mcp.listTools()).tools.every(t => t.description?.length > 40 && t.inputSchema?.type === 'object');
   check('every tool has a description and a JSON schema', schemaOk);
@@ -146,10 +146,10 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const song = await call(mcp, 'song_get');
   check('song_get', song.duration_ms === 20000 && song.sections?.length === 4 && song.lines?.length === 9 && song.lines[1].words?.length > 3 && song.grid?.beats > 30, { title: song.title, sections: song.sections?.map(s => s.id), lines: song.lines?.length });
   const chorus = await call(mcp, 'song_get', { section: 'chorus', words: false });
-  check('song_get section filter', chorus.sections?.length === 1 && chorus.lines?.every(l => l.section === 'chorus' && !l.words) && chorus.events?.some(e => e.kind === 'drop'), { lines: chorus.lines?.length, events: chorus.events?.length });
+  check('song_get section filter', chorus.sections?.length === 1 && chorus.lines?.every(l => l.section === 'chorus' && !l.words) && chorus.events?.some(e => e.kind === 'cue' && e.source_kind === 'drop'), { lines: chorus.lines?.length, events: chorus.events?.length });
   const tq = await call(mcp, 'timeline_query', { t0: '0:12', t1: 15000 });
   check('timeline_query across columns', tq.t0 === 12000 && tq.sections?.[0]?.id === 'chorus' && tq.shots?.some(s => s.id === 's4-chorus' && s.state === 'review') && tq.uses?.some(u => u.id === 'C3@12000')
-    && tq.lines?.length >= 2 && tq.notes?.some(n => n.id === 'n02') && tq.events?.some(e => e.kind === 'drop') && tq.requests?.some(r => r.id === 'rdemo01') && Array.isArray(tq.bars) && tq.cast?.includes('ada'),
+    && tq.lines?.length >= 2 && tq.notes?.some(n => n.id === 'n02') && tq.events?.some(e => e.id === 'drop_chorus' && e.kind === 'cue') && tq.requests?.some(r => r.id === 'rdemo01') && Array.isArray(tq.bars) && tq.cast?.includes('ada'),
     { sections: tq.sections?.length, shots: tq.shots?.map(s => s.id), uses: tq.uses?.map(u => u.id), lines: tq.lines?.length, notes: tq.notes?.length, bars: tq.bars?.length, requests: tq.requests?.length });
 
   // 3. snapshot first (the round trip below restores to it)
@@ -1687,6 +1687,90 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
     bad.every(b => /error 400/.test(b.error || '')) && /error 400/.test(badMap.error || '') && /error 400/.test(badMap2.error || '') && !stray.length, { bad: bad.map(b => (b.error || 'OK').slice(0, 40)), stray });
 }
 // ==================== 24. (E9) composition data export: END ====================
+// ==================== 25. (E1) named sync points and the re-time: BEGIN ====================
+// On its own project copy (mcp-events): js/events.js, lib/ops/events.mjs, mcp/tools/events.mjs. events_get reads the importer's
+// array as v2; event_add writes a proposed event (accepting is the page's); scenes_update / shots_update anchor boundaries
+// (anchors, snap "events": the anchored edge takes the event's time; an unknown event is dropped with a warning);
+// retime_propose returns the plan (anchored boundaries and the cuts that share them) and moves nothing; applying, undoing and
+// accepting are page only (HTTP without the page: 403; offline: 403; no tool); the page's retime_apply writes a new scenes and
+// storyboard version and moves the events; retime_undo puts them back (pending again).
+{
+  const EP = 'mcp-events', ED = path.join(DATA, EP);
+  fs.cpSync(ORIG, ED, { recursive: true, filter: (f) => !f.includes(`${path.sep}.snapshots`) });   // the pristine demo (the sections above changed the scratch one)
+  const pageOp = (name, body = {}) => post(`/api/op/${name}?project=${EP}`, body, { origin: URL_ });
+  const agentOp = (name, body = {}) => post(`/api/op/${name}?project=${EP}`, body);
+  const rd = (f) => JSON.parse(fs.readFileSync(path.join(ED, f), 'utf8'));
+  const curV = (f, k) => { const d = rd(f); return d.versions.find(v => v.id === d.current)[k]; };
+  const tools = (await mcp.listTools()).tools.map(t => t.name);
+  const g0 = await call(mcp, 'events_get', { project: EP });
+  check('events_get reads the importer\'s events.json (an array) as named events: drop_chorus a cue (source_kind drop), stop_outro a stop, accepted; the agent tools exist and the page-only acts have no tool',
+    g0.events?.some(e => e.id === 'drop_chorus' && e.kind === 'cue' && e.source_kind === 'drop' && e.status === 'accepted') && g0.events?.some(e => e.id === 'stop_outro' && e.kind === 'stop') && g0.pending === null
+    && ['events_get', 'event_add', 'retime_propose'].every(t => tools.includes(t)) && !['events_act', 'retime_apply', 'retime_undo'].some(t => tools.includes(t)), { n: g0.events?.length, err: g0.error });
+  const a1 = await call(mcp, 'event_add', { project: EP, name: 'her hi there', t: '0:05.000', kind: 'spoken', note: 'Verse, her line' });
+  const aDup = await call(mcp, 'event_add', { project: EP, id: 'her_hi_there', name: 'again', t: 6000 });
+  const aBad = await call(mcp, 'event_add', { project: EP, name: 'x', t: 999999 }), aKind = await call(mcp, 'event_add', { project: EP, name: 'x', t: 1000, kind: 'banana' });
+  const acc = await agentOp('events_act', { act: 'accept', id: 'her_hi_there', via: 'page' });
+  let accOff; try { S.ops.events_act(EP, { act: 'accept', id: 'her_hi_there' }); accOff = 200; } catch (e) { accOff = e.code; }
+  // proposed events are no snap target: anchoring to one is dropped with a warning
+  const scP = await call(mcp, 'scenes_update', { project: EP, upsert: [{ id: 'sc01', anchors: { t1: 'her_hi_there' } }], message: 'anchor to a proposed event' });
+  const accP = await pageOp('events_act', { act: 'accept', id: 'her_hi_there' });
+  check('event_add writes a PROPOSED event (by the agent); a duplicate id 409, a time outside the song or an unknown kind 400; accepting it is the page\'s (agent HTTP 403 even claiming via "page", offline 403); the page accepts it',
+    a1.event?.status === 'proposed' && a1.event.via === 'agent' && /409/.test(aDup.error || '') && /400/.test(aBad.error || '') && !!aKind.error && acc.status === 403 && accOff === 403
+    && accP.status === 200 && accP.body?.event?.status === 'accepted' && rd('events.json').events.find(e => e.id === 'her_hi_there').accepted_by === 'director',
+    { a1: a1.error || a1.event?.status, aDup: aDup.error?.slice(0, 40), acc: acc.status, accOff, accP: accP.status });
+  // anchors over the agent tools: the anchored edge takes the event's time; snap "events"; an unknown event is dropped with a warning
+  const sc1 = await call(mcp, 'scenes_update', { project: EP, upsert: [{ id: 'sc02', t1: 17900, anchors: { t1: 'stop_outro' } }, { id: 'sc03', t0: 18000 }], message: 'anchor sc02 end' });
+  const sb1 = await call(mcp, 'shots_update', { project: EP, upsert: [{ id: 's3-grid', t1: '0:11.950' }, { id: 's4-chorus', t0: '0:11.950' }], snap: 'events', message: 'cut on the drop' });
+  const sbBad = await call(mcp, 'shots_update', { project: EP, upsert: [{ id: 's2-wall', anchors: { t1: 'no_such_event' } }], message: 'bad anchor' });
+  const sbBad2 = await call(mcp, 'shots_update', { project: EP, upsert: [{ id: 's2-wall', anchors: { t1: '../x' } }] });
+  const s2 = curV('scenes.json', 'scenes').find(s => s.id === 'sc02'), b3 = curV('storyboard.json', 'shots').find(s => s.id === 's3-grid'), b4 = curV('storyboard.json', 'shots').find(s => s.id === 's4-chorus');
+  check('scenes_update / shots_update anchor boundaries to named events: anchors {t1: stop_outro} sets sc02\'s end to the event\'s time (17.9 -> 18.0 s, warned); snap "events" puts a cut typed at 11.95 s on drop_chorus (12.0 s) and anchors it; an unknown or a proposed event is dropped with a warning; an anchor that is not an event id is 400',
+    s2?.t1 === 18000 && s2.anchors?.t1 === 'stop_outro' && (sc1.warnings || []).some(w => /anchored to stop_outro/.test(w)) && b3?.t1 === 12000 && b3.anchors?.t1 === 'drop_chorus' && b4?.t0 === 12000 && b4.anchors?.t0 === 'drop_chorus'
+    && (sbBad.warnings || []).some(w => /no_such_event.*dropped/.test(w)) && !curV('storyboard.json', 'shots').find(s => s.id === 's2-wall').anchors && /400/.test(sbBad2.error || '') && (scP.warnings || []).some(w => /her_hi_there.*dropped/.test(w)),
+    { s2: s2 && [s2.t1, s2.anchors], w1: sc1.warnings || sc1.error, b3: b3 && [b3.t1, b3.anchors], b4: b4 && [b4.t0, b4.anchors], w: sbBad.warnings, scP: scP.warnings, bad2: sbBad2.error?.slice(0, 60) });
+  // the director measures (page); the agent proposes a re-time; nothing moves; applying is the page's
+  const m1 = await pageOp('events_act', { act: 'measure', id: 'stop_outro', measured: 18250 });
+  const mAgent = await agentOp('events_act', { act: 'measure', id: 'stop_outro', measured: 19000 });
+  const g1 = await call(mcp, 'events_get', { project: EP });
+  const scV = rd('scenes.json').current, sbV = rd('storyboard.json').current;
+  const pr = await call(mcp, 'retime_propose', { project: EP, moves: [{ event: 'stop_outro', to: '0:18.250' }, { event: 'drop_chorus', to: 11900 }], why: 'measured on the stems' });
+  const prBad = await call(mcp, 'retime_propose', { project: EP, moves: [{ event: 'stop_outro', to: 3000 }] });
+  const prNone = await call(mcp, 'retime_propose', { project: EP, moves: [{ event: 'nope', to: 1000 }] });
+  const rows = pr.plan?.rows || [], has = (k, id, e, a, b, why) => rows.some(r => r.kind === k && r.id === id && r.edge === e && r.from === a && r.to === b && r.why === why);
+  check('retime_propose: the plan lists every boundary anchored to the moved events and the cuts that share them (sc02 end anchored, sc03 start / s4-chorus end / s5-outro start shared, s3-grid end and s4-chorus start anchored) and records a PROPOSED re-time; nothing moves; a re-time that would leave a boundary without length is 400, an unknown event 404; measuring is the page\'s (agent 403); events_get shows the pending plan',
+    pr.retime && has('scene', 'sc02', 't1', 18000, 18250, 'anchored') && has('scene', 'sc03', 't0', 18000, 18250, 'shared') && (has('shot', 's4-chorus', 't1', 18000, 18250, 'shared') || has('shot', 's4-chorus', 't1', 18000, 18250, 'anchored')) && has('shot', 's5-outro', 't0', 18000, 18250, 'shared')
+    && has('shot', 's3-grid', 't1', 12000, 11900, 'anchored') && has('shot', 's4-chorus', 't0', 12000, 11900, 'anchored') && rows.length === 6
+    && rd('scenes.json').current === scV && rd('storyboard.json').current === sbV && rd('events.json').retimes.find(r => r.id === pr.retime)?.status === 'proposed'
+    && /400/.test(prBad.error || '') && /404/.test(prNone.error || '') && m1.status === 200 && mAgent.status === 403 && g1.pending?.rows?.length === 4,
+    { pr: pr.error || rows.map(r => `${r.kind} ${r.id}.${r.edge} ${r.from}->${r.to} ${r.why}`), prBad: prBad.error?.slice(0, 80), prNone: prNone.error?.slice(0, 40), m1: m1.status, mAgent: mAgent.status, pending: g1.pending?.rows?.length });
+  const apA = await agentOp('retime_apply', { retime: pr.retime, via: 'page' }), apA2 = await agentOp('retime_undo', { retime: pr.retime });
+  let apOff; try { S.ops.retime_apply(EP, { retime: pr.retime }); apOff = 200; } catch (e) { apOff = e.code; }
+  const ap = await pageOp('retime_apply', { retime: pr.retime });
+  const scA = curV('scenes.json', 'scenes'), sbA = curV('storyboard.json', 'shots'), evA = rd('events.json');
+  check('applying a re-time is the page\'s (agent HTTP 403 even claiming via "page", retime_undo 403, offline 403); the page applies the proposal: ONE new scenes version and ONE new storyboard version with the boundaries moved (anchors kept, the picks untouched), the events at their new times (measured cleared, retimed history), the record applied by the director',
+    apA.status === 403 && apA2.status === 403 && apOff === 403 && ap.status === 200 && rd('scenes.json').versions.length === JSON.parse(JSON.stringify(rd('scenes.json'))).versions.length
+    && ap.body.versions.scenes?.[0] === scV && ap.body.versions.storyboard?.[0] === sbV && scA.find(s => s.id === 'sc02').t1 === 18250 && scA.find(s => s.id === 'sc02').anchors?.t1 === 'stop_outro' && scA.find(s => s.id === 'sc03').t0 === 18250
+    && sbA.find(s => s.id === 's3-grid').t1 === 11900 && sbA.find(s => s.id === 's4-chorus').t0 === 11900 && sbA.find(s => s.id === 's4-chorus').t1 === 18250 && sbA.find(s => s.id === 's5-outro').t0 === 18250
+    && evA.events.find(e => e.id === 'stop_outro').t === 18250 && evA.events.find(e => e.id === 'stop_outro').measured == null && evA.events.find(e => e.id === 'stop_outro').retimed?.length === 1
+    && evA.retimes.find(r => r.id === pr.retime)?.status === 'applied' && evA.retimes.find(r => r.id === pr.retime).applied_by === 'director',
+    { apA: apA.status, apA2: apA2.status, apOff, ap: ap.status, versions: ap.body?.versions, err: ap.body?.error });
+  const un = await pageOp('retime_undo', { retime: pr.retime });
+  const evU = rd('events.json'), scU = curV('scenes.json', 'scenes'), sbU = curV('storyboard.json', 'shots');
+  const g2 = await call(mcp, 'events_get', { project: EP });
+  const re = await pageOp('retime_apply', { retime: pr.retime });
+  check('retime_undo (page): new versions with the old times, the events back at their old times and pending again (measured = the re-timed time); retime_apply of the undone record redoes it',
+    un.status === 200 && scU.find(s => s.id === 'sc02').t1 === 18000 && sbU.find(s => s.id === 's3-grid').t1 === 12000 && evU.events.find(e => e.id === 'stop_outro').t === 18000 && evU.events.find(e => e.id === 'stop_outro').measured === 18250
+    && evU.retimes.find(r => r.id === pr.retime).status === 'undone' && g2.pending?.moves?.length === 2 && re.status === 200 && curV('scenes.json', 'scenes').find(s => s.id === 'sc02').t1 === 18250,
+    { un: un.status, re: re.status, pend: g2.pending?.moves?.length });
+  // an anchored event cannot be moved or removed directly (measure + re-time); import an audio events.json in seconds
+  const upd = await pageOp('events_act', { act: 'update', id: 'stop_outro', t: 19000 }), rem = await pageOp('events_act', { act: 'remove', id: 'stop_outro' });
+  const imp = await pageOp('events_act', { act: 'import', events: [{ id: 'her_hi_there', t: 5.5, kind: 'line' }, { id: 'duet_5_both', t: 16.5, kind: 'line', note: 'Does it matter?' }, { id: 'section_x', t: 2.0, kind: 'section' }] });
+  const impA = await agentOp('events_act', { act: 'import', events: [{ id: 'zz', t: 1, kind: 'stop' }] });
+  check('events_act (page): an anchored event\'s time is not changed directly (409: measure it and re-time) nor removed (409); import reads seconds (duet_5_both 16.5 s -> 16500 ms, a line -> voice), skips sections and existing ids; the agent cannot import (403)',
+    upd.status === 409 && rem.status === 409 && imp.status === 200 && imp.body.added === 1 && imp.body.unit === 's' && rd('events.json').events.find(e => e.id === 'duet_5_both')?.t === 16500 && rd('events.json').events.find(e => e.id === 'duet_5_both').kind === 'voice' && impA.status === 403,
+    { upd: upd.status, rem: rem.status, imp: imp.body, impA: impA.status });
+}
+// ==================== 25. (E1) named sync points and the re-time: END ====================
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {
   // ---------------------------------------------------------------- clean up whatever happened

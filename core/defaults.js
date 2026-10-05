@@ -274,7 +274,7 @@ menus.contribute('menubar:Help', ['window.cheat', 'view.palette', 'edit.keybindi
 
 // ------------------------------------------------------------------ context menus
 // the timeline's + Add comes first on any right-click on the sheet (contextArgs puts "tladd" before the item's own context)
-menus.contribute('tladd', [{ label: '+ Add', submenu: [{ cmd: 'timeline.addNote', label: '+ note at this time' }, { cmd: 'timeline.addScene', label: '+ scene here' }, { cmd: 'timeline.addShot', label: '+ shot here' }] }]);
+menus.contribute('tladd', [{ label: '+ Add', submenu: [{ cmd: 'timeline.addNote', label: '+ note at this time' }, { cmd: 'timeline.addScene', label: '+ scene here' }, { cmd: 'timeline.addShot', label: '+ shot here' }, { cmd: 'events.addHere', label: '+ Named event here' }] }]);
 menus.contribute('timeline', ['marker.add', 'note.add', 'loop.fromHere', 'edit.selectSection', 'view.zoomSection', 'edit.copyTime']);
 menus.contribute('ruler', ['transport.playFrom', 'loop.section', 'loop.selection', 'view.zoomSel']);
 menus.contribute('lyric', ['transport.playFrom', 'loop.line', { cmd: 'note.add', args: { contextLine: true }, label: 'Add note to this line…' }, 'line.editTiming', 'edit.copyText']);

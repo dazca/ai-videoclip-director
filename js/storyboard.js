@@ -6,6 +6,7 @@
 //   Shot  {id "sh03", scene: "sc02" | null, t0, t1, kind, title, text, camera, sketch: id | null, beats: [beat ids],
 //          cast: [entity ids], locations: [ids], props: [ids], variants: {<entity id>: <variant / look id> | null},
 //          gen: "still" | "video" | null, clips: [clip use ids], thumb?, section?,
+//          anchors?: {t0?: event id, t1?: event id} (the boundary follows a named event, js/events.js, E1),
 //          clip?: the director's picked take {request, take, file, media, kind, in_ms, out_ms, note, alt[], by, via, at}
 //          (js/takes.js; written only by the page's take_act, carried forward by every other save)}
 //          t0 < t1 are integer ms of the song; the shots of a scene TILE it (the first starts with the scene, each next one
@@ -26,6 +27,7 @@ import { currentBreakdown } from './breakdown.js';
 import * as A from './assets.js';
 import * as P from './prices.js';
 import { shapeClip } from './takes.js';
+import { snapToEvent, anchorsOf, checkAnchors, settleAnchors } from './events.js';
 
 export const SHOT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 export const SCENE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
@@ -34,7 +36,7 @@ export const SKETCH_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 export const KINDS = ['wide', 'medium', 'close', 'insert', 'performance', 'xp-desktop'];
 export const KIND_RE = /^[a-z][a-z0-9-]{0,23}$/;
 export const GENS = ['still', 'video'];
-export const SNAPS = ['beats', 'bars', 'off'];
+export const SNAPS = ['beats', 'bars', 'events', 'off'];
 export const FIELD = { character: 'cast', location: 'locations', prop: 'props' };
 const CLIP_RE = /^[\w@.:-]{1,80}$/, BEAT_RE = /^[A-Za-z0-9_-]{1,40}$/, THUMB_RE = /^[\w./-]{1,300}$/;
 const num = (v) => Number.isFinite(Number(v)) ? Math.round(Number(v)) : NaN;
@@ -43,9 +45,11 @@ const sum = (a) => +a.reduce((s, x) => s + (Number(x) || 0), 0).toFixed(2);
 export const byTime = (a, b) => a.t0 - b.t0 || a.t1 - b.t1;
 
 // ------------------------------------------------------------------ the beat grid
-// nearest beat / downbeat (mode beats | bars) of the song grid, 0 and the end included; off = rounded ms
-export function snapGrid(t, song, mode = 'beats') {
+// nearest beat / downbeat (mode beats | bars) of the song grid, or named event (mode events: `events`, js/events.js), 0 and
+// the end included; off = rounded ms
+export function snapGrid(t, song, mode = 'beats', events) {
   if (!mode || mode === 'off' || !song) return Math.round(t);
+  if (mode === 'events') return snapToEvent(t, song, events || []).t;
   const g = song.grid || {}, c = mode === 'bars' ? g.downbeats || [] : g.beats || [];
   let best = Math.round(t), d = Infinity;
   for (const x of [0, song.duration_ms || 0, ...c]) { const e = Math.abs(x - t); if (e < d) { d = e; best = x; } }
@@ -95,13 +99,17 @@ export const nextNoteId = (doc) => `sbn${String(maxN(doc?.notes || [], /^sbn(\d+
 export const NEW_SHOT = () => ({ scene: null, title: '', text: '', camera: '', sketch: null, beats: [], cast: [], locations: [], props: [], variants: {}, gen: null, clips: [] });
 
 // a shot from the page or an agent -> the stored shape (ints, strings, checked ids); throws a message on what cannot be fixed
-export function cleanShot(s, song, { snap } = {}) {
+// with `events` (the named events, E1) an anchored edge takes its event's time and snap "events" anchors the edges it snaps
+// (warnings into `warnings`); without them the anchors are kept as given
+export function cleanShot(s, song, { snap, events, warnings } = {}) {
   if (!s || typeof s !== 'object') throw new Error('a shot must be an object');
   const id = String(s.id ?? '');
   if (!SHOT_ID.test(id)) throw new Error(`shot id "${id.slice(0, 60)}": letters, digits, _ and - (up to 40)`);
   const dur = song?.duration_ms || Infinity;
-  let t0 = num(s.t0), t1 = num(s.t1);
-  if (snap && snap !== 'off') { t0 = snapGrid(t0, song, snap); t1 = snapGrid(t1, song, snap); }
+  let t0 = num(s.t0), t1 = num(s.t1), anchors = anchorsOf(s);
+  checkAnchors(s.anchors, `shot ${id}`);
+  if (events) { const x = { t0, t1, ...(anchors ? { anchors } : {}) }; warnings?.push(...settleAnchors(x, events, { snap, song, what: `shot ${id}` })); ({ t0, t1 } = x); anchors = x.anchors || null; if (snap === 'events') snap = null; }
+  if (snap && snap !== 'off') { if (!anchors?.t0) t0 = snapGrid(t0, song, snap); if (!anchors?.t1) t1 = snapGrid(t1, song, snap); }
   if (!(t0 >= 0 && t1 > t0 && t1 <= dur)) throw new Error(`shot ${id}: needs 0 <= t0 < t1 <= ${dur} ms (got ${s.t0}, ${s.t1})`);
   const scene = s.scene == null || s.scene === '' ? null : String(s.scene);
   if (scene && !SCENE_ID.test(scene)) throw new Error(`shot ${id}: scene "${scene.slice(0, 60)}" is not a scene id`);
@@ -132,7 +140,8 @@ export function cleanShot(s, song, { snap } = {}) {
   let clip = null; if (s.clip != null) { try { clip = shapeClip(s.clip, `shot ${id}: clip`); } catch (e) { throw new Error(e.message); } }
   return { id, scene, t0, t1, kind, title: String(s.title ?? '').slice(0, 300), text: String(s.text ?? '').slice(0, 8000), camera: String(s.camera ?? '').slice(0, 2000), sketch,
     beats: list('beats', BEAT_RE, 200), cast: list('cast', ENT_ID, 40), locations: list('locations', ENT_ID, 40), props: list('props', ENT_ID, 40), variants, gen,
-    clips: list('clips', CLIP_RE, 100), ...(thumb ? { thumb } : {}), ...(s.section ? { section: String(s.section).slice(0, 60) } : {}), ...(clip ? { clip } : {}) };
+    clips: list('clips', CLIP_RE, 100), ...(thumb ? { thumb } : {}), ...(s.section ? { section: String(s.section).slice(0, 60) } : {}), ...(clip ? { clip } : {}),
+    ...(anchors ? { anchors } : {}) };
 }
 // the shots of each scene tile it: sorted by start; the first starts with the scene, each one ends where the next starts,
 // the last ends with the scene. Shots of an unknown scene (or none) are left as they are. Returns warnings; throws when a
@@ -178,6 +187,7 @@ export function checkBoard(d) {
       if (s.gen != null && !GENS.includes(s.gen)) throw new Error(`storyboard.json: ${v.id}/${s.id}: gen is still or video`);
       if (s.thumb != null && (typeof s.thumb !== 'string' || !THUMB_RE.test(s.thumb) || s.thumb.split('/').includes('..'))) throw new Error(`storyboard.json: ${v.id}/${s.id}: bad thumb path`);
       if (s.clip != null) shapeClip(s.clip, `storyboard.json: ${v.id}/${s.id}: clip`);
+      checkAnchors(s.anchors, `storyboard.json: ${v.id}/${s.id}`);
     }
   }
   if (d.versions.length && !vids.has(d.current)) throw new Error('storyboard.json: current must name a version');
