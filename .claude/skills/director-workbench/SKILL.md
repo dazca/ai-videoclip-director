@@ -98,7 +98,9 @@ with `ui_focus` view `stage`). A locked project refuses your writes with 409 unt
 The page shows it as the **stage rail**: 1 Lyrics, 2 Script, 3 Breakdown, 4 Characters, 5 Scenery, 6 Storyboard,
 7 Final. Report progress with `stage_update` (in_progress while you work, needs_you + a note when the director must
 decide, blockers); only the director marks a stage done, in the page. Show them the stage with `ui_focus` view
-`stage` (the rail opens the right one).
+`stage` (the rail opens the right one). The director may view Lyrics, Script, Breakdown, Storyboard and Final in
+**Time** (List | Time on the stage bar, Alt+T): the same rows on the timeline's time axis. It changes nothing in the files:
+your times (`t0` / `t1` ms on scenes, beats, shots) are what places them, so keep them exact and tiled.
 
 1. **Lyrics** (stage 1): a project can start from lyrics alone (`projects` create with `lyrics`, or the page's
    wizard); the song comes later (`song_attach`, timings re-estimated over the real song). `lyrics_get` gives the

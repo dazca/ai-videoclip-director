@@ -8,6 +8,7 @@
 //
 //   const nc = new NotesColumn({ stage, scroller, rows: () => [Row], top?: {label, targets}, current?: () => target,
 //                                width?: (stageWidth) => px, maxWidth?, allStages? })
+//   fixed: () => bool   the stage's Time view (core/timemode.js): rows are time slots, cells keep their height (no growing)
 //   allStages: the rows carry targets of other stages (the Final list): every stage's notes are matched (scope narrows them)
 //   The column's width is the same in every stage: 25% of the stage's width (260..420 px), always the last column before
 //   any side panel (width / maxWidth override it; no stage does today).
@@ -125,11 +126,13 @@ export class NotesColumn {
     const scR = this.sc.getBoundingClientRect(), st = this.sc.scrollTop;
     const geo = this.rows.map(r => { const a = first(r).getBoundingClientRect(), b = last(r).getBoundingClientRect(); return { h: b.bottom - a.top, lh: b.height }; });
     const ch = cells.map(c => c.offsetHeight);
-    // 2. a row grows to its notes (its last element)
-    this.rows.forEach((r, i) => { if (ch[i] > geo[i].h + 0.5 && geo[i].h > 0) { const L = last(r); L.style.minHeight = `${Math.ceil(geo[i].lh + ch[i] - geo[i].h)}px`; L.classList.add('nc-grown'); } });
+    // 2. a row grows to its notes (its last element); not in a stage's Time view (o.fixed): there a row is a time slot,
+    // so its cell keeps the slot's height (the rest on hover)
+    const fixed = !!this.o.fixed?.();
+    if (!fixed) this.rows.forEach((r, i) => { if (ch[i] > geo[i].h + 0.5 && geo[i].h > 0) { const L = last(r); L.style.minHeight = `${Math.ceil(geo[i].lh + ch[i] - geo[i].h)}px`; L.classList.add('nc-grown'); } });
     // 3. the cells on their rows
     const tops = this.rows.map(r => { const a = first(r).getBoundingClientRect(), b = last(r).getBoundingClientRect(); return { top: a.top - scR.top + st, h: b.bottom - a.top, hidden: !a.height && !b.height }; });
-    cells.forEach((c, i) => { const g = tops[i]; c.style.display = g.hidden ? 'none' : ''; c.style.top = `${Math.round(g.top)}px`; c.style.minHeight = `${Math.max(0, Math.round(g.h))}px`; });
+    cells.forEach((c, i) => { const g = tops[i]; c.style.display = g.hidden ? 'none' : ''; c.style.top = `${Math.round(g.top)}px`; c.style.minHeight = fixed ? '' : `${Math.max(0, Math.round(g.h))}px`; c.style.height = fixed ? `${Math.max(1, Math.round(g.h))}px` : ''; c.classList.toggle('ncfix', fixed); });
     this.layer.style.height = `${this.sc.scrollHeight}px`;
     // watch the rows themselves (images loading, an editor opening in a row): re-align
     // (only new elements: observe() always reports once, and re-observing everything would re-align forever)

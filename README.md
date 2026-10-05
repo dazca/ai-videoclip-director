@@ -107,6 +107,20 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   Alt+Shift+1..7, palette "Go to stage: Lyrics", right-click on the rail) to open its workspace; its bar has the status
   buttons: **only the director marks a stage done** (here or on the rail; agents can set in progress / needs you and
   blockers). Later stages can be opened early. A project made before the flow counts stages with content as done.
+- **List | Time** (ROADMAP_v4 F6, a provisional decision: List stays the default): the stage bar of Lyrics, Script,
+  Breakdown, Storyboard and Final has a **List | Time** toggle (also **Alt+T**, View menu, right-click on the stage),
+  remembered per stage. In **Time** the rows sit on the **timeline's own warped axis** (`core/timemode.js` reads
+  `WB.timeline.warp`: the same anchors and measured row heights), so a lyric line, a scene or a shot is at the same y as
+  on the timeline for the same ms, and the view scrolls with the timeline's playhead (the orange line) and shares its
+  reading position. Lyrics: a line per row (section tags a band on the left); Script: each scene / gap a row, its lyric
+  lines and beats at their own times; Storyboard: the scene a band, its shots stacked down it at their times (frame |
+  text); Breakdown: the matrix on its side, a scene per row (ordered and sized by time) x an item per column; Final: the
+  rows grouped by song section in time order. A row holds what fits its time slot (an orange underline = more; hover
+  shows it whole); the Notes column stays row-aligned, which here means time-aligned (its cells keep the slot's height).
+  A click on an empty spot seeks; right-click > **+ Add at m:ss** adds a note on the row at that time, a scene or a shot.
+  Rows off screen are skipped by the browser (`content-visibility: auto`): placing the owner's 4:28 song (101 lines,
+  52 shots) takes under 10 ms. The timeline stays laid out behind the other pages (hidden, not removed), so its warp
+  is always the real one.
 - **Notes** (SPEC v4 §1): every stage workspace has a **Notes column** on the right of its rows, **row-aligned**: a
   note sits on the row it is about (a lyric line or a section tag, a scene (its beats' notes tagged b1, b2…), a
   breakdown item, a tree branch / the open node, a scene's use of an asset, a storyboard scene (its shots' notes tagged

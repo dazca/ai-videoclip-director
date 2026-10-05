@@ -16,6 +16,8 @@ import { NotesColumn } from '../core/notescol.js';
 import { history } from '../core/history.js';
 import { menus } from '../core/menus.js';
 import { stripHtml, register as registerProposals, offerPrepare } from '../core/proposals.js';
+import { TimeAxis } from '../core/timemode.js';
+import { upperBound } from '../js/warp.js';
 
 const WB = () => window.WB;
 const visible = () => WB()?.app?.active() === 'stage' && WB().stages?.current() === 'lyrics';
@@ -41,17 +43,38 @@ class Workspace {
     this.wire();
     // the Notes column: one row per section tag and per line; the top row holds the notes on the whole poem
     // the poem keeps ~800 px, the Notes column takes the rest (up to 800 px; core/notescol.js width)
-    this.nc = new NotesColumn({ stage: 'lyrics', scroller: this.$('.lypoem'), active: () => !this.compare && !this.textMode && this.draft.length > 0,
-      top: { label: 'notes on the whole poem', targets: [{ stage: 'lyrics', kind: 'stage', id: null }] },
-      rows: () => [...this.el.querySelectorAll('.lypoem .lyhead, .lypoem .lyl')].map(e => e.classList.contains('lyl')
+    // Time view (core/timemode.js): the lines on the timeline's axis, the section tags a band on the left; a section's notes
+    // then sit in the top row (tagged with the section) so the cells stay one per time slot
+    this.nc = new NotesColumn({ stage: 'lyrics', scroller: this.$('.lypoem'), active: () => !this.compare && !this.textMode && this.draft.length > 0, fixed: () => !!this.ta?.on,
+      top: () => this.ta?.on ? { label: 'notes on the whole poem and its sections', targets: [{ stage: 'lyrics', kind: 'stage', id: null }],
+        match: (n) => n.target.kind === 'stage' || n.target.kind === 'section', sub: (n) => n.target.kind === 'section' ? `[${this.draft.find(s => s.id === n.target.id)?.label || n.target.id}]` : '' }
+        : { label: 'notes on the whole poem', targets: [{ stage: 'lyrics', kind: 'stage', id: null }] },
+      rows: () => [...this.el.querySelectorAll(this.ta?.on ? '.lypoem .lyl' : '.lypoem .lyhead, .lypoem .lyl')].map(e => e.classList.contains('lyl')
         ? { el: e, targets: [{ stage: 'lyrics', kind: 'line', id: e.dataset.line }], sub: (n) => n.target.quote ? `“${n.target.quote}”${n.target.w && !F.anchorWords(this.findLine(e.dataset.line)?.l.text || '', n.target) ? ' (text changed)' : ''}` : '' }
         : { el: e, targets: [{ stage: 'lyrics', kind: 'section', id: e.closest('.lysec').dataset.sec }] }),
       current: () => { const s = this.sel, f = this.el.querySelector('.lyl:focus')?.dataset.line; const L = s && this.findLine(s.line)?.l;
         return L ? { stage: 'lyrics', kind: 'line', id: s.line, w: [s.w0, s.w1], quote: F.words(L.text).slice(s.w0, s.w1 + 1).join(' ') } : f ? { stage: 'lyrics', kind: 'line', id: f } : null; } });
+    this.ta = new TimeAxis({ stage: 'lyrics', scroller: this.$('.lypoem'), nc: this.nc, rows: () => this.timeRows(), onApply: () => this.nc.schedule('place') });
+    document.addEventListener('wb:timemode', (e) => { if (e.detail.stage === 'lyrics' && !this.editing) this.render(); });
     store.on((w) => { if (['lyrics', 'all', 'stages', 'notes', 'proposals'].includes(w)) { if (this.editing) this.pending = true; else this.render(); } });
     this.render();
   }
   get doc() { return store.lyrics; }
+  // the Time view's rows: each line at its first word's time (song.json; the same t as the timeline's lyrics column) until
+  // the next line, each section tag from its first line to the next section's; lines without a timing yet go after the end
+  timeRows() {
+    if (this.compare || this.textMode || !this.draft.length) return [];
+    const tm = songLines(), dur = store.song?.duration_ms || 0;
+    const t0of = (id) => { const L = tm.get(id); return L ? (L.words?.[0]?.t0 ?? L.t0) : null; };
+    const after = (list) => { const a = [...new Set(list.filter(t => t != null))].sort((x, y) => x - y); return (t) => { const i = upperBound(a, t); return i < a.length ? a[i] : dur; }; };
+    const lines = [...this.el.querySelectorAll('.lypoem .lyl')].map(e => ({ el: e, t0: t0of(e.dataset.line) }));
+    const nextLine = after(lines.map(r => r.t0));
+    for (const r of lines) if (r.t0 != null) r.t1 = nextLine(r.t0);
+    const heads = [...this.el.querySelectorAll('.lypoem .lysec')].map(sec => { const ts = [...sec.querySelectorAll('.lyl')].map(e => t0of(e.dataset.line)).filter(t => t != null); return { el: sec.querySelector('.lyhead'), t0: ts.length ? Math.min(...ts) : null }; });
+    const nextSec = after(heads.map(h => h.t0));
+    for (const h of heads) if (h.t0 != null) h.t1 = nextSec(h.t0);
+    return [...heads, ...lines];
+  }
   // the notes on the poem (notes.json v2): open ones per line, for the word marks
   lineNotes() { const m = new Map(); for (const n of store.notesOn({ stage: 'lyrics', kind: 'line', status: 'open' })) (m.get(n.target.id) || m.set(n.target.id, []).get(n.target.id)).push(n); return m; }
   // a draft edit from "+ Add" (and the other structural edits): one undo step (Ctrl+Z puts the draft back)
@@ -131,6 +154,7 @@ class Workspace {
     this.renderBar(); this.renderSong();
     if (this.compare) this.renderDiff(); else if (this.textMode) this.renderText(); else this.renderPoem();
     this.renderSide();
+    this.ta?.apply();
   }
   renderBar() {
     const v = this.cur, n = F.flatLines({ sections: this.draft }).length;

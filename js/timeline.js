@@ -23,6 +23,7 @@ export class Timeline {
     this.hoverCol = null;
     this.perf = { relayouts: [], firstRender: 0 };
     this.player = new Player(this);   // lives across rebuilds: a data reload must not stop playback
+    this.watchers = new Set();        // fn(what, t): 'layout' after every relayout, 'tick' on every playhead move (core/timemode.js)
     this.build();
   }
 
@@ -169,6 +170,7 @@ export class Timeline {
     this.drawLanes();
     this.updatePlayhead(this.player.time());
     this.updateLoop(); this.updateSelRange();
+    for (const f of this.watchers) f('layout');
     const dt = performance.now() - t0;
     this.perf.relayouts.push(dt); if (this.perf.relayouts.length > 200) this.perf.relayouts.shift();
     return dt;
@@ -207,6 +209,7 @@ export class Timeline {
     for (const c of this.cols) if (!c.hidden && !c.strip && c.def.tick) c.def.tick(c, t);
     const hd = this.byId.ruler?.head.querySelector('.nm');
     if (hd) hd.textContent = fmt(t, true);
+    for (const f of this.watchers) f('tick', t);
   }
   tickPlaying(t) {
     this.updatePlayhead(t);
@@ -215,6 +218,7 @@ export class Timeline {
       if (Math.abs(this.scroller.scrollTop - want) > 0.5) this.scroller.scrollTop = want;
     }
   }
+  watch(fn) { this.watchers.add(fn); return () => this.watchers.delete(fn); }
   setLoop(range) { this.loop = range; this.updateLoop(); }
   updateLoop() {
     if (!this.loop) { this.loopShade.style.display = 'none'; return; }

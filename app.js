@@ -116,7 +116,9 @@ async function show(id) {
   if (!p) { const s = subDef(id); if (!s) return; p = s.page; subOf[p.id] = id; prefs.set('subs', subOf); }
   active = p.id; prefs.set('activeTab', id);
   const rec = pages[p.id] || buildPage(p);
-  for (const [k, r] of Object.entries(pages)) r.el.style.display = k === p.id ? '' : 'none';
+  // the timeline stays laid out behind the other pages (visibility, not display): its warp y(t) is then always the real one,
+  // which the stages' Time view (core/timemode.js) shares to the pixel
+  for (const [k, r] of Object.entries(pages)) { const bg = k === 'timeline' && k !== p.id; r.el.style.display = k === p.id || bg ? '' : 'none'; r.el.classList.toggle('bg', bg); }
   renderSubnav(p);
   renderTop();
   document.dispatchEvent(new CustomEvent('wb:page', { detail: p.id }));

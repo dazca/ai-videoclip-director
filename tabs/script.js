@@ -18,6 +18,7 @@ import * as SC from '../js/scenes.js';
 import { NotesColumn } from '../core/notescol.js';
 import { history } from '../core/history.js';
 import { stripHtml, register as registerProposals, offerPrepare } from '../core/proposals.js';
+import { TimeAxis } from '../core/timemode.js';
 
 const WB = () => window.WB;
 const visible = () => WB()?.app?.active() === 'stage' && WB().stages?.current() === 'script';
@@ -52,7 +53,7 @@ class Workspace {
     this.wire();
     // the Notes column: one row per scene (its beats' notes tagged b1, b2…); the top row holds the notes on the whole script
     const sceneT = (id) => ({ stage: 'script', kind: 'scene', id }), beatT = (sid, b) => ({ stage: 'script', kind: 'beat', id: `${sid}/${b}` });
-    this.nc = new NotesColumn({ stage: 'script', scroller: this.$('.sclist'), active: () => !this.compare,
+    this.nc = new NotesColumn({ stage: 'script', scroller: this.$('.sclist'), active: () => !this.compare, fixed: () => !!this.ta?.on,
       top: { label: 'notes on the whole script', targets: [{ stage: 'script', kind: 'stage', id: null }] },
       rows: () => [...this.el.querySelectorAll('.sclist > .scrow[data-scene]')].map(e => { const s = this.scene(e.dataset.scene); return {
         el: e, targets: [sceneT(e.dataset.scene), ...(s?.beats || []).map(b => beatT(s.id, b.id))],
@@ -60,10 +61,24 @@ class Workspace {
         sub: (n) => n.target.kind === 'beat' ? n.target.id.split('/')[1] : '',
         targetAt: (x) => { const b = x.closest?.('[data-beat]'); return b ? beatT(e.dataset.scene, b.dataset.beat) : sceneT(e.dataset.scene); } }; }),
       current: () => this.open && this.scene(this.open) ? sceneT(this.open) : null });
+    // Time view (core/timemode.js): each scene / gap row on the timeline's axis, its lyric lines and beats at their own times
+    this.ta = new TimeAxis({ stage: 'script', scroller: this.$('.sclist'), nc: this.nc, rows: () => this.timeRows(), onApply: () => this.nc.schedule('place'), noSeek: '.sccard' });
+    document.addEventListener('wb:timemode', (e) => { if (e.detail.stage === 'script' && !this.typing()) this.render(); });
     store.on((w) => { if (['scenes', 'all', 'song', 'media', 'proposals'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
     this.render();
   }
   get doc() { return store.scenes; }
+  timeRows() {
+    if (this.compare) return [];
+    return [...this.el.querySelectorAll('.sclist > .scrow')].map(e => {
+      const g = e.dataset.gap?.split(',').map(Number), s = !g && this.scene(e.dataset.scene); if (!g && !s) return null;
+      const t0 = g ? g[0] : s.t0, t1 = g ? g[1] : s.t1;
+      const ls = [...e.querySelectorAll('.sclines .scl')].map(x => ({ el: x, t0: Number(x.querySelector('.lyt[data-t]')?.dataset.t) })).filter(x => Number.isFinite(x.t0));
+      const bs = e.classList.contains('open') ? [] : [...e.querySelectorAll('.scbeats > [data-beat]')].map(x => ({ el: x, t0: Number(x.querySelector('.lyt[data-t]')?.dataset.t) })).filter(x => Number.isFinite(x.t0));
+      for (const L of [ls, bs]) L.forEach((x, i) => { x.t0 = Math.max(t0, Math.min(t1, x.t0)); x.t1 = Math.max(x.t0, L[i + 1]?.t0 ?? t1); });
+      return { el: e, t0, t1, subs: [...ls, ...bs] };
+    }).filter(Boolean);
+  }
   // a draft edit from "+ Add" (scene, beat) or a removal: one undo step (Ctrl+Z puts the draft back)
   undoable(label, fn) {
     const before = structuredClone(this.draft); const r = fn(); const after = structuredClone(this.draft);
@@ -272,6 +287,7 @@ class Workspace {
     this.renderBar();
     if (this.compare) this.renderDiff(); else this.renderList();
     this.renderSide();
+    this.ta?.apply();
   }
   renderBar() {
     const v = this.cur, dur = this.song.duration_ms, g = SC.gaps(this.draft, dur), cov = SC.coverage(this.draft, dur);
