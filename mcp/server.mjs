@@ -42,6 +42,7 @@ import './tools/events.mjs';       // E1: named sync points (events_get, event_a
 import './tools/interpret.mjs';    // E10: interpretation_set (the agent's reading of an intake answer / a note; accepting is the page's)
 import './tools/renders.mjs';      // E4 / E8: renders_get, render_propose, sheet_make, sheets_get, sheet_review (starting a render is the page's)
 import './tools/songs.mjs';        // E7: song_versions_get, song_version_add, song_version_plan, suno_brief (using a version is the page's)
+import './tools/projectio.mjs';    // G5: project_export (never private), project_import (a NEW project, approvals demoted)
 
 // ------------------------------------------------------------------ resources: docs + raw project files
 const doc = (f) => { try { return fs.readFileSync(path.join(S.WB_DIR, f), 'utf8'); } catch (e) { return `(${f} not found)`; } };

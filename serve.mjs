@@ -124,7 +124,7 @@ const CSP_FILE = "sandbox; default-src 'none'; img-src 'self' data: blob:; media
 const STATIC = /^(index\.html|dock\.html|app\.js|app\.css|readme\.md|(core|js|tabs|core\/sketch)\/[\w.-]+\.(js|css)|catalog\/([\w-]+\/)?[\w.-]+\.(json|md|jpe?g|png|webp)|templates\/[\w.-]+\.json)$/;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
-  '.svg': 'image/svg+xml', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.mp4': 'video/mp4', '.webm': 'video/webm', '.gif': 'image/gif', '.mov': 'video/quicktime', '.md': 'text/plain; charset=utf-8' };
+  '.svg': 'image/svg+xml', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.mp4': 'video/mp4', '.webm': 'video/webm', '.gif': 'image/gif', '.mov': 'video/quicktime', '.md': 'text/plain; charset=utf-8', '.zip': 'application/zip' };
 fs.mkdirSync(DATA_ROOT, { recursive: true });
 
 function sendFile(req, res, file) {
@@ -162,7 +162,7 @@ fs.watch(DATA_ROOT, { recursive: true }, (_ev, name) => {
   if (!name) { clearTimeout(watchTimer.get('*')); watchTimer.set('*', setTimeout(() => notify('*', ['*']), 80)); return; }   // Windows drops names when its event buffer overflows
   const f = name.replace(/\\/g, '/');
   // (gen/: the runner's outputs, job.json and lock: the page follows requests.json and media.json instead; .history: the git mirror)
-  if (f.endsWith('.tmp') || f.endsWith('.lock') || f.includes('/.snapshots') || f.includes('/.history') || f.includes('/.uploads') || f.includes('/thumbs/') || /\/gen(\/|$)/.test(f) || /\/(renders|sheets)(\/|$)/.test(f) || f.includes('/.sheet-')) return;
+  if (f.startsWith('.') || f.startsWith('_import-') || f.endsWith('.zip') || f.endsWith('.part') || f.endsWith('.tmp') || f.endsWith('.lock') || f.includes('/.snapshots') || f.includes('/.history') || f.includes('/.uploads') || f.includes('/thumbs/') || /\/gen(\/|$)/.test(f) || /\/(renders|sheets)(\/|$)/.test(f) || f.includes('/.sheet-')) return;
   const i = f.indexOf('/'); if (i < 0) return;
   clearTimeout(watchTimer.get(f));
   watchTimer.set(f, setTimeout(() => notify(f.slice(0, i), [f.slice(i + 1)]), 80));
@@ -200,7 +200,7 @@ function pushUi(project, cmd) {
 
 // request bodies: 5 MB, except a sketch save (two base64 PNGs + the stroke JSON): 25 MB. Over the limit: 413 at once
 // (by Content-Length when sent, else while reading); the rest of the upload is discarded and the connection closed.
-const bodyLimit = (p) => p === '/api/op/handoff_upload' ? 30e6 : p === '/api/op/sketch_save' || p === '/api/op/ref_upload' ? 25e6 : p === '/api/op/media_upload' || p === '/api/op/song_upload' ? 9e6 : 5e6;
+const bodyLimit = (p) => p === '/api/op/handoff_upload' ? 30e6 : p === '/api/op/sketch_save' || p === '/api/op/ref_upload' ? 25e6 : p === '/api/op/media_upload' || p === '/api/op/song_upload' || p === '/api/op/project_upload' ? 9e6 : 5e6;
 function readBody(req, limit) {
   return new Promise((ok, bad) => {
     const too = () => new S.WbError(413, `body too big (${limit / 1e6} MB max)`);
@@ -531,11 +531,15 @@ http.createServer(async (req, res) => {
         // made a sheet / asked for a second opinion (provenance); E7: using a song version and uploading a song are the page's
         if (name === 'render_config' || name === 'render_start' || name === 'render_cancel' || name === 'render_propose' || name === 'sheet_make' || name === 'sheet_ask') body.via = fromPage ? 'page' : 'agent';
         if (name === 'song_version_use' || name === 'song_upload' || name === 'song_version_add') body.via = fromPage ? 'page' : 'agent';
+        // G5 / G6: uploading a file to import / start a project from is the page's; a personal backup (include_private) is the page's
+        if (name === 'project_upload' || name === 'project_import' || name === 'project_export') body.via = fromPage ? 'page' : 'agent';
         if (!fromPage) S.lockGate(project, name, body);   // a locked project refuses every agent write, proposals included
         delete body.import_ok;   // only a local script calling lib/store.mjs directly may import approved looks
         try { return json(res, 200, await S.ops[name](project, body)); }
         catch (e) { if (e.code === 403 && !fromPage) e.message += ' (an agent\'s request: no page Origin + Sec-Fetch-Site: same-origin; agents use the MCP tools, the director acts in the open page)'; throw e; }
       }
+      // G6: a song the page staged (project_upload kind song) -> createFromSong (page only); else lyrics / a song path / empty
+      if (p === '/api/projects/new' && body.song_upload != null) return json(res, 200, await S.createFromSong({ ...body, via: fromPage ? 'page' : 'agent' }));
       if (p === '/api/projects/new') return json(res, 200, body.lyrics != null || body.song ? await S.createGuidedProject(body) : S.createProject(body.id, body.title));
       if (p === '/api/projects/duplicate') return json(res, 200, S.duplicateProject(body.from || project, body.to, !!body.reset_state));
       if (p === '/api/projects/delete') return json(res, 200, S.deleteProject(body.id));

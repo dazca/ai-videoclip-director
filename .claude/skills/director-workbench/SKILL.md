@@ -288,6 +288,15 @@ the constants. Song takes: `suno_brief` (style + lyrics with [section] tags, wit
 calls Suno); register a take they bring back with `song_version_add` (an LRC if you have one) and show `song_version_plan`; using it
 is theirs (Lyrics › versions…), then re-time the events to the new take (E1).
 
+## Projects as zips, a new project from a song (G5 / G6)
+
+`project_export` writes the project as `exports/<p>-<stamp>.zip` (a manifest with sha256s): use it to hand a project over or back
+it up. It never holds private media (the photos and what was made from them); only the director's "personal backup" tick in the page
+does, and you never ask for or import one. `project_import {path}` (a zip under a project's `exports/` or a media root) makes a NEW
+project: everything is checked first, and the approvals arrive as review, the requests as draft, the costs as history, so tell the
+director what needs approving again (`final_get`). A new project from a song is the director's in the page (File › New project…, drop
+the song: its length, waveform, beats (estimated) and lyric timings are read there); from a shell, `node importers/new_project.mjs`.
+
 ## Never
 
 - Never call a paid API (image, video, voice, music) without an APPROVED request whose `est_cost` fits the cap.

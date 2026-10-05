@@ -30,6 +30,13 @@ Copies the song into the project, computes the waveform peaks and energy curve, 
 marked `timing: "estimated"`; `[Verse 1]` headers or blank lines start sections). Shots, entities, script and notes
 start empty: fill them with your agent (below). `data/_template/` is the empty project that File > New copies.
 
+**Or in the page, no path typing (G6)**: File > New project… → title → lyrics (paste, or drop / load a `.txt` / `.lrc` file) →
+**drop the song** (mp3, wav, m4a, flac, ogg; or "choose the file"). Create uploads it in 4 MB chunks (a progress bar), then the
+server reads it: the length (ffprobe / ffmpeg), the waveform peaks, the energy curve, **the beat grid estimated from the song**
+when no BPM is typed (an onset autocorrelation over 60-200 BPM with the first downbeat; "no clear beat" falls back to 120), and
+the lyric timings over the real length (LRC tags win). The wizard shows each step, then the result (length, BPM and where it
+came from, lines) and opens the project on the lyrics stage. A path on this machine still works ("or a path on this machine").
+
 **Lyrics first, song later**: `node importers/new_project.mjs my-song --lyrics lyrics.txt --title "My Song"` (or File >
 New project in the page: a wizard, name -> lyrics -> song optional) makes a lyrics-only project: a placeholder length
 (~4 s a line), estimated line timings, the lyrics stage in progress. Add the song when you have it (Lyrics stage >
@@ -604,7 +611,7 @@ Every `/api` call takes `?project=<id>` (default: `$WB_PROJECT`, the config's `d
 only; bodies up to 5 MB, `sketch_save` and `ref_upload` up to 25 MB) · `POST /api/ui {t?, range?, view?, select?, preview?, message?, play?, open_project?}` (live UI channel: pushed to the
 open pages over SSE; returns `{pages, delivered}` once they ack via `POST /api/ui/ack`) ·
 `POST /api/save/<file>` `{base_rev, data}` (409 + current file when stale) · `GET /api/events` (SSE `{project, file}`) ·
-`GET /api/projects` · `POST /api/projects/new {id, title?, lyrics?, song?, bpm?}` (with `lyrics` / `song`: the wizard's guided project) · `POST /api/projects/duplicate {from, to, reset_state?}` ·
+`GET /api/projects` · `POST /api/projects/new {id, title?, lyrics?, song?, bpm?}` (with `lyrics` / `song`: the wizard's guided project; with `song_upload` + `song_name`: G6, a song the page staged with `project_upload`, page only) · `POST /api/projects/duplicate {from, to, reset_state?}` ·
 `POST /api/projects/delete {id}` (the default project is refused) · `GET /api/snapshots` · `POST /api/snapshot {message}` ·
 `POST /api/restore {snapshot}` (auto-snapshots first, copies the snapshot's JSON back, removes files it did not have; costs and requests that ran since are kept) ·
 `POST /api/reveal {path}` (Explorer at a media file). Writes are temp file + rename with retries (Windows locks);
@@ -630,7 +637,7 @@ small files are served in one read so no handle stays open.
   marks a stage done, sets a scene or breakdown item `ok`, dismisses the director's note or ticks "allow uploading
   private refs", and the ops `take_act`, `media_use`, `media_upload`, `batch_act`, `jobbooks_import`, `asset_act` /
   `character_act` (base / import accept, approvals, constants), `ref_upload`, `breakdown_promote`, `round_send`,
-  `revision_close`, `revision_restore`, `final_lock` / `final_unlock`, `proposal_act`, `events_act`, `retime_apply` /
+  `revision_close`, `revision_restore`, `final_lock` / `final_unlock`, `proposal_act`, `events_act`, `project_upload` (G5 / G6), `retime_apply` /
   `retime_undo`. An agent gets 403 on each
   ("agents use the MCP tools"), whatever `via` its body claims; an agent's save is stamped `by: "agent", via:
   "agent"`, and `/api/restore` without the page is an agent's restore. Every `/api` write answers `x-wb-client: page |
@@ -823,6 +830,24 @@ small files are served in one read so no handle stays open.
   extension from the bytes) via `.uploads/` (a dot-folder: never served, ignored by the watcher, parts older than a day
   removed). A recovered cost is recorded only through `cost_record` (once per job; a job the linked falgen ledger counts is
   not offered).
+- The project as a zip (G5 / G6, `lib/ops/projectio.mjs`, `lib/zip.mjs`; tools/security-projectzip.mjs): `project_export` leaves out
+  PRIVATE media (the PRIVATE rule, media flagged private, `thumbs/priv_*`) and scrubs every JSON file (`scrubPrivate`; a cost row keeps
+  its money); `include_private` (a personal backup, written to `private/exports/`: served to localhost only) is the page's only (S9: 403
+  to the page token alone, the agent token, the Origin alone, a forged Origin with the agent token, a claimed via "page" and offline;
+  the MCP tool has no such field). `project_upload` (chunks staged in `<data>/.uploads/`, a dot-folder: never served, cleaned after a
+  day) is page only; its first chunk must sniff as a zip / an audio file (415); declared size caps 2 GB / 300 MB (413); offsets
+  checked (409); free disk checked (507). `project_import` validates the whole zip before writing anything (into a temp folder,
+  renamed at the end; removed on any failure): every entry and manifest name a clean relative path (no `..`, `.`, empty segment,
+  leading `/`, drive, backslash, `:`, NUL, control character, `~<digit>`, device name, trailing dot / space, dot-file or dot-folder
+  but `.snapshots/`), no symlink, no zip64 / multi-disk / encryption, store or deflate only, no overlapping entries, the local name =
+  the central one, sizes (a zip and its total uncompressed <= 2 GB, a file <= 512 MB, <= 20 000 files, ratio <= 1000:1, inflating stops at
+  the declared size), every CRC, the manifest (format v1, a valid project id, every file listed once with the same size and sha256,
+  nothing extra or missing), every JSON parses, entity / request / media ids and paths; then `inside()` again for each file. It never
+  writes over an existing project (409) and demotes the director's decisions (approvals -> review, requests -> draft with the
+  private-upload tick taken back, batches -> draft, looks / variants -> review, approved tree nodes unset, scenes / items ok ->
+  needs_you / review, stages done -> in_progress, the render lock and command dropped; snapshots too); an agent imports only a
+  path under a project's `exports/` or a media root, never a private one (403), and never an upload (403). A new project from an
+  uploaded song (`/api/projects/new {song_upload}`) is the page's (403).
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.
 
@@ -841,6 +866,27 @@ node exporters/hyperframes-html/serve.mjs  <outDir>                             
 ```
 
 Details: `exporters/hyperframes-html/README.md`.
+
+## The project as a zip (G5)
+
+**File › Export project as zip…** writes `data/<project>/exports/<project>-<stamp>.zip` (the last 3 are kept) and downloads it:
+every JSON file, the sketches, peaks, thumbnails and the media the project registers or points at, plus `workbench-export.json`
+(format `director-workbench/project-zip` v1: each file's size and sha256). The zip's layout is the folder's, so it can be unpacked by
+hand. **Private media is left out by default** (the PRIVATE rule, media flagged private, `thumbs/priv_*`) and every JSON file is scrubbed
+of private paths; **include private media (personal backup)** is a tick in the page only, with a warning, and writes to
+`private/exports/` (local only). Snapshots are optional. Files under a media root are not copied (counted as external). The MCP tool
+`project_export` does the same without the private switch.
+
+**File › Import project from zip…** (or drop a `.zip` anywhere on the page): the zip is uploaded in chunks, checked (every name a clean
+relative path: zip-slip, absolute paths, drives, backslashes, dot-folders, device names and symlinks refused; sizes: 2 GB a zip and
+uncompressed, 512 MB a file, 20 000 files, a compression ratio over 1000:1; the manifest's sha256 and size for every file, nothing extra
+or missing; JSON and ids) and imported as a **new** project (id editable; never over an existing one). The director's decisions do not
+travel: approvals arrive as `review`, every request as `draft` (its old status kept in `imported.status`, "allow uploading private refs"
+off), batches as draft, approved looks / variants as review, approved tree nodes unset, scenes `ok` -> `needs_you`, items `ok` -> review,
+stages done -> in progress, the render lock and the render command dropped (imported snapshots too); costs are kept as history
+(`costs.json` `imported`). An agent imports with `project_import {path}` (a zip under a project's `exports/` or a media root).
+No dependency: `lib/zip.mjs` (node:zlib + a CRC-32 table; no zip64). Tested by `npm run verify` v29, `npm run test:mcp` and
+`tools/security-projectzip.mjs`.
 
 ### The way back: the picks as data for the composition (E9)
 

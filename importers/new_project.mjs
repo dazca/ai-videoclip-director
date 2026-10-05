@@ -58,6 +58,41 @@ export function grid(durMs, bpm, beatsPerBar, offsetMs) {
   for (let k = k0; k <= k1; k++) { const t = Math.round(offsetMs + k * beat); if (t > durMs) break; if (t < 0) continue; beats.push(t); if (((k % beatsPerBar) + beatsPerBar) % beatsPerBar === 0) downbeats.push(t); }
   return { bpm, beat_ms: +beat.toFixed(3), bar_ms: +(beat * beatsPerBar).toFixed(3), beats_per_bar: beatsPerBar, grid: { beats, downbeats } };
 }
+// G6: the tempo and the first downbeat from the song itself (no dependency): an onset envelope at 100 fps (positive change
+// of the log energy), its autocorrelation over 60-200 BPM weighted toward 120 (so a half / double tempo loses), refined by a
+// parabola; the beat phase is where the onsets line up best, the downbeat the strongest of beats_per_bar phases.
+// -> {bpm, offset_ms, confidence 0-1} or null when the song has no clear beat (confidence < 0.2)
+export function tempo(x, beatsPerBar = 4) {
+  const fps = 100, hop = SR / fps, n = Math.floor(x.length / hop);
+  if (n < fps * 6) return null;
+  const e = new Float32Array(n);
+  for (let i = 0; i < n; i++) { let s = 0; const a = Math.round(i * hop), b = Math.round((i + 1) * hop); for (let k = a; k < b; k++) s += x[k] * x[k]; e[i] = Math.log(1e-9 + s / Math.max(1, b - a)); }
+  const o = new Float32Array(n); let mean = 0;
+  for (let i = 1; i < n; i++) { o[i] = Math.max(0, e[i] - e[i - 1]); mean += o[i]; }
+  mean /= n; for (let i = 0; i < n; i++) o[i] -= mean;
+  { const c = Float32Array.from(o); for (let i = 2; i < n - 2; i++) o[i] = (c[i - 2] + 2 * c[i - 1] + 3 * c[i] + 2 * c[i + 1] + c[i + 2]) / 9; }   // a beat between two frames still lines up
+  const lo = Math.floor(fps * 60 / 200), hi = Math.ceil(fps * 60 / 60), ac = new Float64Array(hi + 2);
+  for (let L = lo - 1; L <= hi + 1; L++) { let s = 0; for (let i = 0; i + L < n; i++) s += o[i] * o[i + L]; ac[L] = s / (n - L); }
+  let best = -1, bv = -Infinity;
+  for (let L = lo; L <= hi; L++) {
+    const w = Math.exp(-0.5 * (Math.log2((fps * 60 / L) / 120) / 0.9) ** 2);
+    const v = ac[L] * w;
+    if (v > bv) { bv = v; best = L; }
+  }
+  if (best < 0 || ac[best] <= 0) return null;
+  let a0 = 0; for (let i = 0; i < n; i++) a0 += o[i] * o[i]; a0 /= n;
+  const confidence = ac[best] / Math.max(1e-12, a0);   // the normalised autocorrelation at the beat: ~0 for noise, ~1 for a click track
+  if (confidence < 0.2) return null;
+  const a = ac[best - 1], b = ac[best], c = ac[best + 1], den = a - 2 * b + c, shift = den ? Math.max(-0.5, Math.min(0.5, 0.5 * (a - c) / den)) : 0;
+  let bpm = fps * 60 / (best + shift);
+  bpm = Math.abs(bpm - Math.round(bpm)) < 0.35 ? Math.round(bpm) : +bpm.toFixed(1);
+  const beat = fps * 60 / bpm, score = (ph) => { let s = 0; for (let t = ph; t < n; t += beat) s += o[Math.round(t)] || 0; return s; };
+  let ph = 0, pv = -Infinity;
+  for (let p = 0; p < beat; p += 0.5) { const v = score(p); if (v > pv) { pv = v; ph = p; } }
+  let db = 0, dv = -Infinity;
+  for (let k = 0; k < beatsPerBar; k++) { let s = 0; for (let t = ph + k * beat; t < n; t += beat * beatsPerBar) s += o[Math.round(t)] || 0; if (s > dv) { dv = s; db = k; } }
+  return { bpm, offset_ms: Math.round((ph + db * beat) / fps * 1000), confidence: +confidence.toFixed(2) };
+}
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'section';
 // lyrics text -> {sections, lines} (times in ms, inside [0, durMs])
 export function parseLyrics(text, durMs) {
@@ -176,7 +211,7 @@ export function newProject(id, { song, lyrics = '', title, bpm = 120, beatsPerBa
 // into audio/ (unless it is already in the project or under a media root), then peaks, energy, beat grid and duration
 // are rebuilt and the lyric lines get timings: a project that had no song gets every line re-estimated over the real
 // duration (LRC tags in the lyrics win), a project that had one keeps the timings it has.
-export function attachSong(project, src, { bpm, beatsPerBar, offset } = {}) {
+export function attachSong(project, src, { bpm, beatsPerBar, offset, estimate = false } = {}) {
   if (!src || typeof src !== 'string') throw new S.WbError(400, 'path of the song file required');
   if (!/\.(wav|mp3|m4a|flac|ogg|aac)$/i.test(src)) throw new S.WbError(400, 'the song must be an audio file (wav, mp3, m4a, flac, ogg, aac)');
   if (S.isPrivate(src)) throw new S.WbError(400, 'a PRIVATE path cannot be the song (it would be served and exported)');
@@ -190,13 +225,16 @@ export function attachSong(project, src, { bpm, beatsPerBar, offset } = {}) {
   fs.mkdirSync(path.join(pd, 'peaks'), { recursive: true });
   S.writeJSON(path.join(pd, 'peaks', 'mix.json'), peaks(x, 'mix', mix));
   S.writeJSON(path.join(pd, 'energy.json'), energy(x));
+  // G6: no bpm given and estimate asked (the page's new project from a song): the tempo and the first downbeat from the song
+  const est = estimate && !bpm ? tempo(x, Number(beatsPerBar || song.beats_per_bar || 4)) : null;
+  if (est) { bpm = est.bpm; if (offset == null) offset = est.offset_ms; }
   const g = grid(durMs, Number(bpm || song.bpm || 120), Number(beatsPerBar || song.beats_per_bar || 4), Number(offset || 0));
   const next = { ...song, duration_ms: durMs, ...g, audio: { ...(song.audio || {}), mix, stems: song.audio?.stems || [] } };
   delete next.placeholder_duration;
   if (had) next.lines = (next.lines || []).map(l => ({ ...l, t0: Math.min(l.t0, durMs - 2), t1: Math.min(Math.max(l.t1, l.t0 + 1), durMs) }));
   S.write(project, 'song.json', next);
   const sync = S.syncLyrics(project, { reestimate: !had });
-  return { project, mix, duration_ms: durMs, bpm: g.bpm, replaced: had, lines: sync.lines ?? next.lines.length, timing: S.read(project, 'song.json').timing || null };
+  return { project, mix, duration_ms: durMs, bpm: g.bpm, replaced: had, ...(estimate ? { beats: est ? { source: 'estimated', bpm: est.bpm, offset_ms: est.offset_ms, confidence: est.confidence } : { source: bpm ? 'given' : 'default', bpm: g.bpm } } : {}), lines: sync.lines ?? next.lines.length, timing: S.read(project, 'song.json').timing || null };
 }
 
 // ------------------------------------------------------------------ CLI

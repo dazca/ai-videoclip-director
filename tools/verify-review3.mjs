@@ -78,6 +78,8 @@ export async function verifyReview3({ browser, OUT }) {
     await clickSel('.wizbg [data-w=next]'); await until(() => !!document.querySelector('.wizbg [name=lyrics]'));
     await pg.type('.wizbg [name=lyrics]', '[Verse]\nwalking home at night\nthe city hums along\n\n[Chorus]\nlights go on and off');
     await clickSel('.wizbg [data-w=next]'); await until(() => !!document.querySelector('.wizbg [name=song]'));
+    // G6: the song step takes a dropped file; a path on this machine sits under "or a path on this machine" (a <details>): open it
+    await pg.evaluate(() => { const d = document.querySelector('.wizbg .wzpath'); if (d) d.open = true; });
     await pg.type('.wizbg [name=song]', SONG);
     await clickSel('.wizbg [data-w=create]');
     await pg.waitForFunction(() => /project=night-walk/.test(location.search) && document.body.dataset.ready === '1', { timeout: 40000 });
