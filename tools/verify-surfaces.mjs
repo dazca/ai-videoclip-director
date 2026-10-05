@@ -132,14 +132,16 @@ export async function verifySurfaces({ browser, OUT }) {
     // 5. the timeline's surface column: covered words read normally, uncovered ones red
     const g1 = (await tool('surfaces_get')).body;
     await pg.evaluate(() => window.WB.app.show('timeline')); await wait(800);
-    await until(() => document.querySelectorAll('.col-surface .sfw').length > 20, null, 8000);
-    const col = await pg.evaluate(() => { const on = [...document.querySelectorAll('.col-surface .sfw.on')], un = [...document.querySelectorAll('.col-surface .sfw.un')];
-      return { on: on.length, un: un.length, unColor: un[0] ? getComputedStyle(un[0]).color : null, onColor: on[0] ? getComputedStyle(on[0]).color : null, title: on[0]?.title, head: !!document.querySelector('.colhead .nm[title="surface"], .col-surface') }; });
+    // review #3 (UX 2): the column is "on screen", one chip per line (covered/words), the words not repeated
+    await until(() => document.querySelectorAll('.col-surface .sfl').length >= 9, null, 8000);
+    const col = await pg.evaluate(() => { const ls = [...document.querySelectorAll('.col-surface .sfl')], okL = ls.filter(l => l.classList.contains('ok')), bad = ls.filter(l => !l.classList.contains('ok'));
+      return { on: ls.reduce((s, l) => s + Number(l.dataset.covered), 0), un: ls.reduce((s, l) => s + Number(l.dataset.n) - Number(l.dataset.covered), 0), words: document.querySelectorAll('.col-surface .sfw').length,
+        unColor: bad[0] ? getComputedStyle(bad[0]).borderLeftColor : null, onColor: okL[0] ? getComputedStyle(okL[0]).borderLeftColor : null, title: ls.find(l => /s2-wall/.test(l.title))?.title, chip: ls[0]?.querySelector('.sfn')?.textContent }; });
     const cb = await pg.evaluate(() => { const c = document.querySelector('.col-surface'), l = document.querySelector('.col-lyrics'); const it = document.querySelector('.col-surface .sfl'); it?.scrollIntoView({ block: 'start' }); const a = (l || c).getBoundingClientRect(), b = c.getBoundingClientRect(); return { x: Math.max(0, Math.min(a.left, b.left) - 4), y: 40, width: Math.min(innerWidth, Math.max(a.right, b.right) - Math.min(a.left, b.left) + 8), height: Math.min(innerHeight - 40, 520) }; });
     await frames(3); await pg.screenshot({ path: path.join(OUT, 'v24_surface_column.png'), clip: cb });
     const red = (c) => { const m = /rgb\((\d+), (\d+), (\d+)/.exec(c || ''); return m && +m[1] > 200 && +m[2] < 140 && +m[3] < 140; };
     check('the timeline\'s surface column: the covered words read normally (hover: shot · where), the uncovered ones red; the counts match surfaces_get',
-      col.on === g1.covered && col.on === 12 && col.un === g1.total - g1.covered && red(col.unColor) && !red(col.onColor) && /s2-wall · chat: Notepad/.test(col.title || ''), { col, covered: g1.covered, total: g1.total });
+      col.on === g1.covered && col.on === 12 && col.un === g1.total - g1.covered && col.words === 0 && /^\d+\/\d+$/.test(col.chip || '') && /s2-wall · chat: Notepad/.test(col.title || ''), { col, covered: g1.covered, total: g1.total });
 
     // 6. the Lyrics stage: a coverage count per line (and the kinds that show it)
     await pg.evaluate(() => window.WB.stages.open('lyrics')); await wait(700);
@@ -155,7 +157,7 @@ export async function verifySurfaces({ browser, OUT }) {
     const fl = await pg.evaluate(() => { const e = document.querySelector('.fnci[data-ck="lyrics"]'); return e ? { text: e.textContent.replace(/\s+/g, ' ').trim().slice(0, 160), ok: e.classList.contains('ok'), gaps: e.querySelectorAll('.fngaps a').length } : null; });
     await shot('v24_final_lyrics', '.fnci[data-ck="lyrics"]', 4);
     check('Final\'s checklist: "every word on a surface" fails with the count and the uncovered runs as links (as final_get says)',
-      line && !line.ok && /12 of 57 words on a surface/.test(line.detail) && line.gaps.length >= 7 && fl && !fl.ok && /every word on a surface/.test(fl.text) && /12 of 57/.test(fl.text) && fl.gaps > 0, { line: line && { detail: line.detail, gaps: line.gaps.length }, fl });
+      line && !line.ok && /12 of 57 words on screen/.test(line.detail) && line.gaps.length >= 7 && fl && !fl.ok && /every word on screen/.test(fl.text) && /12 of 57/.test(fl.text) && fl.gaps > 0, { line: line && { detail: line.detail, gaps: line.gaps.length }, fl });
 
     // 8. F4: Assets › Media has ONE status filter (the bin's); the page bar's is hidden there and back on Characters
     await pg.evaluate(() => window.WB.app.show('media')); await wait(600);
@@ -177,7 +179,7 @@ export async function verifySurfaces({ browser, OUT }) {
     const closed = await pg.evaluate(() => !document.querySelector('.hlpd[open]'));
     const gate = await pg.evaluate(() => ({ head: [...document.querySelectorAll('.sbside .sbgh')].map(h => h.textContent.replace(/\s+/g, ' ').trim()), runs: document.querySelectorAll('.sbside .sbgap .sfun').length }));
     check('F5: the storyboard\'s side panel is one line of help with a "?" popover (opens inside the window, Esc closes it), then the lyric gate\'s uncovered runs and the gap counts instead of prose',
-      lines0 && lines0 <= 22 && pop && pop.inside && pop.hit && /tile/.test(pop.text) && closed && gate.head.some(h => /lyric gate\s*12\/57/i.test(h)) && gate.runs >= 7, { lines0, pop, closed, gate });
+      lines0 && lines0 <= 22 && pop && pop.inside && pop.hit && /tile/.test(pop.text) && closed && gate.head.some(h => /on screen\s*12\/57/i.test(h)) && gate.runs >= 7, { lines0, pop, closed, gate });
 
     // 10. F5: every stage at 1280x800 and 1600x900: no horizontal overflow, the Notes column inside the window, a short poem fills the height
     const layout = {};

@@ -146,11 +146,11 @@ export async function verifyFinal({ browser, OUT }) {
     const apv = await pg.evaluate(() => ({ rows: document.querySelectorAll('.apws .fnrow').length, raw: document.querySelectorAll('.apws .apraw .chip[data-k]').length, panels: !!document.querySelector('.apws .fntop'), notes: !!document.querySelector('.apws .nclayer') }));
     await shot('v15_approvals');
     const nowRows = (await tool('final_get', {})).body.pending.length;
-    check('Review › Approvals is the same list as the Final stage (rows with what / why / image / time and the acts), without the checklist, costs and Notes column; the raw approvals.json states below', apv.rows === nowRows && apv.raw > 0 && !apv.panels && !apv.notes, { apv, nowRows });
+    check('Review › Approvals is the same list as the Final stage (rows with what / why / image / time and the acts), without the checklist and costs, WITH the Notes column (review #3); the raw approvals.json states below', apv.rows === nowRows && apv.raw > 0 && !apv.panels && apv.notes, { apv, nowRows });
 
     // 8. Lock for render (anyway: the checklist still fails) -> the agent is refused (409) while it reads; Unlock
     await pg.evaluate(() => window.WB.stages.open('final')); await wait(500);
-    await click('[data-x=lock]'); await wait(200);
+    await click('.sgbar [data-slot=primary]'); await wait(200);   // (review #3: the one Lock for render… is the stage bar's)
     const lconf = await pg.evaluate(() => document.querySelector('.fnconf')?.textContent.replace(/\s+/g, ' '));
     await shot('v15_lock_confirm');
     await click('.fnconf [data-x=confirm]');

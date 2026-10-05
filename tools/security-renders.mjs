@@ -137,8 +137,21 @@ try {
   const lk = await op('final_lock', { force: true, summary: 'sec' }, H.page);
   const p409 = await op('render_propose', { scope: 'full' }), sOk = await op('sheet_make', { from: 'storyboard' }), dStart = await op('render_start', { id: p2 }, H.page);
   await until(async () => { const x = (await op('renders_get', { id: p2 })).body?.renders?.[0]; return ['done', 'failed'].includes(x?.status); });
+  const lkUse = await op('song_version_use', { version: 'v2' }, H.page);
   const ul = await op('final_unlock', {}, H.page);
-  check('a project locked for render refuses the agent\'s render_propose (409); a sheet is still made; the director still renders', lk.status === 200 && p409.status === 409 && sOk.status === 200 && dStart.status === 200 && ul.status === 200, { lk: lk.status, p409: p409.status, sOk: sOk.status, dStart: dStart.status });
+  check('a project locked for render refuses the director\'s song_version_use too (409: the re-time lock rule, review #3 L1)', lkUse.status === 409 && /locked for render/.test(lkUse.body?.error || ''), { lkUse: lkUse.status, e: lkUse.body?.error });
+  // 6b. using a song version holds an approved shot it moves until the page confirms it (review #3 M2), then sends it back to review
+  const svp = await op('song_version_plan', { version: 'v2' }), mv = svp.body?.rows?.find(r => r.kind === 'shot');
+  const ap = mv ? await save('approvals.json', (d) => { d.items ||= {}; d.items['shot:' + mv.id] = { ...(d.items['shot:' + mv.id] || {}), state: 'approved' }; }) : null;
+  const svp2 = await op('song_version_plan', { version: 'v2' });
+  const noConf = await op('song_version_use', { version: 'v2' }, H.page);
+  const keys = (noConf.body?.held || []).map(h => h.key);
+  const conf = await op('song_version_use', { version: 'v2', confirm: keys }, H.page);
+  const apSt = J('approvals.json').items?.['shot:' + mv?.id]?.state;
+  check('song_version_use holds an approved shot it moves: song_version_plan lists it in held, 409 + held without confirm (nothing used), 200 with every held key confirmed and the shot back to review',
+    !!mv && ap?.status === 200 && (svp2.body?.held || []).some(h => h.key === 'shot:' + mv.id) && noConf.status === 409 && keys.includes('shot:' + mv.id)
+    && conf.status === 200 && J('song.json').current_version === 'v2' && apSt === 'review', { mv: mv?.id, ap: ap?.status, noConf: noConf.status, keys, conf: conf.status, e: conf.body?.error, apSt });
+  check('a project locked for render refuses the agent\'s render_propose (409); a sheet is still made; the director still renders',lk.status === 200 && p409.status === 409 && sOk.status === 200 && dStart.status === 200 && ul.status === 200, { lk: lk.status, p409: p409.status, sOk: sOk.status, dStart: dStart.status });
 
   // 7. escaping in the page
   await op('render_propose', { scope: 'excerpt', t0: 0, t1: 2000, why: '<img src=x onerror=window.__pwn=1>' });

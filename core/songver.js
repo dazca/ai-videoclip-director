@@ -13,7 +13,9 @@ import { commands } from './commands.js';
 import { menus } from './menus.js';
 import { history } from './history.js';
 import { copyText } from './dialog.js';
-import { planTable, evDialog, evCss } from './events.js';
+import { planTable, evDialog, evCss, heldHtml, ticked, allTicked } from './events.js';
+import { ui } from './palette.js';
+import { HELD_LABEL } from '../js/events.js';
 import { store, toast, esc } from '../js/store.js';
 import { fmt } from '../js/timeline.js';
 import { currentScript } from '../js/scenes.js';
@@ -26,17 +28,28 @@ const CSS = `.sgdlg .sgv{width:100%;border-collapse:collapse} .sgdlg .sgv td,.sg
 .sgdlg .cnt{font-size:10.5px;color:var(--dim)} .sgdlg .cnt.over{color:#f08080} .sgdlg .sgsum{margin:4px 0} .sgdlg .sgpv{border:1px solid var(--line2);padding:3px 6px;margin-top:6px}`;
 const css = () => { evCss(); if (!document.getElementById('sgcss')) { const st = document.createElement('style'); st.id = 'sgcss'; st.textContent = CSS; document.head.appendChild(st); } };
 const b64 = (blob) => new Promise((ok, bad) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).replace(/^data:[^,]*,/, '')); fr.onerror = () => bad(fr.error); fr.readAsDataURL(blob); });
-const ctx = () => ({ scenes: currentScript(store.scenes)?.scenes || [], shots: store.boardShots(), events: (store.events || []).filter(e => e.status !== 'dismissed') });
+// approvals and the scene states feed `held` (review #3 M2: the same rule as a re-time)
+const ctx = () => ({ scenes: currentScript(store.scenes)?.scenes || [], shots: store.boardShots(), events: (store.events || []).filter(e => e.status !== 'dismissed'), approvals: store.approvals, states: store.scenes?.states || {} });
+const lockedNow = () => store.revisions?.lock || null;
 // the plan of using version v now: computed here exactly as the server does (js/songs.js)
 export function plan(id) {
   const song = store.song, v = SG.versionsOf(song).find(x => x.id === id); if (!v) return null;
   const map = SG.mapTo(song, v), p = SG.songPlan({ map, ...ctx(), dur: v.duration_ms, version: v.id });
   return { v, plan: p, lines: SG.linesMoved(song.lines, map) };
 }
-async function use(id) {
+// Ctrl+Z / redo moves cuts too: a held item (approved / ok / take too short) asks first (review #3 M2), never silently
+async function confirming(version) {
+  try { return await store.op('song_version_use', { version }); } catch (e) {
+    const held = e.body?.held; if (e.status !== 409 || !Array.isArray(held) || !held.length) throw e;
+    const ok = await ui.confirm(`Use song ${version}: it moves ${held.map(h => `${h.key} (${h.reasons.map(r => HELD_LABEL[r] || r).join(', ')})`).join('; ')}. An approved shot goes back to review. Go on?`);
+    if (!ok) throw new Error('not done: you kept the cuts');
+    return store.op('song_version_use', { version, confirm: held.map(h => h.key) });
+  }
+}
+async function use(id, confirm = []) {
   const prev = SG.currentVersionId(store.song);
-  const r = await store.op('song_version_use', { version: id });
-  history.push({ label: `song ${prev} → ${id}`, undo: () => store.op('song_version_use', { version: prev }), redo: () => store.op('song_version_use', { version: id }) });
+  const r = await store.op('song_version_use', { version: id, confirm });
+  history.push({ label: `song ${prev} → ${id}`, undo: () => confirming(prev), redo: () => confirming(id) });
   toast(`song ${id} in use: ${r.summary} (Ctrl+Z goes back to ${prev})`);
   return r;
 }
@@ -55,14 +68,15 @@ export function openVersions(pre = null) {
   const song = store.song, vs = SG.versionsOf(song), cur = SG.currentVersionId(song);
   if (sel && (sel === cur || !vs.some(v => v.id === sel))) sel = null;
   const brief = SG.sunoBrief({ version: currentVersion(store.lyrics), style: store.settings?.suno?.style || '', exclude: store.settings?.suno?.exclude || '' });
-  const pv = sel ? plan(sel) : null;
+  const pv = sel ? plan(sel) : null, lk = lockedNow();
   const rows = vs.map(v => `<tr class="${v.id === cur ? 'cur' : ''}" data-v="${esc(v.id)}"><td><b>${esc(v.id)}</b></td><td>${esc(v.label || '')}</td><td>${esc(v.source)}</td><td>${fmt(v.duration_ms)}</td><td>${esc(v.bpm || '')}</td>
     <td class="dim" title="${esc(v.alignment ? JSON.stringify(v.alignment) : '')}">${esc(v.alignment?.method || '')}${v.alignment?.matched ? ` ${v.alignment.matched}/${v.alignment.total}` : ''}</td><td class="dim">${esc(v.by || '')}</td>
     <td>${v.id === cur ? '<b>in use</b>' : `<button data-x="pv" data-v="${esc(v.id)}">${sel === v.id ? 'Previewing' : 'Preview…'}</button>`}</td></tr>`).join('');
   const body = `<table class="sgv"><tr><th>version</th><th>label</th><th>source</th><th>length</th><th>bpm</th><th>lyrics aligned by</th><th>by</th><th></th></tr>${rows}</table>`
     + (pv ? `<div class="sgpv"><h4>Preview: using ${esc(pv.v.id)} (${fmt(pv.v.duration_ms)})</h4><div class="sgsum">${esc(SG.planSummary(pv.plan, pv.lines))}</div>${pv.v.style ? `<div class="dim" title="${esc(pv.v.style)}">style: ${esc(pv.v.style.slice(0, 140))}${pv.v.style.length > 140 ? '…' : ''}</div>` : ''}`
-      + planTable(pv.plan, '<div class="dim">no scene, shot or event moves</div>') + (pv.plan.problems.length ? `<div class="err">cannot use it: ${esc(pv.plan.problems.join('; '))}</div>` : '')
-      + `<button data-x="use" class="pri"${pv.plan.problems.length ? ' disabled' : ''}>Use ${esc(pv.v.id)}</button> <span class="dim">one undoable change: the audio, the beat grid, the lyric timings, a new scenes and storyboard version</span></div>` : '')
+      + planTable(pv.plan, '<div class="dim">no scene, shot or event moves</div>') + heldHtml(pv.plan)
+      + (lk ? `<div class="err rtlock">The project is locked for render (${esc(lk.revision || 'locked')}): using another take would move the locked cut. Unlock it first (Final › Unlock).</div>` : '') + (pv.plan.problems.length ? `<div class="err">cannot use it: ${esc(pv.plan.problems.join('; '))}</div>` : '')
+      + `<button data-x="use" class="pri"${pv.plan.problems.length || lk || pv.plan.held?.length ? ' disabled' : ''}>Use ${esc(pv.v.id)}</button> <span class="dim">one undoable change: the audio, the beat grid, the lyric timings, a new scenes and storyboard version</span></div>` : '')
     + `<div class="sgadd"><b style="grid-column:1/-1">+ Add a take</b>
       <span>File</span><span><input type="file" data-f="file" accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg"> or a path <input type="text" data-f="path" placeholder="C:\\Music\\suno-take-2.mp3" spellcheck="false"></span>
       <span>Source</span><span><select data-f="source"><option value="suno">Suno</option><option value="upload">upload</option><option value="other">other</option></select> <input type="text" data-f="label" placeholder="label (Suno v17, take 2…)" style="width:60%"></span>
@@ -75,13 +89,15 @@ export function openVersions(pre = null) {
   el.querySelector('.evdlg').classList.add('sgdlg');
   focusDlg(el);
   const res = (h, bad) => { const r = el.querySelector('.rtres'); r.innerHTML = h; r.className = 'rtres ' + (bad ? 'err' : 'ok'); };
-  el.addEventListener('change', (e) => { if (e.target.name === 'al') el.querySelector('[data-f=lrc]').style.display = e.target.value === 'lrc' ? '' : 'none'; });
+  el.addEventListener('change', (e) => {
+    if (e.target.matches('input[data-held]')) { const box = el.querySelector('.sgpv'), btn = el.querySelector('[data-x=use]'); if (btn) btn.disabled = !!(lk || pv?.plan.problems.length || !allTicked(box)); return; }
+    if (e.target.name === 'al') el.querySelector('[data-f=lrc]').style.display = e.target.value === 'lrc' ? '' : 'none'; });
   el.addEventListener('click', async (e) => {
     const x = e.target.closest('[data-x]')?.dataset.x; if (!x || x === 'close') return;
     try {
       if (x === 'pv') { sel = e.target.closest('[data-v]').dataset.v; return openVersions(); }
       if (x === 'brief') { el.remove(); return openBrief(); }
-      if (x === 'use') { const v = sel; res('using ' + esc(v) + '… (decoding the audio)'); await use(v); sel = null; return openVersions(); }
+      if (x === 'use') { const v = sel; res('using ' + esc(v) + '… (decoding the audio)'); await use(v, ticked(el.querySelector('.sgpv'))); sel = null; return openVersions(); }
       if (x === 'add') {
         const f = (k) => el.querySelector(`[data-f=${k}]`), file = f('file').files?.[0], al = el.querySelector('[name=al]:checked').value;
         let p = f('path').value.trim();

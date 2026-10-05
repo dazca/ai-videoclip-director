@@ -120,7 +120,10 @@ export const keymap = {
   handle(e) {
     const combo = comboFromEvent(e); if (!combo) return false;
     const ids = this.byKey.get(combo); if (!ids) return false;
-    const typing = !!e.target.closest?.('input, textarea, select, [contenteditable=""], [contenteditable=true]');
+    // typing: the event's target OR the focused element is a field (a key never runs a command inside an input), and an IME
+    // composition is typing too (review #3 walk blocker 1)
+    const FIELD = 'input, textarea, select, [contenteditable=""], [contenteditable=true]';
+    const typing = e.isComposing || !!e.target.closest?.(FIELD) || !!document.activeElement?.closest?.(FIELD);
     const c = context();
     for (const id of ids) {
       const cmd = reg.get(id);

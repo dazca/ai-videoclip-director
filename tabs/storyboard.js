@@ -35,7 +35,7 @@ import { stripHtml, register as registerProposals, offerPrepare } from '../core/
 import * as PR from '../js/proposals.js';
 import { mountTakes } from './takes.js';
 import { mountSurfaces } from './surfaces.js';
-import { coverage } from '../js/surfaces.js';
+import { coverage, gateOn } from '../js/surfaces.js';
 import { help } from '../core/helptip.js';
 import { placeholderFor, placeholderUri } from '../js/placeholder.js';
 import * as CH from '../js/chapters.js';
@@ -599,8 +599,8 @@ class Board {
     // requests (drafts approved here) and the next one this shot needs
     const reqs = this.reqs(s.id), openR = reqs.some(r => OPEN_REQ.includes(r.status)), saved = !!this.cur?.shots.some(x => x.id === s.id), q = est.items[0];
     h += `<div class="scbh">takes <span class="dim">pick one: in / out, a note, alternatives</span></div><div class="tkhost"></div>`;
-    h += `<div class="scbh">lyrics on screen <span class="dim">every sung word on a surface (E2)</span></div><div class="sfhost"></div>`;
-    h += `<div class="scbh">generation</div>${(s.clips || []).length ? `<div class="sbreq s-done"><b>clip</b><span class="sbrqs">${esc(s.clips.join(' '))}</span><span class="dim">in the world clips column</span></div>` : ''}` + reqs.map(r => `<div class="sbreq s-${esc(r.status)}" data-r="${esc(r.id)}"><b>${esc(String(r.kind).replace('shot-', ''))}</b><span class="dim">${esc(r.id)}</span><span class="sbrqs">${esc(r.status)}</span><span class="dim">${usd(r.est_cost)}${r.actual_cost_usd != null ? ' / ' + usd(r.actual_cost_usd) : ''}</span>${r.status === 'draft' ? `<button data-a="reqok" class="pri" title="approve: the agent may run it and spend up to the estimate (page only)">Approve</button><button data-a="reqno">Reject</button>` : ''}</div>`).join('')
+    h += `<div class="scbh">on screen <span class="dim">where the sung words show during this shot</span></div><div class="sfhost"></div>`;
+    h += `<div class="scbh">generation</div>${(s.clips || []).length ? `<div class="sbreq s-done"><b>clip</b><span class="sbrqs">${esc(s.clips.join(' '))}</span><span class="dim">in the clips column</span></div>` : ''}` + reqs.map(r => `<div class="sbreq s-${esc(r.status)}" data-r="${esc(r.id)}"><b>${esc(String(r.kind).replace('shot-', ''))}</b><span class="dim">${esc(r.id)}</span><span class="sbrqs">${esc(r.status)}</span><span class="dim">${usd(r.est_cost)}${r.actual_cost_usd != null ? ' / ' + usd(r.actual_cost_usd) : ''}</span>${r.status === 'draft' ? `<button data-a="reqok" class="pri" title="approve: the agent may run it and spend up to the estimate (page only)">Approve</button><button data-a="reqno">Reject</button>` : ''}</div>`).join('')
       + `<div class="sbiact"><button data-a="reqgen" class="pri"${openR || !saved ? ' disabled' : ''} title="${esc(!saved ? 'save the storyboard first' : openR ? 'a request is open' : `a DRAFT request (nothing runs or is paid until you approve it): ${q.tool}, ${q.why}`)}">Request ${esc(q.kind.replace('shot-', ''))} · est ${usd(q.usd)}</button>${est.items.length > 1 ? `<span class="dim">then the video ${usd(est.items[1].usd)}</span>` : ''}</div>`;
     h += `<div class="sbiact"><button data-a="split" title="cut on the beat grid at the playhead (inside the shot) or the middle">Split at beat</button><button data-a="merge"${next && next.scene === s.scene ? '' : ' disabled'}>Merge with next</button><button data-a="mvl"${prev && prev.scene === s.scene ? '' : ' disabled'} title="swap with the previous shot">◂ Move</button><button data-a="mvr"${next && next.scene === s.scene ? '' : ' disabled'} title="swap with the next shot">Move ▸</button><button data-a="note" title="a note on this shot (Alt+N)">✉ Note</button><button data-a="del">Delete</button></div>`;
     return `<div class="sbins" data-shot="${esc(s.id)}">${h}</div>`;
@@ -612,8 +612,8 @@ class Board {
     const runs = cov.uncovered.slice(0, 40).map(u => { const sh = shots.find(x => x.t0 <= u.t0 && u.t0 < x.t1); return `<div class="sbgap"${sh ? ` data-pick="${esc(sh.id)}"` : ''}><span class="sbgt">${esc(u.line)}</span><span class="sbgx sfun">“${esc(u.text)}”</span><span class="dim sbgc">${esc(clk(u.t0))}${sh ? ' · ' + esc(sh.id) : ''}</span>${sh ? '<a>shot ›</a>' : ''}</div>`; }).join('');
     const counts = [['unscripted', 'unscripted stretches'], ['no_shots', 'scenes without shots'], ['no_frame', 'shots without a frame'], ['assets', 'assets not approved'], ['looks', 'looks off their world'], ['no_request', 'shots without a request']].map(([k, l]) => `<span class="${g.counts[k] ? 'bad' : 'okc'}">${g.counts[k]} ${l}</span>`).join('');
     return `<div class="lyvh sbov">${help('<span class="dim">no shot selected · click a card (← / → step)</span>', more)}</div>`
-      + `<div class="sbgh"><b>Lyric gate</b><i>${cov.covered}/${cov.total}</i><span class="dim">every sung word on a surface at its time</span></div>`
-      + (cov.ok ? '<div class="sbgok">✓ every word is on a surface</div>' : runs + (cov.uncovered.length > 40 ? `<div class="dim sbpad">+${cov.uncovered.length - 40} more (timeline: the surface column)</div>` : ''))
+      + (!gateOn(store.settings) ? '' : `<div class="sbgh"><b>On screen</b><i>${cov.covered}/${cov.total}</i><span class="dim">every sung word shown at its time</span></div>`
+      + (cov.ok ? '<div class="sbgok">✓ every word is on screen</div>' : runs + (cov.uncovered.length > 40 ? `<div class="dim sbpad">+${cov.uncovered.length - 40} more (timeline: the on screen column)</div>` : '')))
       + `<div class="sbgh"><b>Gaps</b><i>${g.total}</i><a data-side="gaps">details ›</a></div><div class="sbcounts">${counts}</div>`;
   }
   gapsHtml(g) {
@@ -627,7 +627,7 @@ class Board {
       + (!cv.cap ? '<div class="chwarn">The cap is $0: nothing paid can run. Set it in Review &gt; Costs (costs.json cap_usd).</div>' : over ? `<div class="chwarn">Over the cap by ${usd(total - cv.cap)}: turn some video shots into stills, drop shots, or raise the cap.</div>` : '') + '</div>';
     const grp = (title, rows, ok) => `<div class="sbgh"><b>${title}</b><i>${rows.length}</i></div>` + (rows.length ? rows.join('') : `<div class="sbgok">✓ ${ok}</div>`);
     const R = (go, a, b, c, link) => `<div class="sbgap" data-go="${esc(go)}"><span class="sbgt">${a}</span><span class="sbgx">${b}</span>${c ? `<span class="dim sbgc">${c}</span>` : ''}<a>${link} ›</a></div>`;
-    return `<div class="lyvh"><span class="dim">${nn(g.total, 'gap')} across the stages${this.dirty ? ' · with your unsaved edits' : ''}</span><button data-a="fill" class="pri" title="a note asking the agent for draft requests (MCP gaps_get; also: the stage bar's Ask the agent…)">Ask the agent to fill the gaps</button></div>${cost}`
+    return `<div class="lyvh"><span class="dim">${nn(g.total, 'gap')} across the stages${this.dirty ? ' · with your unsaved edits' : ''}</span><span class="dim" title="a note asking the agent for draft requests (MCP gaps_get)">the agent drafts them: Ask the agent… › Fill the gaps</span></div>${cost}`
       + grp('Unscripted time', g.unscripted.map(x => R(`gap:${x.t0}`, esc(x.time), 'no scene', '', 'script')), 'every second of the song is scripted')
       + grp('Scenes without shots', g.no_shots.map(x => R(`scene:${x.scene}`, esc(x.scene), esc(x.title || 'untitled'), nn(x.beats, 'beat'), 'board')), 'every scene has shots')
       + grp('Shots without a frame', g.no_frame.map(x => R(`shot:${x.shot}`, esc(x.shot), esc(x.time), esc(x.scene || ''), 'draw')), 'every shot has a frame')

@@ -316,7 +316,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const g1 = await call(mcp, 'lyrics_get', { project: NP });
   const st1 = await call(mcp, 'stages_get', { project: NP });
   check('projects create with lyrics: v1, placeholder duration, estimated timings, lyrics stage in progress', cr.lines === 3 && g1.current === 'v1' && g1.song?.has_audio === false && g1.song?.placeholder_duration === true && g1.sections?.[0]?.lines?.[0]?.timing === 'estimated'
-    && st1.stages?.[0]?.status === 'in_progress' && st1.next?.blockers?.some(b => /no song/.test(b)), { cr, song: g1.song, lyrics: st1.stages?.[0] });
+    && st1.stages?.[0]?.status === 'in_progress' && (st1.stages?.[0]?.content?.hints || []).some(b => /no song/.test(b)), { cr, song: g1.song, lyrics: st1.stages?.[0] });
   const u2 = await call(mcp, 'lyrics_update', { project: NP, text: g1.text.replace('second line there', 'second line, rewritten') + '\nla la lo', message: 'mcp test: rewrite' });
   const same = await call(mcp, 'lyrics_update', { project: NP, text: (await call(mcp, 'lyrics_get', { project: NP })).text });
   const g2 = await call(mcp, 'lyrics_get', { project: NP });
@@ -362,7 +362,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const pageIntake = await pageHas((_, s) => s ? s.files.includes('scenes.json') : window.WB.store.scenes?.intake?.mood?.text === 'mcp: bright and playful');
   check('intake_get / intake_answer: 9 questions, answers stamped via agent, asked in chat, unknown key refused, the page sees it',
     ig.questions?.length === 9 && ig.unanswered?.length === 9 && ia.updated?.length === 2 && iq.updated?.[0] === 'who' && /400|Invalid enum/.test(ib.error || '') && ig2.unanswered.length === 7
-    && ig2.questions.find(q => q.id === 'mood').via === 'agent' && ig2.questions.find(q => q.id === 'mood').by === 'director' && !!ig2.questions.find(q => q.id === 'who').asked_in_chat && pageIntake,
+    && ig2.questions.find(q => q.id === 'mood').via === 'agent' && ig2.questions.find(q => q.id === 'mood').by === 'agent' /* review #3 L3: never signed "director" by an agent */ && !!ig2.questions.find(q => q.id === 'who').asked_in_chat && pageIntake,
     { unanswered: ig2.unanswered, bad: ib.error, pageIntake });
   // E10: the agent's interpretation next to the verbatim answer: written via "agent" (status proposed), never the answer's
   // text; no tool accepts it, and interpretation_act without the page is 403 (also claiming via "page"); a question
@@ -1763,6 +1763,8 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
   const EP = 'mcp-events', ED = path.join(DATA, EP);
   fs.cpSync(ORIG, ED, { recursive: true, filter: (f) => !f.includes(`${path.sep}.snapshots`) });   // the pristine demo (the sections above changed the scratch one)
   const pageOp = (name, body = {}) => post(`/api/op/${name}?project=${EP}`, body, { origin: URL_ });
+  // review #3 M2: a re-time that moves a held item (approved / a shared cut / a short take) needs the page's confirm of each: the dialog's ticks
+  const pageRetime = async (name, body) => { const r = await pageOp(name, body); return r.status === 409 && Array.isArray(r.body?.held) ? pageOp(name, { ...body, confirm: r.body.held.map(h => h.key) }) : r; };
   const agentOp = (name, body = {}) => post(`/api/op/${name}?project=${EP}`, body);
   const rd = (f) => JSON.parse(fs.readFileSync(path.join(ED, f), 'utf8'));
   const curV = (f, k) => { const d = rd(f); return d.versions.find(v => v.id === d.current)[k]; };
@@ -1810,7 +1812,7 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
     { pr: pr.error || rows.map(r => `${r.kind} ${r.id}.${r.edge} ${r.from}->${r.to} ${r.why}`), prBad: prBad.error?.slice(0, 80), prNone: prNone.error?.slice(0, 40), m1: m1.status, mAgent: mAgent.status, pending: g1.pending?.rows?.length });
   const apA = await agentOp('retime_apply', { retime: pr.retime, via: 'page' }), apA2 = await agentOp('retime_undo', { retime: pr.retime });
   let apOff; try { S.ops.retime_apply(EP, { retime: pr.retime }); apOff = 200; } catch (e) { apOff = e.code; }
-  const ap = await pageOp('retime_apply', { retime: pr.retime });
+  const ap = await pageRetime('retime_apply', { retime: pr.retime });
   const scA = curV('scenes.json', 'scenes'), sbA = curV('storyboard.json', 'shots'), evA = rd('events.json');
   check('applying a re-time is the page\'s (agent HTTP 403 even claiming via "page", retime_undo 403, offline 403); the page applies the proposal: ONE new scenes version and ONE new storyboard version with the boundaries moved (anchors kept, the picks untouched), the events at their new times (measured cleared, retimed history), the record applied by the director',
     apA.status === 403 && apA2.status === 403 && apOff === 403 && ap.status === 200 && rd('scenes.json').versions.length === JSON.parse(JSON.stringify(rd('scenes.json'))).versions.length
@@ -1819,10 +1821,10 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
     && evA.events.find(e => e.id === 'stop_outro').t === 18250 && evA.events.find(e => e.id === 'stop_outro').measured == null && evA.events.find(e => e.id === 'stop_outro').retimed?.length === 1
     && evA.retimes.find(r => r.id === pr.retime)?.status === 'applied' && evA.retimes.find(r => r.id === pr.retime).applied_by === 'director',
     { apA: apA.status, apA2: apA2.status, apOff, ap: ap.status, versions: ap.body?.versions, err: ap.body?.error });
-  const un = await pageOp('retime_undo', { retime: pr.retime });
+  const un = await pageRetime('retime_undo', { retime: pr.retime });
   const evU = rd('events.json'), scU = curV('scenes.json', 'scenes'), sbU = curV('storyboard.json', 'shots');
   const g2 = await call(mcp, 'events_get', { project: EP });
-  const re = await pageOp('retime_apply', { retime: pr.retime });
+  const re = await pageRetime('retime_apply', { retime: pr.retime });
   check('retime_undo (page): new versions with the old times, the events back at their old times and pending again (measured = the re-timed time); retime_apply of the undone record redoes it',
     un.status === 200 && scU.find(s => s.id === 'sc02').t1 === 18000 && sbU.find(s => s.id === 's3-grid').t1 === 12000 && evU.events.find(e => e.id === 'stop_outro').t === 18000 && evU.events.find(e => e.id === 'stop_outro').measured === 18250
     && evU.retimes.find(r => r.id === pr.retime).status === 'undone' && g2.pending?.moves?.length === 2 && re.status === 200 && curV('scenes.json', 'scenes').find(s => s.id === 'sc02').t1 === 18250,

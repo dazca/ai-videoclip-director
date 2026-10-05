@@ -19,8 +19,9 @@ const CSS = `.cxback{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.55
 .cxdlg textarea{height:54px;resize:vertical} .cxdlg .cxsum b{color:var(--acc)} .cxdlg .cxw{color:var(--acc);font-size:11px}
 .cxdlg .cxr{grid-column:1/-1;font-size:11px;word-break:break-all} .cxdlg .cxr.err{color:#f08080}
 .cxdlg .cxf{display:flex;gap:6px;align-items:center;padding:4px 8px;border-top:1px solid var(--line2)}`;
-const mapText = (m) => (m || []).map(r => `${r.from} => ${r.to}`).join('\n');
-const parseMap = (s) => String(s || '').split('\n').map(l => l.trim()).filter(Boolean).map((l) => { const i = l.indexOf('=>'); if (i < 0) throw new Error(`map line "${l.slice(0, 60)}": write "from => to"`); return { from: l.slice(0, i).trim(), to: l.slice(i + 2).trim() }; });
+// (an empty prefix reads "(any)": the rule for every path; review #3 LOW 13)
+const mapText = (m) => (m || []).map(r => `${r.from || '(any)'} => ${r.to}`).join('\n');
+const parseMap = (s) => String(s || '').split('\n').map(l => l.trim()).filter(Boolean).map((l) => { const i = l.indexOf('=>'); if (i < 0) throw new Error(`map line "${l.slice(0, 60)}": write "from => to"`); const from = l.slice(0, i).trim(); return { from: from === '(any)' ? '' : from, to: l.slice(i + 2).trim() }; });
 
 let dlg = null;
 export function openCompExport() { if (!dlg) dlg = new CompExportDialog(); dlg.show(); return dlg; }

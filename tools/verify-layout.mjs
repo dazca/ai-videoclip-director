@@ -205,6 +205,8 @@ export async function verifyLayout({ browser, OUT }) {
         await pg.evaluate(() => document.querySelector('.scq[data-q=mood] .itp [data-itp=accept]').click());
         await until(() => document.querySelector('.scq[data-q=mood] .itp')?.classList.contains('s-accepted'));
         const acc = J('scenes.json').intake.mood.interpretation;
+        // the Notes column re-renders after the accept: wait for the note's Edit before clicking it
+        await until((nid) => !!document.querySelector(`.nclayer .ncn[data-nid="${nid}"] .itp [data-itp=edit]`), app.noteId);
         await pg.evaluate((nid) => document.querySelector(`.nclayer .ncn[data-nid="${nid}"] .itp [data-itp=edit]`).click(), app.noteId);
         await until(() => !!document.querySelector('.pal input'));
         await pg.evaluate(() => { const i = document.querySelector('.pal input'); i.select(); });

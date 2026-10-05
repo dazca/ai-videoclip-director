@@ -780,8 +780,8 @@ try {
   const agentDone = await post(`/api/op/stage_update?project=${NEW}`, { stage: 'script', status: 'done' }, BASE, H);
   const agentMove = await post(`/api/op/stage_update?project=${NEW}`, { stage: 'lyrics', status: 'in_progress' }, BASE, H);
   const agentOk = await post(`/api/op/stage_update?project=${NEW}`, { stage: 'script', status: 'needs_you', blockers: ['verify: intake answers missing'] }, BASE, H);
-  // ROADMAP_v4 F1: the ask for the agent is still open, so lyrics marked done reads "done ⚠ not ready" until the agent answers it
-  const notReady = await until(() => document.querySelector('#rail a[data-stage=lyrics]')?.classList.contains('st-changed') && /open ask/.test(document.querySelector('#rail a[data-stage=lyrics]')?.title || ''));
+  // review #3: the director's own open ask for the agent no longer undoes their "done" (it waits for an agent): lyrics reads done, the ask in its tooltip
+  const notReady = await until(() => document.querySelector('#rail a[data-stage=lyrics]')?.classList.contains('st-done') && /open ask/.test(document.querySelector('#rail a[data-stage=lyrics]')?.title || ''));
   const resolved = await post(`/api/op/lyrics_note_resolve?project=${NEW}`, { id: ask.id, reply: 'verify agent: a bridge idea in the notes' }, BASE, H);
   const railAfter = notReady && resolved.status === 200 && await until(() => document.querySelector('#rail a[data-stage=script]')?.classList.contains('st-needs_you') && document.querySelector('#rail a[data-stage=lyrics]')?.classList.contains('st-done'));
   await pg.screenshot({ path: path.join(OUT, 'v4_rail_after.png'), clip: { x: 0, y: 0, width: 1500, height: 60 } });
@@ -881,7 +881,7 @@ try {
 
   // 4. Fill the gaps: an ask for the agent with the gaps; the agent fills them and the page follows live
   const askAgentS = async (label) => { await pg.evaluate(() => document.querySelector('.sgbar [data-ask]')?.click()); await new Promise(r => setTimeout(r, 200)); return pg.evaluate((l) => { const it = [...document.querySelectorAll('.pop .pi')].find(e => (e.querySelector('.lb')?.textContent || '').startsWith(l)); it?.click(); return !!it; }, label); };   // the stage bar's one "Ask the agent…" menu
-  await askAgentS('Ask the agent to fill the gaps');
+  await askAgentS('Fill the gaps');
   await until(() => window.WB.store.notes.notes.some(n => n.ask === 'fill_gaps'));
   await fileUntil(NP, 'notes.json', (j) => j.notes.some(n => n.ask === 'fill_gaps'));
   const sg = (await op('script_get', {})).body;
@@ -1135,7 +1135,7 @@ try {
   // 8. Ask the agent to extract: an ask note; the agent answers with a new version (live, marked agent); the agent rules
   await pg.evaluate(() => window.WB.stages.open('breakdown')); await until(() => window.WB.stages.current() === 'breakdown' && !!document.querySelector('.bdbar'));
   const askAgent = async (label) => { await pg.evaluate(() => document.querySelector('.sgbar [data-ask]')?.click()); await new Promise(r => setTimeout(r, 200)); return pg.evaluate((l) => { const it = [...document.querySelectorAll('.pop .pi')].find(e => (e.querySelector('.lb')?.textContent || '').startsWith(l)); it?.click(); return !!it; }, label); };   // the stage bar's one "Ask the agent…" menu
-  await askAgent('Ask the agent to extract');
+  await askAgent('Extract');
   await fileUntil(NP, 'notes.json', (j) => j.notes.some(n => n.ask === 'extract'));
   const bg = (await agent('breakdown_get', { with_script: false })).body, ask = bg.asks_for_agent.find(a => a.kind === 'extract');
   const au = await agent('breakdown_update', { upsert: [{ kind: 'prop', name: 'Bus ticket', description: 'verify agent: the ticket she keeps', links: [{ scene: 'sc04', beats: [] }] }], message: 'verify agent: the ticket' });
@@ -1312,6 +1312,14 @@ catch (e) { v26.checks.aborted = blockFailed('v26', e); v26.pass = false; }
 const v27 = report.v27 = { checks: {} };
 try { const { verifyRenders } = await import('./verify-renders.mjs'); Object.assign(v27, await verifyRenders({ browser, OUT })); }
 catch (e) { v27.checks.aborted = blockFailed('v27', e); v27.pass = false; }
+// ---------------------------------------------------------------- v28: review #3 (REVIEW_2026-10-05c): a NEW user's walk-through with no agent, no fal
+// key and a media root named "media/", from the first open to Final without leaving the page (the wizard, the intake typed field after field
+// with no shortcut firing, "next:" leaving Script, Ask the agent… -> Connect Claude…, the Queue's "Open in another app" with its drop zone, a
+// private upload made public from Final's export line, Lock for render, the composition export), the re-time preview that holds approved shots
+// and shared cuts until each is ticked (Esc closes it), a wrapped lyric line kept in one block: tools/verify-review3.mjs. Screenshots v28_*.png.
+const v28 = report.v28 = { checks: {} };
+try { const { verifyReview3 } = await import('./verify-review3.mjs'); Object.assign(v28, await verifyReview3({ browser, OUT })); }
+catch (e) { v28.checks.aborted = blockFailed('v28', e); v28.pass = false; }
 // write path: approve/needs-changes + a note, on another scratch copy (_verify, its own server), then a stale-rev POST must get 409
 try {
   const TMP = path.join(DATA, '_verify');
@@ -1341,8 +1349,8 @@ report.project = P;
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 1));
 const w = report.writes || {};
 const writesOk = w.noteSaved && w.noteShownInColumn && w.staleStatus === 409 && w.newState !== undefined && w.newState !== w.stateBefore && w.approvalsRev > w.approvalsRevBefore;
-console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· v7 (characters stage):', report.v7?.pass ? 'all PASS' : 'FAIL', '· v8 (scenery stage):', report.v8?.pass ? 'all PASS' : 'FAIL', '· v9 (storyboard stage):', report.v9?.pass ? 'all PASS' : 'FAIL', '· v10 (dogfood frictions):', report.v10?.pass ? 'all PASS' : 'FAIL', '· v11 (notes everywhere):', report.v11?.pass ? 'all PASS' : 'FAIL', '· v12 (request runner):', report.v12?.pass ? 'all PASS' : 'FAIL', '· v13 (rounds, revisions, compare):', report.v13?.pass ? 'all PASS' : 'FAIL', '· v14 (proposals):', report.v14?.pass ? 'all PASS' : 'FAIL', '· v15 (final approvals):', report.v15?.pass ? 'all PASS' : 'FAIL', '· v16 (take selection):', report.v16?.pass ? 'all PASS' : 'FAIL', '· v17 (import media):', report.v17?.pass ? 'all PASS' : 'FAIL', '· v18 (video runner):', report.v18?.pass ? 'all PASS' : 'FAIL', '· v21 (identity checks):', report.v21?.pass ? 'all PASS' : 'FAIL', '· v22 (composition round trip):', report.v22?.pass ? 'all PASS' : 'FAIL', '· v23 (named events + re-time):', report.v23?.pass ? 'all PASS' : 'FAIL', '· v24 (lyric gate, F4, F5):', report.v24?.pass ? 'all PASS' : 'FAIL', '· v25 (chapters, placeholders, worlds, F2):', report.v25?.pass ? 'all PASS' : 'FAIL', '· v26 (layout, Connect, About, interpretations):', report.v26?.pass ? 'all PASS' : 'FAIL', '· v27 (renders, song versions, sheets):', report.v27?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
-process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && report.v7?.pass && report.v8?.pass && report.v9?.pass && report.v10?.pass && report.v11?.pass && report.v12?.pass && report.v13?.pass && report.v14?.pass && report.v15?.pass && report.v16?.pass && report.v17?.pass && report.v18?.pass && report.v19?.pass && report.v20?.pass && report.v21?.pass && report.v22?.pass && report.v23?.pass && report.v24?.pass && report.v25?.pass && report.v26?.pass && report.v27?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
+console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· v7 (characters stage):', report.v7?.pass ? 'all PASS' : 'FAIL', '· v8 (scenery stage):', report.v8?.pass ? 'all PASS' : 'FAIL', '· v9 (storyboard stage):', report.v9?.pass ? 'all PASS' : 'FAIL', '· v10 (dogfood frictions):', report.v10?.pass ? 'all PASS' : 'FAIL', '· v11 (notes everywhere):', report.v11?.pass ? 'all PASS' : 'FAIL', '· v12 (request runner):', report.v12?.pass ? 'all PASS' : 'FAIL', '· v13 (rounds, revisions, compare):', report.v13?.pass ? 'all PASS' : 'FAIL', '· v14 (proposals):', report.v14?.pass ? 'all PASS' : 'FAIL', '· v15 (final approvals):', report.v15?.pass ? 'all PASS' : 'FAIL', '· v16 (take selection):', report.v16?.pass ? 'all PASS' : 'FAIL', '· v17 (import media):', report.v17?.pass ? 'all PASS' : 'FAIL', '· v18 (video runner):', report.v18?.pass ? 'all PASS' : 'FAIL', '· v21 (identity checks):', report.v21?.pass ? 'all PASS' : 'FAIL', '· v22 (composition round trip):', report.v22?.pass ? 'all PASS' : 'FAIL', '· v23 (named events + re-time):', report.v23?.pass ? 'all PASS' : 'FAIL', '· v24 (lyric gate, F4, F5):', report.v24?.pass ? 'all PASS' : 'FAIL', '· v25 (chapters, placeholders, worlds, F2):', report.v25?.pass ? 'all PASS' : 'FAIL', '· v26 (layout, Connect, About, E10):', report.v26?.pass ? 'all PASS' : 'FAIL', '· v27 (renders, song versions, sheets):', report.v27?.pass ? 'all PASS' : 'FAIL', '· v28 (review #3 fixes + the new-user walk-through):', report.v28?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
+process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && report.v7?.pass && report.v8?.pass && report.v9?.pass && report.v10?.pass && report.v11?.pass && report.v12?.pass && report.v13?.pass && report.v14?.pass && report.v15?.pass && report.v16?.pass && report.v17?.pass && report.v18?.pass && report.v19?.pass && report.v20?.pass && report.v21?.pass && report.v22?.pass && report.v23?.pass && report.v24?.pass && report.v25?.pass && report.v26?.pass && report.v27?.pass && report.v28?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
 await browser.close();
 for (const c of procs) c.kill();
 await new Promise(r => setTimeout(r, 300));   // let the servers release the scratch folder; cleanup() removes it on exit

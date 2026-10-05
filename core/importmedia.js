@@ -13,6 +13,7 @@
 import { commands } from './commands.js';
 import { menus } from './menus.js';
 import { ui } from './palette.js';
+import { confirmDialog } from './dialog.js';
 import { store, toast, esc, postJSON, mediaUrl, config } from '../js/store.js';
 import * as A from '../js/assets.js';
 import { boardShots } from '../js/storyboard.js';
@@ -71,7 +72,26 @@ export function useAsItems(m) {
   if (img || vid) items.push({ label: 'Take of shot…', run: async () => { const s = await pickShot(`Take: ${m.id} becomes a take of a shot`); if (s) useAs(m, { as: 'take', shot: s }, 'take'); } });
   return items.length ? items : none('(not an image or a video)');
 }
-menus.contribute('media', [{ label: 'Use as…', when: (c) => !!c.media && (IMG.test(c.media.path) || VID.test(c.media.path)), submenu: (c) => useAsItems(c.media) }]);
+menus.contribute('media', [{ label: 'Use as…', when: (c) => !!c.media && (IMG.test(c.media.path) || VID.test(c.media.path)), submenu: (c) => useAsItems(c.media) },
+  { label: 'Make public…', when: (c) => canPublish(c.media), run: (c) => makePublic([c.media.id]) }]);
+
+// review #3 walk blocker 2: "Make public…" (media_publish, page only): the director's own private upload becomes a public file
+// (it moves out of private/, its picks and refs follow) after a confirm that says what that means. An agent cannot.
+export const canPublish = (m) => !!m && m.private === true && m.imported?.from === 'upload' && /^private\/[a-z0-9_-]+\/[^/]+$/.test(m.path || '');
+export async function makePublic(ids) {
+  const ms = ids.map(id => (store.media || []).find(m => m.id === id)).filter(canPublish);
+  if (!ms.length) { toast('only your own private uploads can be made public'); return []; }
+  const what = ms.length === 1 ? (ms[0].label || ms[0].id) : `${ms.length} uploads`;
+  const ok = await confirmDialog({ id: 'publish', title: `Make ${what} public?`, ok: 'Make public', cancel: 'Keep it private',
+    html: `<p class="wbwarn"><b>${esc(ms.map(m => m.path).join(', '))}</b> moves out of <code>private/</code> into <code>media/</code>. A public file:</p>`
+      + '<ul><li>can be exported (edl.json, the HTML package) and packaged for the render;</li><li>is served to other machines on your network (with <code>--lan</code>);</li><li>can be uploaded to fal (a public URL) when a run uses it as a reference.</li></ul>'
+      + '<p class="wbwarn">Only do this for an image you are fine sharing: never a private photo of a person. To make it private again, flag it private (Assets › Media).</p>' });
+  if (!ok) return [];
+  const done = [];
+  for (const m of ms) { try { const r = await store.op('media_publish', { media: m.id, confirm: true }); done.push(r); } catch (e) { toast(`${m.id}: ${e.message}`); } }
+  if (done.length) toast(`${done.length} file${done.length === 1 ? '' : 's'} made public: ${done.map(r => r.to).join(', ')}${done.some(r => r.updated?.storyboard) ? ' · the storyboard follows (a new version)' : ''}`);
+  return done;
+}
 
 // ------------------------------------------------------------------ the dialog
 let dlg = null;
@@ -120,7 +140,9 @@ class ImportDialog {
   }
   show() {
     if (!this.el.isConnected) document.body.appendChild(this.el);
-    this.el.querySelector('.imroots').textContent = config.media_roots?.length ? `media roots: ${config.media_roots.join(' · ')}` : 'no media roots configured (workbench.config.json media_roots): drop files instead';
+    { const b = this.el.firstElementChild; b.tabIndex = -1; b.focus({ preventScroll: true }); }   // Esc reaches the dialog (review #3 UX 3)
+    this.el.querySelector('.imroots').textContent = (config.media_roots?.length ? `media roots: ${config.media_roots.join(' · ')}` : 'no media roots configured (workbench.config.json media_roots): drop files instead')
+      + (config.media_roots_ignored?.length ? ` · ignored: ${config.media_roots_ignored.join(', ')} (named like a project folder: rename it, e.g. my-media/)` : '');
     this.render(); this.el.querySelector('[name=path]').focus();
   }
   hide() { for (const r of this.rows) if (r.url) URL.revokeObjectURL(r.url); this.rows = []; this.jobs = []; this.el.remove(); }
@@ -225,4 +247,4 @@ commands.register({ id: 'file.importMedia', group: 'File', title: 'Import media�
 // files dropped anywhere that nothing else took (a look form, a reference drop zone) open the dialog with them
 document.addEventListener('dragover', (e) => { if (e.dataTransfer?.types?.includes('Files') && !e.defaultPrevented) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
 document.addEventListener('drop', (e) => { if (!e.defaultPrevented && e.dataTransfer?.files?.length) { e.preventDefault(); openImport({ files: [...e.dataTransfer.files] }); } });
-window.WB = Object.assign(window.WB || {}, { importMedia: { open: openImport, useAsItems } });
+window.WB = Object.assign(window.WB || {}, { importMedia: { open: openImport, useAsItems, makePublic, canPublish } });

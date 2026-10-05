@@ -85,10 +85,13 @@ export async function verifyRenders({ browser, OUT }) {
     await click('.lysong [data-a=songvers]'); await until(() => !!document.querySelector('.sgdlg'));
     await shot('v27_song_versions');
     await click('.sgdlg button[data-x=pv][data-v=v2]'); await until(() => !!document.querySelector('.sgdlg .sgpv'));
-    const pv = await pg.evaluate(() => ({ rows: document.querySelectorAll('.sgdlg .sgpv table.rtrows tr[data-row]').length, sum: document.querySelector('.sgdlg .sgsum')?.textContent, use: !!document.querySelector('.sgdlg [data-x=use]:not([disabled])') }));
+    // review #3 M2: an approved shot the take moves is held (red, one tick each): Use stays off until every one is ticked
+    const tickAll = () => pg.evaluate(() => { for (const i of document.querySelectorAll('.sgdlg .sgpv input[data-held]')) if (!i.checked) i.click(); });
+    const pv = await pg.evaluate(() => ({ rows: document.querySelectorAll('.sgdlg .sgpv table.rtrows tr[data-row]').length, sum: document.querySelector('.sgdlg .sgsum')?.textContent, held: document.querySelectorAll('.sgdlg .sgpv input[data-held]').length, offBefore: !!document.querySelector('.sgdlg [data-x=use][disabled]') }));
+    await tickAll(); pv.use = await pg.evaluate(() => !!document.querySelector('.sgdlg [data-x=use]:not([disabled])'));
     await shot('v27_song_preview');
-    check('E7 the Lyrics stage: the song line links "versions…" and "Suno brief…"; the dialog lists v1 (in use) and v2; Preview v2 shows the E1 re-time table with the same rows as song_version_plan, and Use v2',
-      /versions…/.test(line) && /Suno brief/.test(line) && pv.rows === Math.min(400, plan.body.rows_total) && pv.use && /lyric line/.test(pv.sum || ''), { line: line.slice(0, 120), pv, planRows: plan.body?.rows_total });
+    check('E7 the Lyrics stage: the song line links "versions…" and "Suno brief…"; the dialog lists v1 (in use) and v2; Preview v2 shows the E1 re-time table with the same rows as song_version_plan and the held (approved) shots to tick, and Use v2 once each is ticked',
+      /versions…/.test(line) && /Suno brief/.test(line) && pv.rows === Math.min(400, plan.body.rows_total) && (pv.held === 0 || pv.offBefore) && pv.use && /lyric line/.test(pv.sum || ''), { line: line.slice(0, 120), pv, planRows: plan.body?.rows_total });
     // a take uploaded from the page (song_upload, page only)
     const fi = await pg.$('.sgdlg [data-f=file]'); await fi.uploadFile(take3.replace(/\.wav$/, '.mp3'));
     await pg.select('.sgdlg [data-f=source]', 'upload');
@@ -101,6 +104,7 @@ export async function verifyRenders({ browser, OUT }) {
     await click('.sgdlg button[data-x=pv][data-v=v2]'); await until(() => /v2/.test(document.querySelector('.sgdlg .sgpv h4')?.textContent || ''));
     const Jn = (f) => { try { return J(f); } catch (e) { return null; } };
     const sc0 = Jn('scenes.json'), sb0 = Jn('storyboard.json');
+    await tickAll();
     await click('.sgdlg [data-x=use]');
     const used = await untilFile(() => J('song.json').current_version === 'v2' && J('song.json'));
     await until(() => !document.querySelector('.sgdlg [data-x=use]') || /in use/.test(document.querySelector('.sgdlg tr[data-v=v2]')?.textContent || ''));

@@ -1,5 +1,5 @@
 // Review › Approvals (ROADMAP_v4 C3): the same rows as the Final stage (tabs/final.js FinalList: what, why, image, time,
-// cost, Approve / Request changes, jump), without the checklist / costs panels and the Notes column; below them the raw
+// cost, Approve / Request changes, jump) with the Notes column, without the checklist / costs panels; below them the raw
 // approvals.json states (every key, click a chip to cycle draft -> approved -> changes). Keys, states and by/at/why/comment
 // come from approvals.json (agent-written free text): every value is escaped.
 import { store } from '../js/store.js';
@@ -9,7 +9,7 @@ export default {
   mount(el, ctx) {
     el.classList.add('apws');
     el.innerHTML = '<div class="aplist"></div><details class="apraw"><summary></summary><div class="chips"></div></details>';
-    new FinalList(el.querySelector('.aplist'), ctx, { panels: false, notes: false });
+    new FinalList(el.querySelector('.aplist'), ctx, { panels: false, notes: true });   // review #3 (UX 4): the Notes column here too
     const raw = el.querySelector('.apraw');
     const render = () => {
       const items = Object.entries(store.approvals.items), cnt = {};

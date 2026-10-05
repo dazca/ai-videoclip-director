@@ -11,6 +11,7 @@ export default {
     const tl = ctx.timeline, el = this.el; if (!tl) return;
     el.innerHTML = `<h4 class="gen">generator <i class="dim">(what runs an approved request, per kind · the fal key stays in your environment, never in the project)</i></h4><div class="genbox dim">loading…</div>
       <h4 class="costset">costs <i class="dim">(spend made outside the queue, counted in the one total: Review › Costs)</i></h4><div class="falgenbox"><table class="tbl"><tr><td title="a falgen folder (a runner that spends outside the queue: its gen/spent.json and the via-falgen rows of its LEDGER.md, read only); relative to the media base, inside it">falgen folder</td><td><input data-x=falgen class="falgenin" value="${esc(typeof window.WB.store.settings?.falgen === 'string' ? window.WB.store.settings.falgen : window.WB.store.settings?.falgen?.dir || '')}" placeholder="e.g. project/gen (relative to the media base)" spellcheck="false" style="width:22em"> <span class="falgenst dim">…</span></td></tr></table></div>
+      <h4>project</h4><table class="tbl"><tr><td title="every sung or spoken word must show on screen (a window, a chat, a caption…) at its time: the timeline's 'on screen' column, the Lyrics stage's counts and Final's checklist line follow it. Off: none of them is shown or blocks">lyric gate: every sung word on screen</td><td><input type=checkbox data-x=gate ${window.WB.store.settings?.lyric_gate !== false ? 'checked' : ''}> <span class="dim">off for a new project; turn it on when the lyrics must show on screen</span></td></tr></table>
       <h4>view</h4><table class="tbl"><tr><td>min px / second (floor)</td><td><input type=number data-x=pps value="${tl.pxPerSec.toFixed(1)}" min=2 max=800 step=1></td></tr>
       <tr><td>linear time (no warp)</td><td><input type=checkbox data-x=lin ${tl.linear ? 'checked' : ''}></td></tr>
       <tr><td>column header</td><td><select data-x=hdr>${['full', 'thin', 'hidden'].map((n, i) => `<option value=${i} ${i === tl.headerMode ? 'selected' : ''}>${n}</option>`).join('')}</select></td></tr></table>
@@ -25,6 +26,7 @@ export default {
       const d = e.target.dataset;
       if (d.x === 'pps') { tl.pxPerSec = Number(e.target.value) || 16; tl.save(); tl.relayout(); }
       if (d.x === 'lin') tl.toggleLinear();
+      if (d.x === 'gate') window.WB.store.setSettings((s) => { s.lyric_gate = e.target.checked; });   // review #3: the lyric gate, opt-in per project
       if (d.x === 'hdr') { tl.headerMode = Number(e.target.value); tl.applyHeaderMode(); tl.save(); }
       if (d.c) tl.setHidden(d.c, !e.target.checked);
       if (d.w) tl.setWidth(d.w, Math.max(3, Number(e.target.value)));
@@ -55,8 +57,8 @@ export default {
     box.classList.remove('dim');
     box.innerHTML = `<table class="tbl gentbl"><tr><th>kind</th><th>generator</th><th>state</th></tr>${info.kinds.map(k => {
       const g = info.generators.find(x => x.id === cur[k]) || info.generators[0], runs = g.kinds.includes(k);
-      return `<tr data-kind="${k}"><td>${esc(LBL[k] || k)}</td><td><select data-gen="${k}">${info.generators.map(x => `<option value="${esc(x.id)}"${x.id === g.id ? ' selected' : ''}>${esc(x.label)}${x.id === 'fal' ? ' (default)' : ''}</option>`).join('')}</select></td>
-        <td class="${g.ready && runs ? 'ok' : 'no'}">${runs ? `${g.ready ? '✓' : '✕'} ${esc(g.why)}` : `✕ ${esc(g.label)} does not run ${esc(k)} yet (D3b): pick "Open in another app" for now`}</td></tr>`;
+      return `<tr data-kind="${k}"><td>${esc(LBL[k] || k)}</td><td><select data-gen="${k}">${info.generators.map(x => `<option value="${esc(x.id)}"${x.id === g.id ? ' selected' : ''}>${esc(x.label)}${x.id === (info.default || 'fal') ? ' (default)' : ''}</option>`).join('')}</select></td>
+        <td class="${g.ready && runs ? 'ok' : 'no'}">${runs ? (g.ready ? `✓ ${esc(g.why)}` : g.id === 'fal' && !info.fal_key.found ? '✕ no fal key (below)' : `✕ ${esc(g.why)}`) : `✕ ${esc(g.label)} does not run ${esc(k)} yet (D3b): pick "Open in another app" for now`}</td></tr>`;
     }).join('')}</table>
       <div class="dim">fal key: ${info.fal_key.found ? `found in ${esc(info.fal_key.source)}` : `not found${info.fal_key.why ? ` (${esc(info.fal_key.why)})` : ''}: set FAL_KEY before starting the server, or fal_key_file in workbench.config.json`} · Review › Queue runs approved requests only, up to 2 at once, the cap checked for each</div>`;
   },

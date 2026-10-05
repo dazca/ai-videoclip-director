@@ -16,6 +16,19 @@ export function openDialog({ id, title, html, wide = false }) {
   open = { el, body: el.querySelector('.wbdlgc'), close };
   return open;
 }
+// a confirm that shows its whole explanation (the palette's one-line confirm cuts long texts): resolves true / false.
+//   await confirmDialog({id, title, html, ok: 'Make public', cancel: 'Cancel'})
+export function confirmDialog({ id = 'confirm', title, html, ok = 'OK', cancel = 'Cancel' }) {
+  return new Promise((done) => {
+    let answered = false;
+    const d = openDialog({ id, title, html: `${html}<div class="wbdlgf"><span class="sp"></span><button data-cf="no">${esc(cancel)}</button><button data-cf="yes" class="pri">${esc(ok)}</button></div>` });
+    const finish = (v) => { if (answered) return; answered = true; d.close(); done(v); };
+    d.el.addEventListener('click', (e) => { const b = e.target.closest('[data-cf]'); if (b) finish(b.dataset.cf === 'yes'); });
+    // Esc / a click outside close it: that is a no
+    new MutationObserver((_, o) => { if (!d.el.isConnected) { o.disconnect(); finish(false); } }).observe(document.body, { childList: true });
+    d.el.querySelector('[data-cf=yes]')?.focus();
+  });
+}
 // copy a text: the async clipboard (localhost is a secure context), else a hidden textarea + execCommand
 export async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* fall back */ }

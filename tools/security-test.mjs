@@ -1238,7 +1238,7 @@ try {
     const sfPanel = await spg.evaluate(() => ({ e: document.querySelector('.sbins .sfx .sfe b')?.textContent || '', p: document.querySelector('.sbins .sfx .sfp')?.textContent || '' }));
     await spg.evaluate(() => window.WB.storyboard.ws.select(null, { seek: false })); await wait(300);
     await spg.evaluate(() => window.WB.app.show('timeline')); await wait(900);
-    const sfCol = await spg.evaluate(() => [...document.querySelectorAll('.col-surface .sfw.on')].map(w => w.title).join(' '));
+    const sfCol = await spg.evaluate(() => [...document.querySelectorAll('.col-surface .sfl')].map(w => w.title).join(' '));
     for (const st of ['lyrics', 'final']) { await spg.evaluate((x) => window.WB.stages.open(x), st); await wait(700); }
     const sf = await spg.evaluate(() => ({ inert: window.__sf === undefined && window.__sf2 === undefined && window.__sf3 === undefined && window.__sf4 === undefined
       && !document.querySelector('.sfx img, .sfx script, .col-surface img, .col-surface script, .lysfk img, .sfx b[onmouseover], .lypoem img[src="x"], .fnck img[src="x"]') }));
@@ -1344,7 +1344,9 @@ try {
       { ea: ea.status, rp: rp.status, meas: meas.status, res, off });
     const saveEv = await post(`/api/save/events.json?project=${P}`, { base_rev: readP('events.json').rev, data: { ...readP('events.json'), events: readP('events.json').events.map(e => ({ ...e, status: 'accepted' })) } }, { origin: A.base });
     const pageAcc = await raw(`/api/op/events_act?project=${P}`, { act: 'accept', id: 'sec_ev' }, page);
-    const pageAp = await raw(`/api/op/retime_apply?project=${P}`, { retime: rp.body?.retime }, page);
+    // review #3 M2: the cuts that share an anchored edge are "held": the page confirms them (the dialog's ticks) first
+    const pageAp0 = await raw(`/api/op/retime_apply?project=${P}`, { retime: rp.body?.retime }, page);
+    const pageAp = pageAp0.status === 409 && Array.isArray(pageAp0.body?.held) ? await raw(`/api/op/retime_apply?project=${P}`, { retime: rp.body?.retime, confirm: pageAp0.body.held.map(h => h.key) }, page) : pageAp0;
     const sc = readP('scenes.json'), s2 = sc.versions.find(v => v.id === sc.current).scenes.find(s => s.id === 'sc02');
     check('E1: events.json is not a page save (403, even from the page); the page (its Origin + Sec-Fetch-Site) accepts the agent\'s event and applies its re-time (sc02 end -> 18.3 s, stamped director)',
       saveEv.status === 403 && pageAcc.status === 200 && pageAcc.body?.event?.status === 'accepted' && pageAp.status === 200 && s2?.t1 === 18300 && readP('events.json').retimes.find(r => r.id === rp.body?.retime)?.applied_by === 'director',

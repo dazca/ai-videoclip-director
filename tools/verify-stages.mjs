@@ -44,8 +44,8 @@ const board = (shots) => ({ rev: 1, current: 'v1', versions: [{ id: 'v1', n: 1, 
 
 // per stage: [empty facts, partial facts, ready facts, regressed facts]
 const CASES = {
-  lyrics: [facts(), facts({ song, lyrics: { versions: [], notes: [{ id: 'ln01', status: 'open', to: 'agent' }] } }), facts({ song }), facts({ song, lyrics: { versions: [], notes: [{ id: 'ln01', status: 'open', to: 'agent' }] } })],
-  script: [facts({ song }), facts({ song, scenes: { ...scenes(2, { intake: false }) } }), facts({ song, scenes: scenes(2) }), facts({ song, scenes: scenes(2, { gap: true }) })],
+  lyrics: [facts(), facts({ song, lyrics: { versions: [], notes: [{ id: 'ln01', status: 'open', to: 'agent' }] } }), facts({ song }), facts()],   // (regressed: the lyrics gone; an open ask alone no longer undoes "done", review #3)
+  script: [facts({ song }), facts({ song, scenes: { ...scenes(2, { intake: false, gap: true }) } }), facts({ song, scenes: scenes(2) }), facts({ song, scenes: scenes(2, { gap: true }) })],
   breakdown: [facts(), facts({ breakdown: breakdown([{ id: 'bi01', kind: 'fx', name: 'rain', links: [] }], { bi01: { status: 'review' } }) }),
     facts({ breakdown: breakdown([{ id: 'bi01', kind: 'fx', name: 'rain', links: [] }], { bi01: { status: 'ok' } }) }),
     facts({ breakdown: breakdown([{ id: 'bi01', kind: 'fx', name: 'rain', links: [] }, { id: 'bi02', kind: 'fx', name: 'fog', links: [] }], { bi01: { status: 'ok' } }) })],
@@ -186,8 +186,8 @@ try {
   const nextHint = await pg.evaluate(() => document.querySelector('#rail .next')?.textContent || '');
   // F8: one stage bar (core/stagebar.js): Mark done | Reopen · Needs you · the primary act · Ask the agent… · the round button
   const sameBtns = Object.values(bars).every(b => b.btns.length === 5 && /^(Mark done|Reopen)$/.test(b.btns[0]) && b.btns[1] === 'Needs you' && /^(Save version|Send edit request|Lock for render…|Unlock)$/.test(b.btns[2]) && b.btns[3] === 'Ask the agent…' && /^(Send round \d+ \(\d+\)|Round \d+: Claude working|Close revision R\d+)$/.test(b.btns[4]));
-  check('U6 / U8: every stage bar shows one status (no "(marked …)"), the same five buttons (Mark done | Reopen · Needs you · the primary act · Ask the agent… · the round) in the same place; "Ask the agent…" lists the stage\'s asks, each worded "Ask the agent …"; the rail\'s next hint is "next: <stage> · <its status>"',
-    sameBtns && Object.values(bars).every(b => !/marked/.test(b.st) && b.asks.length >= 1 && b.asks.every(a => /^Ask the agent/.test(a))) && new Set(Object.values(bars).map(b => b.askX)).size <= 2
+  check('U6 / U8: every stage bar shows one status (no "(marked …)"), the same five buttons (Mark done | Reopen · Needs you · the primary act · Ask the agent… · the round) in the same place; "Ask the agent…" lists the stage\'s asks, its items without the repeated "Ask the agent" prefix, ending with Connect Claude… (review #3); the rail\'s next hint is "next: <stage> · <its status>"',
+    sameBtns && Object.values(bars).every(b => !/marked/.test(b.st) && b.asks.length >= 2 && b.asks.every(a => !/^Ask the agent/.test(a)) && b.asks[b.asks.length - 1].startsWith('Connect Claude')) && new Set(Object.values(bars).map(b => b.askX)).size <= 2
     && /^next: \S+ · (empty|in progress|needs you|ready to mark done|done ⚠ changed since)$/.test(nextHint.trim()), { bars, nextHint });
 
   // done: the director marks lyrics done (content ready); Ada and Bo get an approved identity; Characters marked done

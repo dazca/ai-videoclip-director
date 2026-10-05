@@ -13,7 +13,7 @@
 // - ‹ prev / next ›: always both slots (an empty one at the ends).
 //   stageBar.render(bar, stageId) · stageBar.bind(bar) · stageBar.refreshPrimary(bar)
 //   SLOTS (the data-slot names, in order; tools/verify-layout.mjs (v26) checks every stage has them at the same x)
-import { esc } from '../js/store.js';
+import { esc, store } from '../js/store.js';
 import { STAGES, STATUS_LABEL, stageById, stageTip } from '../js/flow.js';
 import { TIME_STAGES, isTime, setMode } from './timemode.js';
 import { menus } from './menus.js';
@@ -30,6 +30,11 @@ export const ASKS = {
   storyboard: ['storyboard.ask', 'storyboard.fillGaps', 'storyboard.askNote', 'proposals.prepare'],
   final: [{ cmd: 'stage.note', label: 'Ask the agent anything about the final list… (a note)' }],
 };
+// review #3 walk blocker 3: every Ask menu ends with Connect Claude… (an ask is only read once an agent is connected)
+for (const k of Object.keys(ASKS)) ASKS[k].push('-', { cmd: 'help.connect', label: 'Connect Claude… (no agent yet? start here)' });
+// UX 6: the menu is already 'Ask the agent…': its items say what to ask, without repeating the prefix (the palette keeps the full titles)
+const short = (t) => { const x = String(t || '').replace(/^Ask the agent\s+(to\s+)?/i, ''); return x.charAt(0).toUpperCase() + x.slice(1); };
+export const askItems = (id) => (ASKS[id] || []).map(it => { if (it === '-') return it; const o = typeof it === 'string' ? { cmd: it } : it; const c = commands.get(o.cmd); return { ...o, label: o.label && /^Connect/.test(o.label) ? o.label : short(o.label || (c ? commands.title(c) : o.cmd)) }; });
 const SAVE_LABEL = { characters: 'Send edit request', scenery: 'Send edit request' };
 const WB = () => window.WB;
 function primaryOf(id) {
@@ -59,7 +64,7 @@ export const stageBar = {
       + `<button data-slot="primary" class="sgpri" title="${esc(p.title)}"${p.can() ? '' : ' disabled'}>${esc(p.label)}</button>`
       + `<button data-slot="ask" class="sgask" data-ask="1" title="ask the agent: a note it reads (MCP), from this stage">Ask the agent…</button>`
       + roundSlot()
-      + `<span data-slot="info" class="dim sgbl" title="${esc(stageTip(s))}">${s.changed ? `<b class="stw">⚠ ${esc(s.changed)}</b> · ` : ''}${s.blockers_all.length ? esc(s.blockers_all.join(' · ')) : 'nothing blocking'}${s.note ? ` · <span class="sgnote" title="${esc(`${s.updated_by || ''} ${s.updated || ''}`)}">${s.via === 'agent' ? 'agent: ' : ''}${esc(s.note)}</span>` : ''}</span>`
+      + `<span data-slot="info" class="dim sgbl" title="${esc(stageTip(s))}">${WB().agent?.none?.() ? '<a class="sgcon" data-connect="1" title="no agent has written since the server started: the asks wait in the Notes. Help › Connect Claude…">no agent connected · Connect Claude…</a> · ' : ''}${s.changed ? `<b class="stw">⚠ ${esc(s.changed)}</b> · ` : ''}${s.blockers_all.length ? esc(s.blockers_all.join(' · ')) : 'nothing blocking'}${s.note ? ` · <span class="sgnote" title="${esc(`${s.updated_by || ''} ${s.updated || ''}`)}">${s.via === 'agent' ? 'agent: ' : ''}${esc(s.note)}</span>` : ''}</span>`
       + (TIME_STAGES.includes(id) ? `<span data-slot="time" class="sgtm" title="${esc(`List: the stage's own list (the default). Time: ${id === 'final' ? 'the rows grouped by song section, in time order' : "the rows on the timeline's time axis (the same y for the same ms); a click on an empty spot seeks"}. Alt+T`)}"><a data-tm="list" class="${isTime(id) ? '' : 'on'}">List</a><a data-tm="time" class="${isTime(id) ? 'on' : ''}">Time</a></span>` : '<span data-slot="time" class="sgtm none"></span>')
       + `<a data-slot="prev" class="sgnv"${prev ? ` data-go="${prev.id}" title="Alt+Shift+${prev.n}"` : ''}>${prev ? `‹ ${esc(prev.title)}` : ''}</a>`
       + `<a data-slot="next" class="sgnv"${next ? ` data-go="${next.id}" title="Alt+Shift+${next.n}"` : ''}>${next ? `${esc(next.title)} ›` : ''}</a>`;
@@ -67,6 +72,9 @@ export const stageBar = {
   // the primary button follows the stage's draft (dirty / clean) without a full re-render
   refreshPrimary(bar) { const b = bar.querySelector('[data-slot=primary]'), id = bar.dataset.stage; if (b && id) { const p = primaryOf(id); b.disabled = !p.can(); if (b.textContent !== p.label) b.textContent = p.label; } },
   bind(bar) {
+    document.addEventListener('wb:agent', () => { if (bar.isConnected && bar.dataset.stage) stageBar.render(bar, bar.dataset.stage); });
+    // the primary act follows the lock too (Final: Lock for render… / Unlock)
+    store.on((w) => { if ((w === 'revisions' || w === 'all') && bar.isConnected && bar.dataset.stage) requestAnimationFrame(() => stageBar.refreshPrimary(bar)); });
     bar.addEventListener('click', (e) => {
       const id = WB().stages.current();
       const b = e.target.closest('[data-st]'); if (b) return WB().stages.setStatus(id, b.dataset.st);
@@ -74,7 +82,8 @@ export const stageBar = {
       const tm = e.target.closest('[data-tm]'); if (tm) return setMode(id, tm.dataset.tm);
       const pr = e.target.closest('[data-slot=primary]'); if (pr && !pr.disabled) return primaryOf(id).run();
       const rv = e.target.closest('[data-rv]'); if (rv && !rv.disabled) return commands.run(rv.dataset.rv === 'send' ? 'round.send' : 'revision.close');
-      const ak = e.target.closest('[data-ask]'); if (ak) { const r = ak.getBoundingClientRect(); menus.open(ASKS[id] || [], { x: r.left, y: r.bottom }); }
+      if (e.target.closest('[data-connect]')) return commands.run('help.connect');
+      const ak = e.target.closest('[data-ask]'); if (ak) { const r = ak.getBoundingClientRect(); menus.open(askItems(id), { x: r.left, y: r.bottom }); }
     });
   },
 };

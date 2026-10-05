@@ -138,9 +138,12 @@ export function stageContent(id, f) {
       const counts = { scenes: f.scenes || 0, intakeOpen: f.intakeOpen || 0, scenesNeedYou: f.scenesNeedYou || 0, unscriptedS: gapS, asks: f.sceneAsks || 0, legacyLines: f.script || 0 };
       // nothing written yet (no scene, no legacy script, no intake answer): empty, whatever the open questions
       if (!f.scenes && !f.script && !f.intakeAnswered) return { status: 'empty', blockers: ['no scenes yet', ...(f.intakeOpen ? [`${pl(f.intakeOpen, 'intake question')} open`] : [])], hints: [], counts };
-      const you = [...(f.intakeOpen ? [`${pl(f.intakeOpen, 'intake question')} open`] : []), ...(f.scenesNeedYou ? [`${pl(f.scenesNeedYou, 'scene')} flagged needs you`] : [])];
+      // review #3: open intake questions are a hint once there are scenes (the questions help the draft; a complete script
+      // with every scene ok is ready, and "next:" moves on); before any scene they still need the director
+      const intake = f.intakeOpen ? [`${pl(f.intakeOpen, 'intake question')} open`] : [];
+      const you = [...(f.scenes ? [] : intake), ...(f.scenesNeedYou ? [`${pl(f.scenesNeedYou, 'scene')} flagged needs you`] : [])];
       const work = [...(f.scenes ? (f.gapMs >= 1000 ? [`${gapS} s unscripted`] : []) : ['no scenes yet']), ...asks(f.sceneAsks)];
-      return { status: you.length ? 'needs_you' : work.length ? 'in_progress' : 'ready', blockers: [...you, ...work], hints: [], counts };
+      return { status: you.length ? 'needs_you' : work.length ? 'in_progress' : 'ready', blockers: [...you, ...work], hints: f.scenes ? intake : [], counts };
     }
     case 'breakdown': {
       const ents = f.characters + f.locations + f.props;
@@ -178,6 +181,8 @@ export function normStages(doc, facts) {
 }
 // stored status + content -> shown status (and the reason of a "changed")
 function shownOf(s, c) {
+  // (review #3: the director's own open asks for the agent never undo their "done": they wait for an agent, a hint)
+  if (s.status === 'done' && c.status !== 'empty' && c.blockers.length && c.blockers.every(b => / open asks? for the agent$/.test(b))) return { shown: 'done' };
   if (s.status === 'done') return c.status === 'ready' ? { shown: 'done' } : { shown: 'changed', changed: `${s.done_ok === false ? 'marked done while not ready' : 'changed since marked done'}: ${c.blockers.join('; ') || c.status}` };
   if (s.status === 'needs_you') return { shown: 'needs_you' };
   if (c.status === 'empty' && s.status === 'in_progress') return { shown: 'in_progress' };
@@ -198,7 +203,12 @@ export function stagesView(doc, facts) {
     out.push({ ...s, title: d.title, n: d.n, content: c, ...sh, shown_label: sh.shown === 'changed' && s.done_ok === false ? 'done ⚠ not ready' : SHOWN_LABEL[sh.shown],
       blockers_all: [...s.blockers, ...waits, ...c.blockers, ...c.hints] });
   }
-  const next = out.find(s => s.shown === 'needs_you' || s.shown === 'changed') || out.find(s => s.shown !== 'done') || null;
+  // "next:" from the F1 status of each stage: first what needs the director (needs you / changed since done), then the first
+  // stage with work left (empty / in progress; Final only once the others are done or ready), then a stage that is ready to
+  // mark done. A stage that is ready but not marked no longer holds the hint back (review #3: it stayed on Script)
+  const next = out.find(s => s.shown === 'needs_you' || s.shown === 'changed')
+    || out.find(s => s.id !== 'final' && ['empty', 'in_progress'].includes(s.shown))
+    || out.find(s => s.shown !== 'done') || null;
   return { rev: n.rev || 0, derived: !!n.derived, stages: out, next: next ? { id: next.id, title: next.title, status: next.status, shown: next.shown, blockers: next.blockers_all } : null };
 }
 // the rail / stage-bar tooltip of a stage: status, why, what blocks it

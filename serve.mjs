@@ -200,7 +200,7 @@ function pushUi(project, cmd) {
 
 // request bodies: 5 MB, except a sketch save (two base64 PNGs + the stroke JSON): 25 MB. Over the limit: 413 at once
 // (by Content-Length when sent, else while reading); the rest of the upload is discarded and the connection closed.
-const bodyLimit = (p) => p === '/api/op/sketch_save' || p === '/api/op/ref_upload' ? 25e6 : p === '/api/op/media_upload' || p === '/api/op/song_upload' ? 9e6 : 5e6;
+const bodyLimit = (p) => p === '/api/op/handoff_upload' ? 30e6 : p === '/api/op/sketch_save' || p === '/api/op/ref_upload' ? 25e6 : p === '/api/op/media_upload' || p === '/api/op/song_upload' ? 9e6 : 5e6;
 function readBody(req, limit) {
   return new Promise((ok, bad) => {
     const too = () => new S.WbError(413, `body too big (${limit / 1e6} MB max)`);
@@ -232,6 +232,26 @@ function readBody(req, limit) {
 const SAVE_STATUSES = ['draft', 'approved', 'rejected', 'withdrawn'];   // what a save may move a request to (the runner does the rest)
 const CONTENT = ['prompt', 'refs', 'est_cost', 'tool', 'video', 'takes'];   // what the director approves (an edit voids it)
 const same_ = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+// review #3 M1: a versioned file (lyrics / scenes / breakdown / storyboard.json) only GROWS through a save: every version the
+// server has stays (a save that leaves one out gets it back, in place), and `current` moves only to a version this save
+// adds (the page's Save version and its restore both add one); otherwise the server's `current` stays. A save can never
+// point `current` back at an older version (which would drop the director's picks, surfaces and anchors from every
+// version built on it); switching versions is an op (scenes_update / shots_update restore make a new version).
+function keepVersions(data, cur) {
+  const had = new Map((cur.versions || []).map(v => [v.id, v]));
+  if (!had.size) return;   // the first save of the file: it makes its versions
+  const sent = (data.versions || []).filter(v => v && typeof v === 'object');
+  const ids = new Set(sent.map(v => v.id)), added = sent.filter(v => !had.has(v.id)).map(v => v.id);
+  data.versions = [...(cur.versions || []).map(v => (ids.has(v.id) ? sent.find(x => x.id === v.id) : v)), ...sent.filter(v => !had.has(v.id))];
+  data.current = added.includes(data.current) ? data.current : added.length ? added[added.length - 1] : cur.current;
+}
+// M1: an agent's raw save never drops an anchored boundary the server has (E1): an anchor on a scene / shot of the current
+// version (and that edge's time) carries into the agent's new version; the agent may add anchors (scenes_update /
+// shots_update are the way), not remove or move them
+function keepAnchors(items, curItems) {
+  const was = new Map((curItems || []).filter(x => x?.anchors && typeof x.anchors === 'object').map(x => [x.id, x]));
+  return (items || []).map(x => { const c = was.get(x?.id); if (!c) return x; const out = { ...x, anchors: { ...(x.anchors || {}), ...c.anchors } }; for (const k of ['t0', 't1']) if (c.anchors[k]) out[k] = c[k]; return out; });
+}
 function stampPage(name, data, cur, fromPage = true) {
   const at = new Date().toISOString().slice(0, 19);
   const W = fromPage ? { by: 'director', via: 'page' } : { by: 'agent', via: 'agent' };
@@ -291,6 +311,8 @@ function stampPage(name, data, cur, fromPage = true) {
       if (!c || c.state !== v.state) { if (!fromPage && ['approved', 'locked'].includes(v.state)) deny(`${k} ${v.state}`); v.via = W.via; } else if (c.via) v.via = c.via; else delete v.via;
     }
   }
+  // review #3 L2: the composition export's file map and file (settings.json `composition`) change only by a page act
+  if (name === 'settings.json' && !fromPage) { if (cur.composition !== undefined) data.composition = cur.composition; else delete data.composition; }
   if (name === 'stages.json') {
     if (!Array.isArray(data.stages)) throw new S.WbError(400, 'stages.json: {stages: [...]} expected');
     const was = new Map((cur.stages || []).map(x => [x?.id, x]));
@@ -303,6 +325,7 @@ function stampPage(name, data, cur, fromPage = true) {
   }
   if (name === 'lyrics.json') {
     try { checkLyrics(data); } catch (e) { throw new S.WbError(400, e.message); }
+    keepVersions(data, cur);
     const cv = new Map((cur.versions || []).map(v => [v.id, v])), cn = new Map((cur.notes || []).map(n => [n.id, n]));
     data.versions = data.versions.map(v => cv.get(v.id) || { ...v, created: at, ...(v.via === 'import' && !cur.versions ? {} : { ...W }) });
     data.notes = (data.notes || []).filter(n => n && typeof n === 'object').map(n => {
@@ -313,8 +336,10 @@ function stampPage(name, data, cur, fromPage = true) {
   }
   if (name === 'scenes.json') {
     try { checkScenes(data); } catch (e) { throw new S.WbError(400, e.message); }
+    keepVersions(data, cur);
     const cv = new Map((cur.versions || []).map(v => [v.id, v])), cn = new Map((cur.notes || []).map(n => [n.id, n]));
-    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, created: at, ...(v.via === 'import' && !cur.versions ? {} : { ...W }) });
+    const curScenes = (cur.versions || []).find(v => v.id === cur.current)?.scenes || [];
+    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, ...(fromPage ? {} : { scenes: keepAnchors(v.scenes, curScenes) }), created: at, ...(v.via === 'import' && !cur.versions ? {} : { ...W }) });
     data.notes = (data.notes || []).filter(n => n && typeof n === 'object').map(n => {
       const c = cn.get(n.id), cr = new Map((c?.replies || []).map(r => [r.id, r]));
       const replies = (Array.isArray(n.replies) ? n.replies : []).filter(r => r && typeof r === 'object').map(r => cr.get(r.id) ? { ...r, by: cr.get(r.id).by, via: cr.get(r.id).via, at: cr.get(r.id).at } : { ...r, ...W, at });
@@ -342,6 +367,7 @@ function stampPage(name, data, cur, fromPage = true) {
   }
   if (name === 'breakdown.json') {
     try { checkBreakdown(data); } catch (e) { throw new S.WbError(400, e.message); }
+    keepVersions(data, cur);
     const cv = new Map((cur.versions || []).map(v => [v.id, v])), cn = new Map((cur.notes || []).map(n => [n.id, n]));
     data.versions = data.versions.map(v => cv.get(v.id) || { ...v, created: at, ...W });
     data.notes = (data.notes || []).filter(n => n && typeof n === 'object').map(n => {
@@ -381,13 +407,14 @@ function stampPage(name, data, cur, fromPage = true) {
   }
   if (name === 'storyboard.json') {
     try { checkBoard(data); } catch (e) { throw new S.WbError(400, e.message); }
+    keepVersions(data, cur);
     const cv = new Map((cur.versions || []).map(v => [v.id, v])), cn = new Map((cur.notes || []).map(n => [n.id, n]));
     // the picked takes (shot.clip) are written only by take_act, the lyric surfaces (shot.lyrics, E2) only by surface_act: a
     // new version from a page save keeps the server's picks and surfaces
     const curShots = (cur.versions || []).find(v => v.id === cur.current)?.shots || [];
     const picks = new Map(curShots.filter(x => x.clip).map(x => [x.id, x.clip])), surf = new Map(curShots.filter(x => x.lyrics?.length).map(x => [x.id, x.lyrics]));
     const keepPicks = (shots) => shots.map(x => { const { clip: _c, lyrics: _l, ...r } = x; return { ...r, ...(picks.has(x.id) ? { clip: picks.get(x.id) } : {}), ...(surf.has(x.id) ? { lyrics: surf.get(x.id) } : {}) }; });
-    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, shots: keepPicks(v.shots), created: at, ...(v.via === 'import' && !cur.versions ? {} : { ...W }) });
+    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, shots: keepPicks(fromPage ? v.shots : keepAnchors(v.shots, curShots)), created: at, ...(v.via === 'import' && !cur.versions ? {} : { ...W }) });
     // E3 chapters (outside the versions): cleaned (a `status` is dropped: the build status is derived); a changed one is stamped
     if (data.chapters != null || cur.chapters != null) {
       let ch; try { ch = cleanChapters(data.chapters ?? cur.chapters ?? []); } catch (e) { throw new S.WbError(400, `storyboard.json: ${e.message}`); }
@@ -417,8 +444,8 @@ http.createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
       res.write(': hi\n\n'); const c = { res, project: url.searchParams.get('project') || null }; clients.add(c); req.on('close', () => clients.delete(c)); flushPendingUi(c); return;
     }
-    if (p === '/api/config') return json(res, 200, { default_project: DEFAULT, media_roots: CFG.mediaRoots, private_re: CFG.privateSrc });
-    if (p === '/api/status') return json(res, 200, { ok: true, app: 'director-workbench', version: VERSION, commit: COMMIT, code: codeStatus(), default_project: DEFAULT, pages: clients.size, pages_by_project: [...clients].reduce((o, c) => (o[c.project || '*'] = (o[c.project || '*'] || 0) + 1, o), {}), data_dir: DATA_ROOT });
+    if (p === '/api/config') return json(res, 200, { default_project: DEFAULT, media_roots: CFG.mediaRoots, media_roots_ignored: CFG.mediaRootsIgnored || [], private_re: CFG.privateSrc });
+    if (p === '/api/status') return json(res, 200, { ok: true, app: 'director-workbench', version: VERSION, commit: COMMIT, code: codeStatus(), default_project: DEFAULT, pages: clients.size, pages_by_project: [...clients].reduce((o, c) => (o[c.project || '*'] = (o[c.project || '*'] || 0) + 1, o), {}), ...(isLocal(req) ? { data_dir: DATA_ROOT } : {}) });   // I5: the absolute data path only to this machine
     // F9 (Help › Connect Claude…): how to connect a Claude Code chat: the paths and the connection state, local only. The agent
     // token's FILE is named, its value never leaves the server here (screenshots, exports)
     if (p === '/api/connect') {
@@ -471,6 +498,9 @@ http.createServer(async (req, res) => {
         // who drew a sketch (provenance, not a permission): a browser on this origin is the page, anything else an agent
         // S9: whatever the op, a body that claims via "page" is the page's only when the request is the page's
         if (!fromPage && body.via === 'page') body.via = 'agent';
+        if (!fromPage) S.agentArgs(body);   // review #3 L3: an agent never signs as the director (by) nor claims another via
+        // L2: the composition export knows who asks (an agent on a locked project may not rewrite edl.json or its map)
+        if (name === 'composition_export') body.via = fromPage ? 'page' : 'agent';
         if (name === 'sketch_save' || name === 'request_run') body.via = fromPage ? 'page' : 'agent';   // provenance (who started a run / drew)
         // only the page turns a breakdown item into an entity: a browser request from this origin (the MCP server has no
         // such tool, and a request without the page's Origin is the agent surface and refused by the op)
@@ -489,7 +519,7 @@ http.createServer(async (req, res) => {
         // the lyric gate (E2): a surface on a shot is the director's (page only); a proposal is the agent's
         if (name === 'surface_act' || name === 'surface_propose') body.via = fromPage ? 'page' : 'agent';
         // D8: uploading files and "use as" (a node, a shot's take / start frame) are the director's (page only); an import's provenance
-        if (name === 'media_upload' || name === 'media_use' || name === 'media_import') body.via = fromPage ? 'page' : 'agent';
+        if (name === 'media_upload' || name === 'media_use' || name === 'media_import' || name === 'media_publish' || name === 'handoff_upload') body.via = fromPage ? 'page' : 'agent';   // + review #3: Make public…, results dropped in the Queue
         // D4: approving / reviewing a batch and importing the job books are the director's (page only); a plan's provenance
         if (name === 'batch_act' || name === 'jobbooks_import' || name === 'waves_plan') body.via = fromPage ? 'page' : 'agent';
         // E1: changing / accepting the named events and applying / undoing a re-time are the director's (page only); an agent's
@@ -564,5 +594,5 @@ http.createServer(async (req, res) => {
       if (priv(rel, [])) { res.writeHead(403); return res.end('private: local only'); }
     }
     sendFile(req, res, f);
-  } catch (e) { const code = e.code >= 400 && e.code < 600 ? e.code : e instanceof SyntaxError || e instanceof URIError ? 400 : 500; json(res, code, { error: String(e.message || e) }); }
+  } catch (e) { const code = e.code >= 400 && e.code < 600 ? e.code : e instanceof SyntaxError || e instanceof URIError ? 400 : 500; json(res, code, { error: String(e.message || e), ...(Array.isArray(e.held) ? { held: e.held } : {}) }); }
 }).listen(PORT, HOST, () => console.log(`workbench: http://localhost:${PORT}/  (listening on ${HOST}; default project ${DEFAULT}, data ${DATA_ROOT}${CFG.file ? ', config ' + path.basename(CFG.file) : ''})`));

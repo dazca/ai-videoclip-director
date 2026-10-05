@@ -12,6 +12,8 @@
 // USING one (the director, in the page: song_version_use) switches the audio, the beat grid and the lyric timings, and
 // moves every scene / shot boundary and named event through the same time map (one new scenes and storyboard version):
 // the E1 re-time preview shows what moves before anything is written.
+// review #3 M2 for song versions too: approved / locked shots, ok scenes and picked takes that get too short are `held`
+import { heldOf } from './events.js';
 export const VERSION_ID = /^v\d{1,4}$/;
 export const SOURCES = ['suno', 'upload', 'import', 'other'];
 export const STYLE_MAX = 1000, EXCLUDE_MAX = 1000, LYRICS_MAX = 5000, TITLE_MAX = 80;   // the Suno paste gates (custom mode, v4.5+)
@@ -108,7 +110,7 @@ export function mapTo(song, v) {
 // ------------------------------------------------------------------ what moves: the E1 re-time preview's shape
 // map + {scenes, shots, events, song (now), dur (new)} -> {rows [{kind: scene | shot | event, id, edge, from, to, event (the
 // version id), why: "song"}], scenes, shots, events (moved copies), problems, beats, changed, moves: []}
-export function songPlan({ map, scenes = [], shots = [], events = [], dur, version = 'song' } = {}) {
+export function songPlan({ map, scenes = [], shots = [], events = [], dur, version = 'song', approvals = null, states = null } = {}) {
   const sc = structuredClone(scenes), sh = structuredClone(shots), ev = structuredClone(events), rows = [], problems = [];
   for (const [kind, list] of [['scene', sc], ['shot', sh]]) for (const x of list) for (const edge of ['t0', 't1']) {
     const to = map(x[edge]); if (to !== x[edge]) { rows.push({ kind, id: x.id, edge, from: x[edge], to, event: version, why: 'song' }); x[edge] = to; }
@@ -118,7 +120,8 @@ export function songPlan({ map, scenes = [], shots = [], events = [], dur, versi
   for (const e of ev) { if (!Number.isFinite(e.t)) continue; const to = map(e.t); if (to !== e.t) { rows.push({ kind: 'event', id: e.id, edge: 't', from: e.t, to, event: version, why: 'song' }); e.t = to; } }
   for (const [kind, list] of [['scene', sc], ['shot', sh]]) for (const x of list) if (!(x.t0 >= 0 && x.t1 > x.t0 && (!dur || x.t1 <= dur))) problems.push(`${kind} ${x.id} would be ${clock(x.t0)}–${clock(x.t1)}: no length left in the new take`);
   rows.sort((a, b) => a.from - b.from || a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id));
-  return { moves: [], rows, scenes: sc, shots: sh, events: ev, problems, beats, changed: { scenes: rows.some(r => r.kind === 'scene') || beats > 0, shots: rows.some(r => r.kind === 'shot'), events: rows.some(r => r.kind === 'event') } };
+  const held = heldOf(rows.filter(r => r.kind !== 'event'), { scenes, shots: sh, approvals, states });
+  return { moves: [], rows, scenes: sc, shots: sh, events: ev, problems, beats, held, changed: { scenes: rows.some(r => r.kind === 'scene') || beats > 0, shots: rows.some(r => r.kind === 'shot'), events: rows.some(r => r.kind === 'event') } };
 }
 export const planSummary = (plan, linesMoved) => `${linesMoved} lyric line${linesMoved === 1 ? '' : 's'} · ${plan.rows.filter(r => r.kind === 'scene').length} scene and ${plan.rows.filter(r => r.kind === 'shot').length} shot boundaries · ${plan.rows.filter(r => r.kind === 'event').length} events move`;
 export const linesMoved = (lines, map) => (lines || []).filter(l => map(l.t0) !== l.t0).length;

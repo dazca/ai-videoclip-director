@@ -193,7 +193,7 @@ export const store = {
   // a note on any target {stage, kind, id, w?, quote?, t?, pin?}; opts {to: "agent", ask, gaps, marker, about}; -> its id
   noteAdd(target, text, opts = {}) {
     let id = null;
-    return this.mutate('notes.json', (d) => { const n = N.makeNote(d, { target, text, by: 'director', via: 'page', version: opts.version, ...opts }); id = n.id; d.notes.push(n); }, { label: opts.to ? 'ask the agent' : 'add note' }).then(() => id);
+    return this.mutate('notes.json', (d) => { const n = N.makeNote(d, { target, text, by: 'director', via: 'page', version: opts.version, ...opts }); id = n.id; d.notes.push(n); }, { label: opts.to ? 'ask the agent' : 'add note' }).then(() => { if (opts.to === 'agent') setTimeout(() => window.WB?.agent?.hint?.(), 400); return id; });   // no agent yet: Connect Claude… (core/connect.js)
   },
   // a timeline note at t (the old signature: the timeline column, markers, paste)
   addNote(t, text, line_id, extra = {}) {
@@ -212,12 +212,12 @@ export const store = {
   // which runs only requests the director approved; an agent's request_run uses the same runner)
   async runRequests(ids, { dry_run = false, all = false, retake = false, batch = null } = {}) {
     const r = await postJSON('/api/op/request_run', { ...(batch ? { batch } : all ? { all: true } : { ids }), dry_run, ...(retake ? { retake: true } : {}), by: 'page' });
-    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j;
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw Object.assign(new Error(j.error || `HTTP ${r.status}`), { status: r.status, body: j }); return j;
   },
   // any server op (the page's own acts: batch_act, waves_plan, jobbooks_import, ...): the JSON answer, or throws its error
   async op(name, body = {}) {
     const r = await postJSON('/api/op/' + name, body);
-    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j;
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw Object.assign(new Error(j.error || `HTTP ${r.status}`), { status: r.status, body: j }); return j;
   },
   async generators() { const r = await postJSON('/api/op/generators_get', {}); return r.ok ? r.json() : null; },
   async costsSummary() { const r = await postJSON('/api/op/costs_get', {}); return r.ok ? r.json() : null; },
@@ -268,14 +268,18 @@ export const store = {
 
 // toasts stack in one bottom-centre column (newest at the bottom, at most 4); the same message again restarts its timer
 // instead of drawing a second copy on top of the first
-export function toast(msg) {
+// opts {action: {label, run}, ms}: a link after the text (e.g. "Connect Claude…") and a longer life
+export function toast(msg, opts = {}) {
   let box = document.getElementById('toasts');
   if (!box) { box = document.createElement('div'); box.id = 'toasts'; box.setAttribute('role', 'status'); box.setAttribute('aria-live', 'polite'); document.body.appendChild(box); }
-  let el = [...box.children].find(x => x.textContent === String(msg));
-  if (el) el.remove(); else { el = document.createElement('div'); el.className = 'toast'; el.textContent = msg; }
+  let el = [...box.children].find(x => x.dataset.msg === String(msg));
+  if (el) el.remove(); else {
+    el = document.createElement('div'); el.className = 'toast'; el.dataset.msg = String(msg); el.textContent = msg;
+    if (opts.action) { const a = document.createElement('a'); a.className = 'toasta'; a.textContent = opts.action.label; a.addEventListener('click', () => { el.remove(); opts.action.run(); }); el.append(' ', a); }
+  }
   box.appendChild(el);
   while (box.children.length > 4) box.firstElementChild.remove();
-  clearTimeout(el._t); el._t = setTimeout(() => el.remove(), 3000);
+  clearTimeout(el._t); el._t = setTimeout(() => el.remove(), opts.ms || 3000);
 }
 
 // localStorage, wrapped (private windows / blocked storage must not break the page)

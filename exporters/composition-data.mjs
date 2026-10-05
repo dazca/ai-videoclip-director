@@ -141,9 +141,14 @@ export function exportComposition(p, { out, map, dry_run = false } = {}) {
   const doc = edlOf(p, { map }), bytes = JSON.stringify(doc, null, 1) + '\n';
   let prev = null; try { prev = fs.readFileSync(abs, 'utf8'); } catch (e) { /* first export */ }
   if (!dry_run) {
+    // a junction / symlink inside exports/ must not lead the write anywhere else: checked on the nearest existing folder
+    // BEFORE any folder is made (review #3 I4: no directory is created through a pre-planted junction), and again after
+    fs.mkdirSync(root, { recursive: true });
+    const real = (x) => fs.realpathSync.native(x), rr = real(root);
+    let up = path.dirname(abs); while (!fs.existsSync(up) && up.startsWith(root + path.sep)) up = path.dirname(up);
+    const ru = real(up); if (ru !== rr && !ru.startsWith(rr + path.sep)) fail(400, 'out: the folder leads outside the project\'s exports/ folder');
     fs.mkdirSync(path.dirname(abs), { recursive: true });
-    // a junction / symlink inside exports/ must not lead the write anywhere else
-    const real = (x) => fs.realpathSync.native(x), rr = real(root), rd = real(path.dirname(abs));
+    const rd = real(path.dirname(abs));
     if (rd !== rr && !rd.startsWith(rr + path.sep)) fail(400, 'out: the folder leads outside the project\'s exports/ folder');
     try { if (fs.lstatSync(abs).isSymbolicLink()) fail(400, 'out: a link, not a file'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
     if (prev !== bytes) writeAtomic(abs, bytes);
