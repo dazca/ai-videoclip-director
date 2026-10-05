@@ -82,6 +82,17 @@ another, with in / out, a note and alternatives); the pick lands on the storyboa
 You never pick (no tool) and never write `clip` (`shots_update` ignores it and keeps theirs). An imported file is a take
 once it is linked to the shot (`media_update {id, shots: ["sh03"]}`). Final's checklist counts the shots with a pick.
 
+**Identity checks** (D7, free). A character's `constants[]` (D2) are the details that must stay identical ("orange starburst
+clip above the LEFT ear", "cyan jaw seam"); the ticked ones are its checklist. The director keeps them in the Characters stage
+(Identity tab, "Constants"); you may propose them with `entity_upsert {kind: "character", id, fields: {constants: [{text, check,
+label}]}}` when they ask. With their switch on ("ask for an identity check when an output lands"), a run, an import or a new node
+leaves you ONE note per character (ask `check`, "Identity check: 2 new outputs of Ada landed …"). Then: `checks_get {entity}` (the
+approved identity image and each output, absolute paths: look at both), and per output `check_add {target, against: {entity},
+verdict: ok | drift | fail, items: [{constant, ok, note: "clip on the RIGHT side"}, {constant: "likeness", ok}], note}`. Be honest:
+`ok` only when every item holds. The ask is absorbed once every output is checked. The director sees the badge ("✗ clip side")
+on the node / take and decides; a check never approves, rejects or picks. Never invent a `score` (only a local face-embedding
+tool fills it: tools/face-score.md).
+
 `final_get` (read only) answers "what is left?": `ready`, `failing`, the **ready-to-render checklist** (every second
 scripted, every scene has shots, every shot an approved frame / take / clip, every shot a picked take, every asset approved, no open notes, no
 open round, costs within the cap, an export is possible; derived from the files, each failing line with its gaps),
@@ -238,6 +249,8 @@ your times (`t0` / `t1` ms on scenes, beats, shots) are what places them, so kee
 - Never pick, mix or dismiss a proposal (the director's, in the page), and never write `proposals.json` or
   `proposals/*.svg` by hand: `proposals_add` sanitises and records them. Never pick a take or write a shot's `clip` (or
   `takes.json`): propose with `take_propose`; the director picks in the page.
+- Never treat an identity check as a decision: `check_add` only informs the director (a badge); never approve, reject or pick
+  because of it, and never write `checks.json` by hand.
 - Never try to work around a project locked for render (409): no hand edits of the files, no snapshot restores; ask the
   director to unlock it in the Final stage.
 - Never `round_absorb` a note you did not apply, and never call `round_finish` before every note of the round is

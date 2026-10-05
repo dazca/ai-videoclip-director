@@ -11,6 +11,7 @@
 import { store, esc, toast, postJSON, mediaUrl, prefs, PROJECT } from '../js/store.js';
 import * as T from '../js/takes.js';
 import * as SB from '../js/storyboard.js';
+import { takeBadge, wireCheckPopover } from '../core/checkbadge.js';
 
 const WB = () => window.WB;
 const ST = new Map();             // per shot: {sel, b, in, out, note, altT, altNote}
@@ -51,7 +52,7 @@ function cardHtml(t, shot, s) {
   const pick = shot.clip, picked = pick?.file === t.file, alt = (pick?.alt || []).filter(a => a.file === t.file), prop = T.openProposals(store.takes, shot.id).some(p => p.file === t.file);
   const { dur } = info(t), name = T.takeName(t);
   return `<div class="tkc${t.media === s.sel ? ' on' : ''}${t.media === s.b ? ' b' : ''}${picked ? ' pk' : ''}" data-tk="${esc(t.media)}" data-tkind="${t.kind}" title="${esc(`${name} · ${t.label}${dur ? ' · ' + T.secs(dur, 1) : ''}${t.source === 'import' ? ' · imported' : ''}${picked ? ' · PICKED' : ''}${prop ? ' · proposed by the agent' : ''}\nclick: open · Shift+click: B for A/B · ⤢ full size`)}">`
-    + `<div class="tkth">${t.thumb ? `<img src="${esc(mediaUrl(t.thumb))}" alt="" loading="lazy">` : t.kind === 'image' ? `<img src="${esc(mediaUrl(t.file))}" alt="" loading="lazy">` : '<span class="tknoth">▶</span>'}<i class="tkbar"></i>${t.kind === 'video' ? '<u class="tkhv"></u>' : ''}<b class="tkz" data-tk-a="big" title="full size">⤢</b></div>`
+    + `<div class="tkth">${t.thumb ? `<img src="${esc(mediaUrl(t.thumb))}" alt="" loading="lazy">` : t.kind === 'image' ? `<img src="${esc(mediaUrl(t.file))}" alt="" loading="lazy">` : '<span class="tknoth">▶</span>'}<i class="tkbar"></i>${takeBadge(shot.id, t.media)}${t.kind === 'video' ? '<u class="tkhv"></u>' : ''}<b class="tkz" data-tk-a="big" title="full size">⤢</b></div>`
     + `<div class="tkl">${t.request || t.job ? `<b>#${esc(t.take ?? '?')}</b>` : `<b class="tkfn">${esc(name)}</b>`}${picked ? '<i class="tkpk" title="picked">★</i>' : prop ? '<i class="tkpp" title="the agent proposes it">◆</i>' : ''}${alt.length ? `<i class="tkal" title="${esc(alt.map(a => `alt for ${clk(a.t)} ${a.note}`).join('\n'))}">alt</i>` : ''}${dur ? `<span>${(dur / 1000).toFixed(1)}s</span>` : t.kind === 'image' ? '<span>still</span>' : ''}${t.request || t.job ? `<span class="tkrq">${esc(t.request || t.job)}</span>` : ''}</div></div>`;
 }
 function editorHtml(t, shot, s) {
@@ -113,6 +114,7 @@ function abSources(shot, takes, s) {
 
 // ------------------------------------------------------------------ mount (the host's innerHTML is replaced on every render)
 export function mountTakes(host, { shot: shotId, onChange } = {}) {
+  wireCheckPopover();   // D7: the identity check badges on the cards (core/checkbadge.js)
   const render = () => { const sh = savedShot(shotId); host.innerHTML = takesHtml(sh); wireMedia(); if (sh) askInfo(shotId, shotTakes(sh), render); onChange?.(); };
   const cur = () => { const sh = savedShot(shotId), takes = shotTakes(sh), s = sh ? stateFor(sh, takes) : null; return { sh, takes, s, t: s && takes.find(x => x.media === s.sel) }; };
   const vid = () => host.querySelector('video.tkvid');
@@ -227,7 +229,7 @@ class TakesView {
     el.classList.add('tkview');
     el.innerHTML = '<div class="tklist"></div><div class="tkmain"></div>';
     el.querySelector('.tklist').addEventListener('click', (e) => { const r = e.target.closest('[data-k]'); if (r) { this.sel = r.dataset.k; prefs.set('takesSel:' + PROJECT, this.sel); this.render(); } });
-    store.on((w) => { if (['all', 'board', 'requests', 'takes', 'media'].includes(w)) this.render(); });
+    store.on((w) => { if (['all', 'board', 'requests', 'takes', 'media', 'checks'].includes(w)) this.render(); });
     this.render();
   }
   rows() {

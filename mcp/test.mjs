@@ -1597,6 +1597,57 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
     && RJ().items.filter(r => r.history).every(r => r.status === 'done' && r.history.book === 'jobs_test.json') && hr.started?.length === 0 && /history/.test(hr.refused?.[0]?.why || '') && /409|done/.test(hu.error || '')
     && fs.readFileSync(path.join(DD, 'costs.json'), 'utf8') === costs0, { jb: jb.status, jd: jd.body?.imported, jp: jp.body?.skipped, hr: hr.refused, hu: hu.error });
 }
+// ==================== 23. (D7) identity checks + (D2) constants: BEGIN ====================
+// A separate section on its own project copy (mcp-d7): lib/ops/checks.mjs, mcp/tools/checks.mjs, js/checks.js. Constants through
+// entity_upsert (cleaned); identity checks off by default (a run asks nothing); on: the runner's done lands the outputs and their
+// nodes as ONE "identity check" ask; checks_get; check_add (checks.json only); the ask absorbed when every output is checked.
+{
+  const P7 = 'mcp-d7', DD = path.join(DATA, P7);
+  fs.cpSync(ORIG, DD, { recursive: true, filter: (f) => !f.includes(`${path.sep}.snapshots`) });
+  const { checksFixture } = await import('../tools/verify-checks.mjs');
+  checksFixture(DD, path.join(MB, 'roots'));
+  const J = (f, d) => { try { return JSON.parse(fs.readFileSync(path.join(DD, f), 'utf8')); } catch (e) { return d; } }, W = (f, d) => fs.writeFileSync(path.join(DD, f), JSON.stringify(d, null, 1));
+  const sha = (f) => { try { return crypto.createHash('sha1').update(fs.readFileSync(path.join(DD, f))).digest('hex'); } catch (e) { return null; } };
+  const tools = (await mcp.listTools()).tools.map(t => t.name);
+  const up = await call(mcp, 'entity_upsert', { project: P7, kind: 'character', id: 'ada', fields: { constants: [{ text: 'Orange starburst clip above the LEFT ear', label: 'clip side' }, 'copper-tipped curls', { text: 'hazel-green eyes', check: false }, '  ', 'Copper-tipped curls'] } });
+  const upLoc = await call(mcp, 'entity_upsert', { project: P7, kind: 'location', id: 'studio', fields: { constants: ['a red door'] } });
+  const cs = J('entities/characters/ada.json').constants || [];
+  check('D2: tools check_add and checks_get; entity_upsert cleans constants[] to {text, check, label?} (blank and duplicate dropped, check false kept off the checklist); a location has none (400)',
+    tools.includes('check_add') && tools.includes('checks_get') && !up.error && cs.length === 3 && cs[0].label === 'clip side' && cs[0].check === true && cs[1].text === 'copper-tipped curls' && cs[2].check === false && /400/.test(upLoc.error || ''),
+    { cs, upLoc: upLoc.error?.slice(0, 80) });
+  const c0 = J('costs.json', {}); c0.cap_usd = 100; W('costs.json', c0);
+  const mkReq = (id) => { const R = J('requests.json'); R.items.push({ id, kind: 'look-sheet', target: 'character:ada', prompt: `mcp d7: Ada look sheet (${id})`, refs: ['media/still/ada_face.jpg'], est_cost: 0.24, takes: 2, tool: 'fal-ai/nano-banana-2/edit', status: 'approved', by: 'agent', at: '2026-10-05T11:00:00',
+    asset: { type: 'character', id: 'ada', tree: 'look:base', from: 'n01', kind: 'look' }, log: [{ at: '2026-10-05T11:00:00', by: 'director', via: 'page', status: 'approved' }] }); R.rev = (R.rev || 0) + 1; W('requests.json', R); };
+  const asks = () => (J('notes.json', { notes: [] }).notes || []).filter(n => n.ask === 'check');
+  mkReq('rd7off');
+  const off = await call(mcp, 'request_run', { project: P7, ids: ['rd7off'], wait: true });
+  const offReq = J('requests.json').items.find(r => r.id === 'rd7off');
+  check('identity checks are off by default: the runner\'s done (outputs + nodes) asks nothing and writes no checks.json',
+    offReq.status === 'done' && offReq.linked?.nodes?.length === 2 && asks().length === 0 && !fs.existsSync(path.join(DD, 'checks.json')), { status: offReq.status, run: off.error?.slice(0, 120), asks: asks().length });
+  W('settings.json', { ...J('settings.json', { rev: 0, keybindings: {} }), identity_checks: true });
+  mkReq('rd7on');
+  await call(mcp, 'request_run', { project: P7, ids: ['rd7on'], wait: true });
+  const onReq = J('requests.json').items.find(r => r.id === 'rd7on'), A1 = asks(), ck1 = J('checks.json', { asks: [] });
+  const nodeT = (onReq.linked?.nodes || []).map(n => `ada/${n}`);
+  check('on (settings.json identity_checks): the runner\'s done lands 2 outputs + their 2 nodes as ONE ask for the agent on Ada (to: agent, ask "check"), naming each node as the target, the approved identity n01 and the checked constants only',
+    onReq.status === 'done' && A1.length === 1 && A1[0].to === 'agent' && A1[0].target.id === 'ada' && /2 new outputs/.test(A1[0].text) && nodeT.length === 2 && nodeT.every(t => A1[0].text.includes(t)) && /n01/.test(A1[0].text)
+    && /clip above the LEFT ear/.test(A1[0].text) && !/hazel/.test(A1[0].text) && ck1.asks.length === 1 && ck1.asks[0].files.every(f => f.target.kind === 'node' && f.request === 'rd7on'),
+    { status: onReq.status, asks: A1.map(n => n.text.slice(0, 200)), files: ck1.asks?.[0]?.files });
+  const g1 = await call(mcp, 'checks_get', { project: P7, entity: 'ada' });
+  const before = ['approvals.json', 'requests.json', 'storyboard.json', 'takes.json'].map(sha);
+  const k1 = await call(mcp, 'check_add', { project: P7, target: { kind: 'node', id: nodeT[0] }, against: { entity: 'ada' }, verdict: 'fail', items: [{ constant: 'clip side', ok: false, note: 'clip on the RIGHT side' }, { constant: 'likeness', ok: true }], note: 'wrong side' });
+  const mid = asks()[0].status;
+  const k2 = await call(mcp, 'check_add', { project: P7, target: { kind: 'node', id: nodeT[1] }, against: { entity: 'ada', node: 'n01' }, verdict: 'ok', items: [{ constant: 1, ok: true }], score: { model: 'arcface-r100 (local)', value: 0.71, threshold: 0.5, metric: 'cosine' } });
+  const kBad = await call(mcp, 'check_add', { project: P7, target: { kind: 'node', id: nodeT[1] }, against: { entity: 'ada' }, verdict: 'ok', score: { model: '', value: 'high' } });
+  const g2 = await call(mcp, 'checks_get', { project: P7, entity: 'ada' });
+  check('checks_get gives the open ask (2 unchecked, absolute files) and Ada\'s checklist; check_add writes checks.json only (approvals, requests, storyboard, takes untouched), returns the badge ("✗ clip side", "identity ok"), keeps the optional score {model, value, threshold}, refuses a malformed score; the ask stays open until both are checked, then is absorbed with the results',
+    g1.enabled === true && g1.asks?.[0]?.unchecked === 2 && g1.asks[0].files.every(f => f.abs) && g1.checklist?.[0]?.identity?.node === 'n01'
+    && k1.badge?.label === '✗ clip side' && k2.badge?.label === 'identity ok' && k2.check?.score?.value === 0.71 && /score/.test(kBad.error || '') && mid === 'open'
+    && JSON.stringify(['approvals.json', 'requests.json', 'storyboard.json', 'takes.json'].map(sha)) === JSON.stringify(before)
+    && asks()[0].status === 'absorbed' && /checked:.*✗ clip side.*identity ok/.test(asks()[0].replies?.at(-1)?.text || '') && g2.asks.length === 0 && g2.latest.length === 2,
+    { k1: k1.error || k1.badge, k2: k2.error || k2.badge, kBad: kBad.error?.slice(0, 80), mid, ask: asks()[0]?.status, latest: g2.latest });
+}
+// ==================== 23. (D7) identity checks + (D2) constants: END ====================
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {
   // ---------------------------------------------------------------- clean up whatever happened

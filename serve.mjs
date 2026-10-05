@@ -445,8 +445,8 @@ http.createServer(async (req, res) => {
       if (priv(rel, [m[1]]) || priv(`data/${m[1]}/${rel}`, [])) { res.writeHead(403); return res.end('private: local only'); }
       // notes.json: the old note stores are migrated into it (v2) on its first read
       if (m[2] === 'notes.json' && fs.existsSync(path.join(pd, 'song.json'))) { try { S.notesDoc(m[1]); } catch (e) { /* a broken file is served as it is */ } }
-      // a writable state file (or revisions.json / proposals.json / takes.json, the server's) that does not exist yet reads as null (the page uses its default)
-      if ((S.WRITABLE.has(m[2]) || m[2] === 'revisions.json' || m[2] === 'proposals.json' || m[2] === 'takes.json') && !fs.existsSync(f)) return json(res, 200, null);
+      // a writable state file (or revisions.json / proposals.json / takes.json / checks.json, the server's) that does not exist yet reads as null (the page uses its default)
+      if ((S.WRITABLE.has(m[2]) || m[2] === 'revisions.json' || m[2] === 'proposals.json' || m[2] === 'takes.json' || m[2] === 'checks.json') && !fs.existsSync(f)) return json(res, 200, null);
       // a remote (LAN) client reads the project's JSON without private paths or items flagged private (media.json,
       // entities with private refs and iteration nodes, requests built on private photos)
       if (!isLocal(req) && /\.json$/i.test(f) && fs.existsSync(f)) {

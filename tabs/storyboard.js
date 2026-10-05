@@ -81,7 +81,7 @@ class Board {
     // stacked down it at their own times; gaps as rows too; shots outside the script after the end
     this.ta = new TimeAxis({ stage: 'storyboard', scroller: this.$('.sblist'), nc: this.nc, rows: () => this.timeRows(), onApply: () => this.nc.schedule('place'), noSeek: '.sbcard, .sbsh, .sbskslot' });
     document.addEventListener('wb:timemode', (e) => { if (e.detail.stage === 'storyboard' && !this.typing()) this.render(); });
-    store.on((w) => { if (['board', 'scenes', 'all', 'approvals', 'requests', 'breakdown', 'costs', 'proposals', 'takes'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
+    store.on((w) => { if (['board', 'scenes', 'all', 'approvals', 'requests', 'breakdown', 'costs', 'proposals', 'takes', 'checks'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
     this.render();
   }
   // a draft edit from "+ Add" (a shot) and the other structural edits: one undo step (Ctrl+Z puts the draft back)

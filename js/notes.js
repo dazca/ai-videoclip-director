@@ -6,7 +6,7 @@
 //   Note    {id "ln03", target: Target, text, by, via: page | agent | import, status: open | absorbed | dismissed,
 //            round, replies: [{id "ln03.1", text, by, via, at}], absorbed_in: <revision id> | null, created,
 //            to?: "agent", ask?: request | fill_gaps | extract | storyboard | round | proposals (an ask for the agent; "proposals" = make proposals for its target, js/proposals.js; "round" = the
-//            one ask a sent review round writes, js/revisions.js), gaps?, version?
+//            one ask a sent review round writes, js/revisions.js; "check" = an identity check of outputs that landed, js/checks.js), gaps?, version?
 //            (the stage version it was written on), marker?: true (a timeline marker), about? (an item key),
 //            closed_by?, closed_via?, closed_at?, legacy?: {store, id} (where a migrated note came from),
 //            change?: {stage, file?, version?, summary, at, by} (what the agent changed for it: round_absorb)}
@@ -36,7 +36,7 @@ export const KINDS = {
   timeline: ['time'],
 };
 export const STATUSES = ['open', 'absorbed', 'dismissed'];
-export const ASKS = ['request', 'fill_gaps', 'extract', 'storyboard', 'round', 'proposals'];
+export const ASKS = ['request', 'fill_gaps', 'extract', 'storyboard', 'round', 'proposals', 'check'];
 export const PREFIX = { lyrics: 'ln', script: 'sn', breakdown: 'bn', characters: 'cn', scenery: 'an', storyboard: 'sbn', final: 'fn', timeline: 'n' };
 export const STAGE_TITLE = { lyrics: 'Lyrics', script: 'Script', breakdown: 'Breakdown', characters: 'Characters', scenery: 'Scenery', storyboard: 'Storyboard', final: 'Final', timeline: 'Timeline' };
 export const TEXT_MAX = 8000;
