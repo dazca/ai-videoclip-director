@@ -5,8 +5,10 @@
 // then read the page and the non-private files; every POST from them still needs allow_remote_ops.
 // Every request must carry a Host header naming this server (localhost / 127.0.0.1 / [::1]:<port>, plus this
 // machine's names and addresses with --lan), so a DNS-rebinding page cannot reach it. Every POST /api/* must be
-// content-type application/json, have no foreign Origin, and carry the header x-wb-token: the per-run token the
-// server writes into index.html / dock.html (<meta name="wb-token">, read by core/token.js; env WB_TOKEN fixes it).
+// content-type application/json, have no foreign Origin, and carry a token: the page's x-wb-token (the per-run token the
+// server writes into index.html / dock.html, <meta name="wb-token">, read by core/token.js; env WB_TOKEN fixes it) or the
+// agents' x-wb-agent-token (<data folder>/.wb-agent-token). Only a request with the page token, this server's Origin and
+// Sec-Fetch-Site: same-origin is the page (the director, S9); anything else is an agent and never does a page act.
 // Only the page's own files are served from the workbench folder (an allow-list), every response says nosniff, and the
 // page shell gets a Content-Security-Policy without inline scripts. Approvals made in the page (POST /api/save of
 // requests.json / approvals.json) are stamped via:"page"; an agent never approves (lib/ops/_shared.mjs directorGate).
@@ -50,6 +52,7 @@ import { checkScenes, SCENE_STATUSES } from './js/scenes.js';
 import { checkBreakdown, ITEM_STATUSES } from './js/breakdown.js';
 import { checkBoard } from './js/storyboard.js';
 import { checkNotes } from './js/notes.js';
+import * as BT from './js/batches.js';
 
 const { CFG, DATA_ROOT, WB_DIR: WB } = S;
 const ARGS = process.argv.slice(2);
@@ -58,9 +61,23 @@ const HOST = ARGS.includes('--lan') ? '0.0.0.0' : CFG.host || '127.0.0.1';
 const DEFAULT = CFG.defaultProject;
 const isLocal = (req) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
 const TOKEN = process.env.WB_TOKEN || crypto.randomBytes(24).toString('hex');
+// S9: the agents' own token (x-wb-agent-token): env WB_AGENT_TOKEN, else <DATA_ROOT>/.wb-agent-token (a dot-file outside
+// every project folder: never served), made once and kept across restarts (several servers on one data folder share it).
+// The MCP server (mcp/tools/_shared.mjs) reads it from there; a request carrying it is an agent, whatever its headers.
+const AGENT_TOKEN_FILE = path.join(DATA_ROOT, '.wb-agent-token');
+const AGENT_TOKEN = (() => {
+  if (process.env.WB_AGENT_TOKEN) return String(process.env.WB_AGENT_TOKEN);
+  const rd = () => { try { const t = fs.readFileSync(AGENT_TOKEN_FILE, 'utf8').trim(); return /^[0-9a-f]{48}$/.test(t) ? t : null; } catch (e) { return null; } };
+  let t = rd(); if (t) return t;
+  t = crypto.randomBytes(24).toString('hex');
+  fs.mkdirSync(DATA_ROOT, { recursive: true });
+  try { fs.writeFileSync(AGENT_TOKEN_FILE, t, { flag: 'wx', mode: 0o600 }); return t; }
+  catch (e) { if (e.code === 'EEXIST') { const t2 = rd(); if (t2) return t2; fs.writeFileSync(AGENT_TOKEN_FILE, t, { mode: 0o600 }); return t; } throw e; }
+})();
 // the code this process runs (hash of serve.mjs, lib/, js/, tabs/, core/, app.js at start): /api/status and the header
 // x-wb-code on every /api response carry it; the MCP server and the page compare it with the files on disk (stale = restart)
 const CODE = S.codeState(), STARTED = new Date().toISOString().slice(0, 19);
+const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(WB, 'package.json'), 'utf8')).version; } catch (e) { return null; } })();   // About shows it
 function codeStatus() {
   const disk = S.codeState(), changed = S.codeDiff(CODE, disk);
   return { hash: CODE.hash, started: STARTED, disk: disk.hash, stale: changed.length > 0, changed: changed.slice(0, 20),
@@ -75,7 +92,13 @@ if (!['127.0.0.1', 'localhost', '::1'].includes(HOST)) {
 }
 const hostOk = (h) => { const m = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(String(h || '').toLowerCase()); return !!m && HOSTS.has(m[1]) && Number(m[2] || 80) === PORT; };
 const originOk = (o) => { try { const u = new URL(o); return u.protocol === 'http:' && hostOk(u.host); } catch (e) { return false; } };
-const tokenOk = (t) => typeof t === 'string' && t.length === TOKEN.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(TOKEN));
+const same = (t, ref) => typeof t === 'string' && t.length === ref.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(ref));
+const tokenOk = (t) => same(t, TOKEN), agentTokenOk = (t) => same(t, AGENT_TOKEN);
+// S9: the page = a browser on this server's origin: its Origin is ours AND it says Sec-Fetch-Site: same-origin (browsers
+// send both on a same-origin POST; Node's fetch, curl and the MCP server send neither unless told to), with the page
+// token and never the agent token. Anything else is an agent: it never approves, picks, locks or uploads as the director.
+const isPage = (req) => !agentTokenOk(req.headers['x-wb-agent-token']) && tokenOk(req.headers['x-wb-token'])
+  && !!req.headers.origin && originOk(req.headers.origin) && req.headers['sec-fetch-site'] === 'same-origin';
 // the page gets the token in its HTML (another site cannot read it); core/token.js adds it to every /api POST
 const TOKEN_TAG = `<meta name="wb-token" content="${TOKEN}"><script src="core/token.js"></script>`;
 // the page shell: scripts only from this server (no inline script, no eval), styles may be inline (style attributes);
@@ -94,7 +117,7 @@ const CSP_FILE = "sandbox; default-src 'none'; img-src 'self' data: blob:; media
 const STATIC = /^(index\.html|dock\.html|app\.js|app\.css|readme\.md|(core|js|tabs|core\/sketch)\/[\w.-]+\.(js|css)|catalog\/([\w-]+\/)?[\w.-]+\.(json|md|jpe?g|png|webp)|templates\/[\w.-]+\.json)$/;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
-  '.svg': 'image/svg+xml', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.mp4': 'video/mp4', '.webm': 'video/webm', '.md': 'text/plain; charset=utf-8' };
+  '.svg': 'image/svg+xml', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.mp4': 'video/mp4', '.webm': 'video/webm', '.gif': 'image/gif', '.mov': 'video/quicktime', '.md': 'text/plain; charset=utf-8' };
 fs.mkdirSync(DATA_ROOT, { recursive: true });
 
 function sendFile(req, res, file) {
@@ -196,22 +219,59 @@ function readBody(req, limit) {
 // absorbed_in and change (the round's link to what the agent changed), and an agent's note keeps its words (only the director's own text can be edited); a status change is
 // stamped closed_by director / via page; legacy_seen only grows (a deleted migrated note never comes back); anything that
 // is not a v2 doc (an old page saving the v1 list) is refused (400: reload).
+// S9: a save without the page (no page Origin + Sec-Fetch-Site: same-origin, or the agent token) is an agent's: it is
+// stamped by "agent", via "agent", and may not approve / lock, mark a stage done, set a scene or item ok, or dismiss the
+// director's notes (403, "approve in the page").
+const SAVE_STATUSES = ['draft', 'approved', 'rejected', 'withdrawn'];   // what a save may move a request to (the runner does the rest)
+const CONTENT = ['prompt', 'refs', 'est_cost', 'tool', 'video', 'takes'];   // what the director approves (an edit voids it)
+const same_ = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 function stampPage(name, data, cur, fromPage = true) {
   const at = new Date().toISOString().slice(0, 19);
+  const W = fromPage ? { by: 'director', via: 'page' } : { by: 'agent', via: 'agent' };
+  const deny = (what) => { throw new S.WbError(403, `${what}: only the director does this, in the open page (approve in the page). This save is an agent's (no page Origin + Sec-Fetch-Site: same-origin); agents use the MCP tools`); };
   if (name === 'requests.json' && Array.isArray(data.items)) {
-    const was = new Map((cur.items || []).map(r => [r.id, r]));
+    const was = new Map((cur.items || []).map(r => [r.id, r])), seen = new Set(), project = cur.__project;
+    // N3: an existing request is never removed or renamed by a save (withdraw or reject it); ids are unique
+    for (const r of data.items) {
+      if (!r || typeof r !== 'object' || typeof r.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(r.id)) throw new S.WbError(400, 'requests.json: every item needs an id ([A-Za-z0-9_-], 1-64)');
+      if (seen.has(r.id)) throw new S.WbError(400, `requests.json: request ${r.id} twice`); seen.add(r.id);
+    }
+    for (const id of was.keys()) if (!seen.has(id)) throw new S.WbError(400, `request ${id}: a save never removes or renames a request (withdraw or reject it instead)`);
     data.items = data.items.map(r => {
-      if (!r || typeof r !== 'object') return r;
       const c = was.get(r.id), log = [...(c?.log || [])];
-      // withdrawn = its author took the draft back: the director withdraws their own drafts; an agent's draft they reject
-      if (r.status === 'withdrawn' && c?.status !== 'withdrawn' && (!c || c.status !== 'draft' || S.requestAuthor(c) !== 'director')) throw new S.WbError(400, `request ${r.id}: only the director's own draft can be withdrawn in the page (an agent's draft: Reject)`);
-      if (!c || c.status !== r.status) log.push({ at, by: 'director', via: 'page', status: r.status });
-      // "allow uploading private refs" is the director's tick: recorded in the server-owned log (lib/ops/_shared.mjs privateUploadOk)
-      const pu = fromPage ? r.private_upload_ok === true : c?.private_upload_ok === true;   // without the page's Origin: unchanged
-      if (pu !== (c?.private_upload_ok === true)) log.push({ at, by: 'director', via: 'page', private_upload: pu });
-      const out = { ...r, log }; if (pu) out.private_upload_ok = true; else delete out.private_upload_ok;
       // a history request (imported from a job book) is the server's: a page save cannot make one or change it
-      if (c?.history) return { ...c }; delete out.history;
+      if (c?.history) return { ...c };
+      const out = { ...r }; delete out.history;
+      if (!c) {   // a new request is always a draft, its author the saver
+        if (r.status !== 'draft') throw new S.WbError(400, `request ${r.id}: a new request is a draft (approve it afterwards, in the page)`);
+        if (Array.isArray(out.refs)) out.refs = S.canonRefs(project, out.refs);
+        delete out.private_upload_ok;
+        return { ...out, by: W.by, log: [{ at, ...W, status: 'draft' }] };
+      }
+      let status = r.status;
+      // an edit of what was approved (prompt, refs, estimate, tool, video, takes) voids the approval and the private tick
+      if (Array.isArray(out.refs) && !same_(out.refs, c.refs)) out.refs = S.canonRefs(project, out.refs);
+      const edited = CONTENT.some(k => !same_(out[k], c[k]));
+      if (edited && !['draft', 'approved'].includes(c.status)) throw new S.WbError(400, `request ${r.id} is ${c.status}: only draft or approved requests can be edited`);
+      if (edited && c.status === 'approved') { if (status !== c.status && status !== 'draft') throw new S.WbError(400, `request ${r.id}: an edit voids its approval (it goes back to draft); approve it again afterwards`); status = 'draft'; }
+      out.status = status;
+      if (c.status !== status) {
+        if (!SAVE_STATUSES.includes(status)) throw new S.WbError(400, `request ${r.id}: a save moves a request to ${SAVE_STATUSES.join(' / ')} only (the runner queues and runs it)`);
+        if (status === 'approved' && !fromPage) deny(`request ${r.id} approved`);
+        // N3: a request in a batch (D4) is approved with its batch (batch_act); a save only rejects, withdraws or re-drafts it
+        const b = BT.batchOfRequest(cur, r.id);
+        if (b && status === 'approved') throw new S.WbError(403, `request ${r.id} is in ${b.name || b.id}: it is approved with its batch (Approve batch), not alone`);
+        // withdrawn = its author took the draft back: the director withdraws their own drafts; an agent's draft they reject
+        if (status === 'withdrawn' && (c.status !== 'draft' || S.requestAuthor(c) !== (fromPage ? 'director' : 'agent'))) throw new S.WbError(fromPage ? 400 : 403, `request ${r.id}: only its author withdraws a draft (${fromPage ? 'an agent\'s draft: Reject' : 'the director\'s: they decide'})`);
+        if (status === 'rejected' && !fromPage) deny(`request ${r.id} rejected (an agent withdraws its own draft)`);
+        log.push({ at, ...W, status, ...(edited && c.status === 'approved' ? { why: 'edited: approve it again' } : {}) });
+      }
+      // "allow uploading private refs" is the director's tick: recorded in the server-owned log (lib/ops/_shared.mjs privateUploadOk);
+      // an agent's save leaves it as it is, and an edit unticks it
+      const pu = edited ? false : fromPage ? r.private_upload_ok === true : c.private_upload_ok === true;
+      if (pu !== (c.private_upload_ok === true)) log.push({ at, ...(edited ? W : { by: 'director', via: 'page' }), private_upload: pu, ...(edited ? { why: 'edited: tick "allow uploading private refs" again' } : {}) });
+      out.log = log; if (pu) out.private_upload_ok = true; else delete out.private_upload_ok;
+      if (c.by !== undefined) out.by = c.by; else delete out.by;   // the author is the server's record
       return out;
     });
     // batches (D4) are the server's: written only by waves_plan / batch_act, a page save keeps the server's copy
@@ -221,7 +281,7 @@ function stampPage(name, data, cur, fromPage = true) {
     for (const [k, v] of Object.entries(data.items)) {
       if (!v || typeof v !== 'object') continue;
       const c = cur.items?.[k];
-      if (!c || c.state !== v.state) v.via = 'page'; else if (c.via) v.via = c.via; else delete v.via;
+      if (!c || c.state !== v.state) { if (!fromPage && ['approved', 'locked'].includes(v.state)) deny(`${k} ${v.state}`); v.via = W.via; } else if (c.via) v.via = c.via; else delete v.via;
     }
   }
   if (name === 'stages.json') {
@@ -229,7 +289,7 @@ function stampPage(name, data, cur, fromPage = true) {
     const was = new Map((cur.stages || []).map(x => [x?.id, x]));
     data.stages = data.stages.filter(x => x && typeof x === 'object').map(x => {
       const c = was.get(x.id), out = { ...x };
-      if (!c || c.status !== x.status) { out.updated = at; out.via = 'page'; out.updated_by = 'director'; if (x.status === 'done') out.done_by = 'director'; else delete out.done_by; }
+      if (!c || c.status !== x.status) { if (!fromPage && (x.status === 'done' || c?.status === 'done')) deny(`stage ${x.id} ${x.status === 'done' ? 'marked done' : 'moved from done'}`); out.updated = at; out.via = W.via; out.updated_by = W.by; if (x.status === 'done') out.done_by = 'director'; else delete out.done_by; }
       else { for (const k of ['done_by', 'via', 'updated_by']) { if (c[k] !== undefined) out[k] = c[k]; else delete out[k]; } }
       return out;
     });
@@ -237,36 +297,37 @@ function stampPage(name, data, cur, fromPage = true) {
   if (name === 'lyrics.json') {
     try { checkLyrics(data); } catch (e) { throw new S.WbError(400, e.message); }
     const cv = new Map((cur.versions || []).map(v => [v.id, v])), cn = new Map((cur.notes || []).map(n => [n.id, n]));
-    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, created: at, ...(v.via === 'import' && !cur.versions ? {} : { by: 'director', via: 'page' }) });
+    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, created: at, ...(v.via === 'import' && !cur.versions ? {} : { ...W }) });
     data.notes = (data.notes || []).filter(n => n && typeof n === 'object').map(n => {
       const c = cn.get(n.id), cr = new Map((c?.replies || []).map(r => [r.id, r]));
-      const replies = (Array.isArray(n.replies) ? n.replies : []).filter(r => r && typeof r === 'object').map(r => cr.get(r.id) ? { ...r, by: cr.get(r.id).by, via: cr.get(r.id).via, at: cr.get(r.id).at } : { ...r, by: 'director', via: 'page', at });
-      return c ? { ...n, by: c.by, via: c.via, at: c.at, replies } : { ...n, by: 'director', via: 'page', at, replies };
+      const replies = (Array.isArray(n.replies) ? n.replies : []).filter(r => r && typeof r === 'object').map(r => cr.get(r.id) ? { ...r, by: cr.get(r.id).by, via: cr.get(r.id).via, at: cr.get(r.id).at } : { ...r, ...W, at });
+      return c ? { ...n, by: c.by, via: c.via, at: c.at, replies } : { ...n, ...W, at, replies };
     });
   }
   if (name === 'scenes.json') {
     try { checkScenes(data); } catch (e) { throw new S.WbError(400, e.message); }
     const cv = new Map((cur.versions || []).map(v => [v.id, v])), cn = new Map((cur.notes || []).map(n => [n.id, n]));
-    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, created: at, ...(v.via === 'import' && !cur.versions ? {} : { by: 'director', via: 'page' }) });
+    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, created: at, ...(v.via === 'import' && !cur.versions ? {} : { ...W }) });
     data.notes = (data.notes || []).filter(n => n && typeof n === 'object').map(n => {
       const c = cn.get(n.id), cr = new Map((c?.replies || []).map(r => [r.id, r]));
-      const replies = (Array.isArray(n.replies) ? n.replies : []).filter(r => r && typeof r === 'object').map(r => cr.get(r.id) ? { ...r, by: cr.get(r.id).by, via: cr.get(r.id).via, at: cr.get(r.id).at } : { ...r, by: 'director', via: 'page', at });
-      return c ? { ...n, by: c.by, via: c.via, at: c.at, replies } : { ...n, by: 'director', via: 'page', at, replies };
+      const replies = (Array.isArray(n.replies) ? n.replies : []).filter(r => r && typeof r === 'object').map(r => cr.get(r.id) ? { ...r, by: cr.get(r.id).by, via: cr.get(r.id).via, at: cr.get(r.id).at } : { ...r, ...W, at });
+      return c ? { ...n, by: c.by, via: c.via, at: c.at, replies } : { ...n, ...W, at, replies };
     });
     // per-scene statuses and intake answers: a changed one is the director's (via page); an unchanged one keeps its author
     const st = {};
     for (const [k, v] of Object.entries(data.states || {})) {
       if (!v || !SCENE_STATUSES.includes(v.status)) continue;
       const c = cur.states?.[k];
-      st[k] = c && c.status === v.status ? { ...c } : { status: v.status, by: 'director', via: 'page', at };
+      if (!(c && c.status === v.status) && v.status === 'ok' && !fromPage) deny(`scene ${k} ok`);
+      st[k] = c && c.status === v.status ? { ...c } : { status: v.status, ...W, at };
     }
     data.states = st;
     const ik = {};
     for (const [k, v] of Object.entries(data.intake || {})) {
       if (!v || typeof v !== 'object') continue;
       const c = cur.intake?.[k] || {}, a = {};
-      if (typeof v.text === 'string') Object.assign(a, v.text === c.text ? { text: c.text, by: c.by, via: c.via, at: c.at } : { text: v.text.slice(0, 8000), by: 'director', via: 'page', at });
-      if (v.asked) a.asked = c.asked || { by: 'director', via: 'page', at };
+      if (typeof v.text === 'string') Object.assign(a, v.text === c.text ? { text: c.text, by: c.by, via: c.via, at: c.at } : { text: v.text.slice(0, 8000), ...W, at });
+      if (v.asked) a.asked = c.asked || { ...W, at };
       ik[k] = a;
     }
     data.intake = ik;
@@ -274,16 +335,17 @@ function stampPage(name, data, cur, fromPage = true) {
   if (name === 'breakdown.json') {
     try { checkBreakdown(data); } catch (e) { throw new S.WbError(400, e.message); }
     const cv = new Map((cur.versions || []).map(v => [v.id, v])), cn = new Map((cur.notes || []).map(n => [n.id, n]));
-    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, created: at, by: 'director', via: 'page' });
+    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, created: at, ...W });
     data.notes = (data.notes || []).filter(n => n && typeof n === 'object').map(n => {
       const c = cn.get(n.id), cr = new Map((c?.replies || []).map(r => [r.id, r]));
-      const replies = (Array.isArray(n.replies) ? n.replies : []).filter(r => r && typeof r === 'object').map(r => cr.get(r.id) ? { ...r, by: cr.get(r.id).by, via: cr.get(r.id).via, at: cr.get(r.id).at } : { ...r, by: 'director', via: 'page', at });
-      return c ? { ...n, by: c.by, via: c.via, at: c.at, replies } : { ...n, by: 'director', via: 'page', at, replies };
+      const replies = (Array.isArray(n.replies) ? n.replies : []).filter(r => r && typeof r === 'object').map(r => cr.get(r.id) ? { ...r, by: cr.get(r.id).by, via: cr.get(r.id).via, at: cr.get(r.id).at } : { ...r, ...W, at });
+      return c ? { ...n, by: c.by, via: c.via, at: c.at, replies } : { ...n, ...W, at, replies };
     });
     const st = {};
     for (const [k, v] of Object.entries(data.states || {})) {
       if (!v || !ITEM_STATUSES.includes(v.status)) continue;
-      const c = cur.states?.[k], x = c && c.status === v.status ? { ...c } : { status: v.status, by: 'director', via: 'page', at };
+      const c = cur.states?.[k], x = c && c.status === v.status ? { ...c } : { status: v.status, ...W, at };
+      if (!(c && c.status === v.status) && v.status === 'ok' && !fromPage) deny(`item ${k} ok`);
       delete x.entity_id; delete x.look_id;
       if (c?.entity_id) x.entity_id = c.entity_id; if (c?.look_id) x.look_id = c.look_id;
       st[k] = x;
@@ -296,11 +358,12 @@ function stampPage(name, data, cur, fromPage = true) {
     const cn = new Map((cur.notes || []).map(n => [n.id, n]));
     data.notes = data.notes.map(n => {
       const c = cn.get(n.id), cr = new Map((c?.replies || []).map(r => [r.id, r]));
-      const replies = (Array.isArray(n.replies) ? n.replies : []).map((r, k) => { const o = cr.get(r.id); return o ? { ...o } : { id: typeof r.id === 'string' && r.id ? r.id.slice(0, 60) : `${n.id}.${k + 1}`, text: String(r.text).slice(0, 8000), by: 'director', via: 'page', at }; });
-      if (!c) { const { legacy: _l, absorbed_in: _a, closed_via: _v, change: _c, ...x } = n; return { ...x, by: 'director', via: 'page', created: at, round: cur.round || 1, absorbed_in: null, replies, ...(n.status !== 'open' ? { closed_by: 'director', closed_via: 'page', closed_at: at } : {}) }; }
-      const out = { ...n, by: c.by, via: c.via, created: c.created, target: c.target, round: c.round, replies, text: c.via === 'agent' ? c.text : n.text };
+      const replies = (Array.isArray(n.replies) ? n.replies : []).map((r, k) => { const o = cr.get(r.id); return o ? { ...o } : { id: typeof r.id === 'string' && r.id ? r.id.slice(0, 60) : `${n.id}.${k + 1}`, text: String(r.text).slice(0, 8000), ...W, at }; });
+      if (!c) { const { legacy: _l, absorbed_in: _a, closed_via: _v, change: _c, ...x } = n; return { ...x, ...W, created: at, round: cur.round || 1, absorbed_in: null, replies, ...(n.status !== 'open' ? { closed_by: W.by, closed_via: W.via, closed_at: at } : {}) }; }
+      if (!fromPage && n.status !== c.status && c.via !== 'agent' && (n.status === 'dismissed' || c.status === 'dismissed')) deny(`note ${n.id} ${n.status === 'dismissed' ? 'dismissed' : 'reopened'} (the director's note)`);
+      const out = { ...n, by: c.by, via: c.via, created: c.created, target: c.target, round: c.round, replies, text: c.via === 'agent' || !fromPage ? c.text : n.text };
       for (const k of ['legacy', 'absorbed_in', 'reply_to', 'change']) { if (c[k] !== undefined) out[k] = c[k]; else delete out[k]; }
-      if (n.status !== c.status) { if (n.status === 'open') { delete out.closed_by; delete out.closed_via; delete out.closed_at; } else Object.assign(out, { closed_by: 'director', closed_via: 'page', closed_at: at }); }
+      if (n.status !== c.status) { if (n.status === 'open') { delete out.closed_by; delete out.closed_via; delete out.closed_at; } else Object.assign(out, { closed_by: W.by, closed_via: W.via, closed_at: at }); }
       else for (const k of ['closed_by', 'closed_via', 'closed_at']) { if (c[k] !== undefined) out[k] = c[k]; else delete out[k]; }
       return out;
     });
@@ -314,11 +377,11 @@ function stampPage(name, data, cur, fromPage = true) {
     // the picked takes (shot.clip) are written only by take_act: a new version from a page save keeps the server's picks
     const picks = new Map(((cur.versions || []).find(v => v.id === cur.current)?.shots || []).filter(x => x.clip).map(x => [x.id, x.clip]));
     const keepPicks = (shots) => shots.map(x => { const { clip: _c, ...r } = x; return picks.has(x.id) ? { ...r, clip: picks.get(x.id) } : r; });
-    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, shots: keepPicks(v.shots), created: at, ...(v.via === 'import' && !cur.versions ? {} : { by: 'director', via: 'page' }) });
+    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, shots: keepPicks(v.shots), created: at, ...(v.via === 'import' && !cur.versions ? {} : { ...W }) });
     data.notes = (data.notes || []).filter(n => n && typeof n === 'object').map(n => {
       const c = cn.get(n.id), cr = new Map((c?.replies || []).map(r => [r.id, r]));
-      const replies = (Array.isArray(n.replies) ? n.replies : []).filter(r => r && typeof r === 'object').map(r => cr.get(r.id) ? { ...r, by: cr.get(r.id).by, via: cr.get(r.id).via, at: cr.get(r.id).at } : { ...r, by: 'director', via: 'page', at });
-      return c ? { ...n, by: c.by, via: c.via, at: c.at, replies } : { ...n, by: 'director', via: 'page', at, replies };
+      const replies = (Array.isArray(n.replies) ? n.replies : []).filter(r => r && typeof r === 'object').map(r => cr.get(r.id) ? { ...r, by: cr.get(r.id).by, via: cr.get(r.id).via, at: cr.get(r.id).at } : { ...r, ...W, at });
+      return c ? { ...n, by: c.by, via: c.via, at: c.at, replies } : { ...n, ...W, at, replies };
     });
   }
   return data;
@@ -339,20 +402,22 @@ http.createServer(async (req, res) => {
       res.write(': hi\n\n'); const c = { res, project: url.searchParams.get('project') || null }; clients.add(c); req.on('close', () => clients.delete(c)); flushPendingUi(c); return;
     }
     if (p === '/api/config') return json(res, 200, { default_project: DEFAULT, media_roots: CFG.mediaRoots, private_re: CFG.privateSrc });
-    if (p === '/api/status') return json(res, 200, { ok: true, app: 'director-workbench', code: codeStatus(), default_project: DEFAULT, pages: clients.size, pages_by_project: [...clients].reduce((o, c) => (o[c.project || '*'] = (o[c.project || '*'] || 0) + 1, o), {}), data_dir: DATA_ROOT });
+    if (p === '/api/status') return json(res, 200, { ok: true, app: 'director-workbench', version: VERSION, code: codeStatus(), default_project: DEFAULT, pages: clients.size, pages_by_project: [...clients].reduce((o, c) => (o[c.project || '*'] = (o[c.project || '*'] || 0) + 1, o), {}), data_dir: DATA_ROOT });
     if (p === '/api/projects' && req.method === 'GET') return json(res, 200, S.listProjects());
     if (p === '/api/snapshots' && req.method === 'GET') return json(res, 200, S.listSnapshots(project));
     if (p.startsWith('/api/') && req.method === 'POST') {
       // CSRF: JSON only (a cross-site form or no-preflight fetch cannot send it), no foreign Origin, the per-run token
       if (req.headers.origin && !originOk(req.headers.origin)) return json(res, 403, { error: 'foreign Origin' });
       if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) return json(res, 415, { error: 'content-type must be application/json' });
-      if (!tokenOk(req.headers['x-wb-token'])) return json(res, 403, { error: 'missing or wrong x-wb-token (reload the page; tools read it from <meta name="wb-token"> in /index.html)' });
+      if (!tokenOk(req.headers['x-wb-token']) && !agentTokenOk(req.headers['x-wb-agent-token'])) return json(res, 403, { error: 'missing or wrong token: the page sends x-wb-token (reload the page); agents send x-wb-agent-token from <data folder>/.wb-agent-token (the MCP server reads it)' });
       if (!isLocal(req) && !CFG.allowRemoteOps && p !== '/api/ui/ack') return json(res, 403, { error: 'writes are local only (set allow_remote_ops in workbench.config.json)' });
       let raw; try { raw = await readBody(req, bodyLimit(p)); } catch (e) { if (e.code === 413) res.setHeader('connection', 'close'); throw e; }
       const body = raw ? JSON.parse(raw) : {};
       if (!body || typeof body !== 'object' || Array.isArray(body)) return json(res, 400, { error: 'body must be a JSON object' });
+      // who writes (S9): the page (the director) or an agent; every stamp, page-only act and lock check follows it
+      const fromPage = isPage(req);
+      res.setHeader('x-wb-client', fromPage ? 'page' : 'agent');
       // a project locked for render (Final stage, page only) refuses every write that is not the page's own: 409 + why
-      const fromPage = !!(req.headers.origin && originOk(req.headers.origin));
       if (!fromPage && (p.startsWith('/api/save/') || p === '/api/restore')) S.lockGate(project, p.startsWith('/api/save/') ? 'save' : 'snapshot_restore');
       if (!fromPage && p === '/api/projects/delete' && S.validId(body.id)) S.lockGate(body.id, 'project_delete');
       if (p.startsWith('/api/save/')) {
@@ -379,17 +444,19 @@ http.createServer(async (req, res) => {
         const name = p.slice('/api/op/'.length);
         if (!Object.hasOwn(S.ops, name)) return json(res, 404, { error: 'no such op: ' + name });
         // who drew a sketch (provenance, not a permission): a browser on this origin is the page, anything else an agent
-        if (name === 'sketch_save') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
+        // S9: whatever the op, a body that claims via "page" is the page's only when the request is the page's
+        if (!fromPage && body.via === 'page') body.via = 'agent';
+        if (name === 'sketch_save' || name === 'request_run') body.via = fromPage ? 'page' : 'agent';   // provenance (who started a run / drew)
         // only the page turns a breakdown item into an entity: a browser request from this origin (the MCP server has no
         // such tool, and a request without the page's Origin is the agent surface and refused by the op)
-        if (name === 'breakdown_promote') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
+        if (name === 'breakdown_promote') body.via = fromPage ? 'page' : 'agent';
         // stages 4 and 5: the director's acts (base, keep / branch / revert, approving the root or a variant, the variant
         // a scene uses) and reference uploads are the page's only, the same way
-        if (name === 'character_act' || name === 'asset_act' || name === 'ref_upload') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
+        if (name === 'character_act' || name === 'asset_act' || name === 'ref_upload') body.via = fromPage ? 'page' : 'agent';
         // review rounds and revisions: sending a round, closing and restoring a revision are the director's (page only)
-        if (name === 'round_send' || name === 'revision_close' || name === 'revision_restore') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
+        if (name === 'round_send' || name === 'revision_close' || name === 'revision_restore') body.via = fromPage ? 'page' : 'agent';
         // proposals: a pick / mix / dismiss is the director's (page only); the local generator's provenance (not a permission)
-        if (name === 'proposal_act' || name === 'proposals_local' || name === 'proposals_add') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
+        if (name === 'proposal_act' || name === 'proposals_local' || name === 'proposals_add') body.via = fromPage ? 'page' : 'agent';
         // stage 7: locking / unlocking the project for render are the director's (page only)
         if (name === 'final_lock' || name === 'final_unlock') body.via = fromPage ? 'page' : 'agent';
         // take selection (D6): picking a take, its in / out and alternatives are the director's (page only)
@@ -400,7 +467,8 @@ http.createServer(async (req, res) => {
         if (name === 'batch_act' || name === 'jobbooks_import' || name === 'waves_plan') body.via = fromPage ? 'page' : 'agent';
         if (!fromPage) S.lockGate(project, name, body);   // a locked project refuses every agent write, proposals included
         delete body.import_ok;   // only a local script calling lib/store.mjs directly may import approved looks
-        return json(res, 200, await S.ops[name](project, body));
+        try { return json(res, 200, await S.ops[name](project, body)); }
+        catch (e) { if (e.code === 403 && !fromPage) e.message += ' (an agent\'s request: no page Origin + Sec-Fetch-Site: same-origin; agents use the MCP tools, the director acts in the open page)'; throw e; }
       }
       if (p === '/api/projects/new') return json(res, 200, body.lyrics != null || body.song ? await S.createGuidedProject(body) : S.createProject(body.id, body.title));
       if (p === '/api/projects/duplicate') return json(res, 200, S.duplicateProject(body.from || project, body.to, !!body.reset_state));

@@ -7,7 +7,9 @@
 // cards (hover scrubs the video) -> the director drags the in / out handles (snapped to frames), writes a note, picks ->
 // storyboard.json gets a NEW version with shot.clip (approvals untouched) -> picks the agent's proposal in one click ->
 // marks an alternative for a song time -> A/B in the dock -> the agent's shots_update keeps the pick -> the timeline clip
-// column shows the pick with in / out -> Final counts picked takes -> Review › Takes per request. Screenshots v16_*.png.
+// column shows the pick with in / out -> Final counts picked takes -> Review › Takes per request (review #2 U10: the
+// editor beside the card grid, using the width; no "#?" on a card without a take number) -> Review › Compare with no
+// revision uses the pane for its explanation (no empty right half). Screenshots v16_*.png.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -17,7 +19,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const WB = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
-const freePort = () => new Promise(ok => { const s = net.createServer().listen(0, () => { const p = s.address().port; s.close(() => ok(p)); }); });
+const freePort = () => new Promise(ok => { const s = net.createServer().listen(process.env.WB_VERIFY_PORT ? Number(process.env.WB_VERIFY_PORT) + ((globalThis.__wbVerifyPortN = (globalThis.__wbVerifyPortN ?? -1) + 1) % 10) : 0, () => { const p = s.address().port; s.close(() => ok(p)); }); });
 const sdk = (p) => import(pathToFileURL(path.join(WB, 'node_modules', '@modelcontextprotocol', 'sdk', 'dist', 'esm', ...p.split('/'))).href);
 // a placeholder take: a lavfi pattern, 4 s at 24 fps, 320x180, VP8 in webm (plays in any Chromium build)
 const take = (file, src) => { fs.mkdirSync(path.dirname(file), { recursive: true }); return spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', `${src}=size=320x180:rate=24:duration=4`, '-c:v', 'libvpx', '-b:v', '300k', '-pix_fmt', 'yuv420p', file]).status === 0; };
@@ -45,7 +47,7 @@ export async function verifyTakes({ browser, OUT }) {
   try {
     await new Promise((ok, bad) => { srv.stdout.once('data', ok); srv.once('exit', (c) => bad(new Error('server exited ' + c))); });
     const TOKEN = /<meta name="wb-token" content="([^"]+)">/.exec(await (await fetch(`${BASE}/?project=${P}`)).text())?.[1];
-    const call = async (name, body, page = false) => { const r = await fetch(`${BASE}/api/op/${name}?project=${P}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-wb-token': TOKEN, ...(page ? { origin: BASE } : {}) }, body: JSON.stringify(body) }); return { status: r.status, body: await r.json().catch(() => null) }; };
+    const call = async (name, body, page = false) => { const r = await fetch(`${BASE}/api/op/${name}?project=${P}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-wb-token': TOKEN, ...(page ? { origin: BASE, 'sec-fetch-site': 'same-origin' } : {}) }, body: JSON.stringify(body) }); return { status: r.status, body: await r.json().catch(() => null) }; };
     const { Client } = await sdk('client/index.js'), { StdioClientTransport } = await sdk('client/stdio.js');
     client = new Client({ name: 'verify-takes', version: '1' });
     await client.connect(new StdioClientTransport({ command: process.execPath, args: [path.join(WB, 'mcp', 'server.mjs')], env: { ...env, WORKBENCH_URL: BASE, WORKBENCH_PROJECT: P }, stderr: 'pipe' }));
@@ -191,6 +193,16 @@ export async function verifyTakes({ browser, OUT }) {
     const tv = await pg.evaluate(() => ({ rows: [...document.querySelectorAll('.tkview .tkli')].map(e => e.dataset.k), cards: document.querySelectorAll('.tkview .tkmain .tkc').length, picked: document.querySelector('.tkview .tkpkd')?.textContent || '' }));
     await shot('v16_takes_view', '.tkview');
     check('Review › Takes lists the requests with outputs and the shots with takes; a shot request opens the same takes panel (the pick shown)', tv.rows.includes('r:' + RQ) && tv.rows.includes('s:' + SHOT) && tv.cards >= 4 && /rv16shot\.2/.test(tv.picked), tv);
+    // U10: open a take: the editor sits BESIDE the cards (to their right, top-aligned), and the view uses the width
+    await pg.evaluate(() => document.querySelector('.tkview .tkmain .tkc .tkl')?.click()); await until(() => !!document.querySelector('.tkview .tked'));
+    const lay = await pg.evaluate(() => { const c = document.querySelector('.tkview .tkcol').getBoundingClientRect(), e = document.querySelector('.tkview .tked').getBoundingClientRect(), m = document.querySelector('.tkview .tkmain').getBoundingClientRect();
+      return { colR: Math.round(c.right), edL: Math.round(e.left), edTop: Math.round(e.top - c.top), used: Math.round((e.right - c.left) / m.width * 100), noQ: ![...document.querySelectorAll('.tkview .tkc .tkl')].some(l => l.textContent.includes('#?')) }; });
+    await shot('v16_takes_view_editor', '.tkview');
+    check('U10 Review › Takes: the in / out editor is beside the card grid (right of it, top-aligned) and the two use ≥ 85 % of the pane; no card reads "#?"', lay.edL >= lay.colR && Math.abs(lay.edTop) <= 30 && lay.used >= 85 && lay.noQ, lay);
+    await pg.evaluate(() => window.WB.app.show('compare')); await until(() => !!document.querySelector('.cmp'));
+    await wait(300);
+    const cmp = await pg.evaluate(() => { const el = document.querySelector('.cmp'), l = el.querySelector('.cmpl').getBoundingClientRect(), r = el.querySelector('.cmpr'); return { none: el.classList.contains('none'), lw: Math.round(l.width), pane: Math.round(el.getBoundingClientRect().width), right: r.offsetParent !== null, steps: el.querySelectorAll('.cmpl ol li').length }; });
+    check('U10 Review › Compare with no revision: the explanation takes the pane (no empty right half) and says how a revision comes about', cmp.none && !cmp.right && cmp.lw >= cmp.pane - 2 && cmp.steps === 3, cmp);
   } catch (e) { console.error('v16 aborted:', e.stack || e); checks.aborted = { pass: false, detail: String(e.message || e) }; }
   finally {
     await client?.close().catch(() => {});

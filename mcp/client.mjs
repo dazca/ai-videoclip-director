@@ -9,7 +9,7 @@
 //   node <workbench>/mcp/client.mjs wait_for '{"request":"r123","until":["approved","rejected"],"timeout_s":1800}'
 // The JSON may also come from a file (@args.json) or stdin (-). Output: the tool's text (JSON for most tools); a
 // "warning: ..." block (a stale server, an op done offline) goes to stderr. Env as for the server (WORKBENCH_URL,
-// WORKBENCH_DATA, WORKBENCH_PROJECT, WORKBENCH_OFFLINE, WB_TOKEN).
+// WORKBENCH_DATA, WORKBENCH_PROJECT, WORKBENCH_OFFLINE, WB_AGENT_TOKEN).
 // From another ESM script, import the SDK through a file URL (a bare specifier resolves only inside the workbench):
 //   const { Client } = await import(pathToFileURL(path.join(WB, 'node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js')).href)
 import fs from 'node:fs';

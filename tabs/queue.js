@@ -117,6 +117,10 @@ export default {
       const tk = x.takes ? ` · take ${Math.min((x.take ?? 0) + 1, x.takes)}/${x.takes}` : '';
       return `${x.phase === 'running' && x.s != null ? 'generating' : PHASE[x.phase] || x.phase}${x.s != null ? ` · ${x.s} s` : ''}${tk}${x.error || x.why ? ': ' + (x.error || x.why) : ''}`;
     };
+    // what a done request cost: "spent" only for money that is recorded or counted; a history request's estimate (or a
+    // falgen ledger row the project does not count) is "est. (not counted)" (lib/ops/batches.mjs history.cost)
+    const counted = (c) => c?.counted === true || ['recorded', 'counted'].includes(c?.status);
+    const costLbl = (r) => { if (!B.isHistory(r)) return `${money(r.actual_cost_usd)} spent`; const c = r.history.cost || {}; return counted(c) ? `${money(c.usd ?? r.actual_cost_usd)} spent` : c.usd != null ? `${money(c.usd)} est. (not counted)` : 'cost unknown'; };
     const actions = (r) => {
       const gen = genOf(r), runLbl = gen === 'openwith' ? 'Export prompt pack' : `Run · ${money(r.est_cost)}`;
       if (r.status === 'draft') return `<button data-x="approve" class="pri" title="approve: it may then run and spend up to its estimate">Approve</button>${author(r) === 'director' ? '<button data-x="withdraw" title="your own draft: take it back (not a rejection)">Withdraw</button>' : '<button data-x="reject">Reject</button>'}`;
@@ -125,7 +129,7 @@ export default {
       if (r.status === 'running' && r.handoff) return `<span class="qprog">handed off: pack in <code>${esc(r.handoff.pack || '')}</code>; save the images in <code>${esc(r.handoff.results || '')}</code></span><button data-x="copy">Copy prompt</button><button data-x="run" class="pri">Collect results</button>`;
       if (r.status === 'failed') return `<span class="qwhy" title="${esc(r.why || '')}">✕ ${esc(String(r.why || 'failed').slice(0, 140))}</span><button data-x="run" class="pri" title="run again (outputs that exist are skipped; a submitted job is polled, not paid twice)">Retry · ${money(r.est_cost)}</button><button data-x="reject">Reject</button>`;
       if (r.status === 'done' && r.retaking) return `<span class="qprog">⟳ retake ${esc((r.retaking.takes || []).map(t => t + 1).join(', '))}: ${esc(progress(r))}</span>`;
-      if (r.status === 'done') { const L = r.linked, tf = r.takes_failed || [], per = (Number(r.est_cost) || 0) / Math.max(1, r.takes || 1); return `${tf.length ? `<button data-x="retake" class="pri" title="run only the failed take${tf.length > 1 ? 's' : ''} again (the done takes are kept and not paid again); within the approved estimate, the cap checked">Retry take ${tf.map(t => t + 1).join(', ')} · ${money(per * tf.length)}</button>` : ''}<span class="qdone">✓ ${money(r.actual_cost_usd)} spent${tf.length ? ` · take ${tf.map(t => t + 1).join(', ')} failed` : ''}${L ? ` · ${L.nodes?.length ? `node${L.nodes.length > 1 ? 's' : ''} ${esc(L.nodes.join(', '))}` : ''}${L.proposals?.length ? ` proposed ${esc(L.proposals.join(', '))}` : ''} in ${esc(L.id)} ${esc(L.tree || '')}: keep or pick` : ''}</span>${L ? '<button data-x="stage" title="keep or pick them in the stage">Open in stage</button>' : ''}`; }
+      if (r.status === 'done') { const L = r.linked, tf = r.takes_failed || [], per = (Number(r.est_cost) || 0) / Math.max(1, r.takes || 1); return `${tf.length ? `<button data-x="retake" class="pri" title="run only the failed take${tf.length > 1 ? 's' : ''} again (the done takes are kept and not paid again); within the approved estimate, the cap checked">Retry take ${tf.map(t => t + 1).join(', ')} · ${money(per * tf.length)}</button>` : ''}<span class="qdone">✓ ${costLbl(r)}${tf.length ? ` · take ${tf.map(t => t + 1).join(', ')} failed` : ''}${L ? ` · ${L.nodes?.length ? `node${L.nodes.length > 1 ? 's' : ''} ${esc(L.nodes.join(', '))}` : ''}${L.proposals?.length ? ` proposed ${esc(L.proposals.join(', '))}` : ''} in ${esc(L.id)} ${esc(L.tree || '')}: keep or pick` : ''}</span>${L ? '<button data-x="stage" title="keep or pick them in the stage">Open in stage</button>' : ''}`; }
       if (r.status === 'rejected') return `<button data-x="redraft">Back to draft</button>`;
       if (r.status === 'withdrawn') return `<span class="qwhy" title="${esc(r.why || '')}">withdrawn by ${author(r) === 'director' ? 'you' : 'the agent'}${r.superseded_by?.length ? ' · superseded by ' + esc(r.superseded_by.join(', ')) : ''}${r.why ? ': ' + esc(String(r.why).slice(0, 120)) : ''}</span><button data-x="redraft">Back to draft</button>`;
       return '';
@@ -151,28 +155,32 @@ export default {
         <div class="qacts"><button data-q="runall" class="pri"${approved.length ? '' : ' disabled'} title="run every approved request, batch by batch (up to 2 at once; the cap is checked for each; a locked batch never runs)">Run all approved (${approved.length}) · ${money(apUsd)}</button>
         ${sel.size ? `<span class="qselt">${sel.size} selected · ${money(selUsd)}</span><button data-q="approvesel" class="pri">Approve selected</button><button data-q="rejectsel">Reject selected</button>` : '<span class="dim">tick drafts to approve or reject several at once</span>'}
         <span class="dim">· nothing runs or is paid until you approve it; Run uses the generator in Settings › Generator · right-click a shot / clip / cast chip / card to add a request</span></div>
-        ${batches.length ? wavesHead(doc, shotsNow) + batches.map(b => batchHtml(b, doc, shotsNow, shown)).join('') : ''}
-        ${hist.length ? histHtml(hist, shotsNow, shown) : ''}
-        ${batches.length || hist.length ? `<div class="qgrp"><b>Not in a batch</b> <span class="dim">${loose.length} request${loose.length === 1 ? '' : 's'}</span></div>` : ''}
-        ${loose.length ? table(shown(loose).slice().reverse()) : items.length ? '' : '<p class="dim">no requests yet</p>'}`;
+        ${batches.length ? wavesHead(doc, shotsNow) : ''}
+        ${items.length ? `<table class="tbl qtbl">${HEAD}
+          ${batches.map(b => batchHtml(b, doc, shotsNow, shown)).join('')}
+          ${hist.length ? histHtml(hist, shotsNow, shown) : ''}
+          ${loose.length ? `<tbody class="qloose">${batches.length || hist.length ? `<tr class="qgh"><td colspan="${NCOL}"><div class="qgrp"><b>Not in a batch</b> <span class="dim">${loose.length} request${loose.length === 1 ? '' : 's'}</span></div></td></tr>` : ''}${rowsHtml(shown(loose).slice().reverse())}</tbody>` : ''}</table>` : '<p class="dim">no requests yet</p>'}`;
     };
-    // a list of requests as the queue table
-    const table = (list, b = null) => `<table class="tbl"><tr><th></th><th>status</th><th>kind</th><th>target</th><th>prompt</th><th>$ est</th><th>refs → outputs</th><th>at</th><th>actions</th></tr>
-        ${list.map(r => { const t = timeOf(r.target); return `<tr data-id="${esc(r.id)}" data-sel="request:${esc(r.id)}" class="q-${esc(r.status)}${(r.warnings || []).length ? ' warn' : ''}">
+    // ONE table for every group (the waves, the history, the requests in no batch): the same columns all the way down,
+    // each group a header row; a prompt is one line until it has the focus
+    const NCOL = 9;
+    const HEAD = `<colgroup><col class="qc-tick"><col class="qc-st"><col class="qc-kind"><col class="qc-tgt"><col class="qc-pr"><col class="qc-est"><col class="qc-refs"><col class="qc-at"><col class="qc-act"></colgroup>
+      <thead><tr><th></th><th>status</th><th>kind</th><th>target</th><th>prompt</th><th>$ est</th><th>refs → outputs</th><th>at</th><th>actions</th></tr></thead>`;
+    const rowsHtml = (list, b = null) => `${list.map(r => { const t = timeOf(r.target); return `<tr data-id="${esc(r.id)}" data-sel="request:${esc(r.id)}" class="q-${esc(r.status)}${(r.warnings || []).length ? ' warn' : ''}">
           <td>${r.status === 'draft' && !b ? `<input type="checkbox" data-x="pick"${sel.has(r.id) ? ' checked' : ''} title="select">` : ''}</td>
           <td><span class="chip ${CLS[r.status] || ''}"${r.status === 'withdrawn' ? ' title="its author took it back (not a rejection by the director)"' : ''}>${esc(r.status)}</span>${B.isHistory(r) ? '<div class="dim qhtag" title="imported from a job book: never run again">history</div>' : ''}</td><td>${esc(r.kind)}${r.recipe ? ' <span class="qrec" title="built from the photoreal recipe (its blocks are stored with the request)">recipe</span>' : ''}<div class="dim">${esc(B.isHistory(r) ? r.history.book : genOf(r))}</div>${r.video ? `<div class="dim qvid" title="${esc(PRICES[r.video.model]?.name || r.video.model)}">${esc(r.video.model)} · ${esc(r.video.seconds)} s${r.video.end ? ' · start→end' : ''}${r.video.ref_video ? ' · ref video' : ''}</div>` : ''}</td>
           <td>${t != null ? `<a data-t="${Number(t) || 0}">${esc(r.target)} ${fmt(t)}</a>` : esc(r.target || '')}</td>
-          <td><textarea data-x="prompt" rows="3" ${['draft', 'approved'].includes(r.status) ? '' : 'readonly'}>${esc(r.prompt)}</textarea>${(r.warnings || []).length ? `<div class="chreqw">${r.warnings.map(w => `<span>⚠ ${esc(w)}</span>`).join('')}</div>` : ''}</td>
+          <td class="qp"><textarea data-x="prompt" rows="1" title="${esc(String(r.prompt || '').slice(0, 600))}" ${['draft', 'approved'].includes(r.status) ? '' : 'readonly'}>${esc(r.prompt)}</textarea>${(r.warnings || []).length ? `<div class="chreqw">${r.warnings.map(w => `<span>⚠ ${esc(w)}</span>`).join('')}</div>` : ''}</td>
           <td><input data-x="cost" type="number" step="0.01" min="0" value="${Number(r.est_cost) || 0}" style="width:4.5em"${['draft', 'approved'].includes(r.status) ? '' : ' disabled'}>${r.takes > 1 ? `<div class="dim qtakes" title="the estimate covers every take">${r.takes} takes · ${money((Number(r.est_cost) || 0) / r.takes)} each</div>` : ''}</td>
           <td class="refs">${thumbs(r.refs || [], '', refTags(r))}${(r.outputs || []).length ? `<span class="qarrow">→</span>${thumbs(r.outputs, 'out')}` : ''}${privBox(r)}</td>
           <td class="dim">${esc((r.at || '').replace('T', ' ').slice(5, 16))}</td>
-          <td class="qbtns">${b ? batchActions(r, b) : B.isHistory(r) ? histActions(r) : actions(r)}</td></tr>`; }).join('')}</table>`;
+          <td class="qbtns">${b ? batchActions(r, b) : B.isHistory(r) ? histActions(r) : actions(r)}</td></tr>`; }).join('')}`;
     // ---------------------------------------------------------------- batches (D4)
     const open = new Map();   // batch id -> expanded? (default: open unless done)
     let confirming = null;    // the batch whose "Approve batch" confirm is showing
     const isOpen = (id, state) => open.has(id) ? open.get(id) : state !== 'done';
     const pctOf = (x, c) => (c ? `${Math.round(x / c * 100)}%` : 'no cap');
-    const statsLine = (st, label = 'take ratio') => `<div class="qstats" title="takes made ÷ shots that use one of them; what they cost ÷ the seconds of them in the film">${esc(label)}: <b>${st.takes}</b> take${st.takes === 1 ? '' : 's'} for ${st.shots} shot${st.shots === 1 ? '' : 's'} · <b>${st.used_shots}</b> used · <b>${st.takes_per_used_shot ?? '–'}</b> takes per used shot · ${money(st.spent_usd)} spent · ${st.used_s} s used · <b>${st.usd_per_used_s != null ? '$' + st.usd_per_used_s.toFixed(3) : '–'}</b> per used second</div>`;
+    const statsLine = (st, label = 'take ratio', money$ = null) => `<div class="qstats" title="takes made ÷ shots that use one of them; what they cost ÷ the seconds of them in the film">${esc(label)}: <b>${st.takes}</b> take${st.takes === 1 ? '' : 's'} for ${st.shots} shot${st.shots === 1 ? '' : 's'} · <b>${st.used_shots}</b> used · <b>${st.takes_per_used_shot ?? '–'}</b> takes per used shot · ${money$ ?? `${money(st.spent_usd)} spent`} · ${st.used_s} s used · <b>${st.usd_per_used_s != null ? '$' + st.usd_per_used_s.toFixed(3) : '–'}</b> per used second</div>`;
     const wavesHead = (doc, shots) => {
       const ob = B.observed(doc, shots), rest = B.reestimate(doc, shots);
       return `<div class="qwaveshead"><b>Waves</b> <span class="dim">approve a whole batch; the next one unlocks when you mark the one before reviewed (its takes picked or rejected)</span>
@@ -183,7 +191,7 @@ export default {
       const g = B.gateState(b, doc), T = B.batchTotals(b, doc), R = B.requestsOf(b, doc), op = isOpen(b.id, g.state), V = B.verdicts(b, doc, shots);
       const prev = b.gate?.after ? B.batchById(doc, b.gate.after) : null, und = V.filter(v => v.verdict === 'pending' || v.verdict === 'not run');
       const runnable = R.filter(r => ['approved', 'failed'].includes(r.status)), runUsd = runnable.reduce((s, r) => s + (Number(r.est_cost) || 0), 0);
-      const btns = g.state === 'locked' ? `<span class="qlock" title="${esc(g.why)}">🔒 waits for ${esc(prev?.name || b.gate.after)}</span>`
+      const btns = g.state === 'locked' ? `<span class="qlock" title="${esc(g.why)}">🔒 waits for ${esc(prev?.name || b.gate.after)} to be reviewed</span>`
         : g.state === 'done' ? '<span class="qdone">✓ reviewed</span>'
         : g.state === 'review' ? `<button data-q="breview" class="pri"${und.length ? ' disabled' : ''} title="${und.length ? esc('pick a take or reject the takes of ' + und.map(v => v.id).join(', ')) : 'every request decided: unlock the next wave'}">Mark reviewed${und.length ? ` (${und.length} to decide)` : ''}</button>`
         : b.status === 'draft' ? `<button data-q="bapprove" class="pri" title="approve every request of this batch at once">Approve batch · ${money(T.drafts_usd)}</button><button data-q="bdismiss" title="drop the batch (its requests stay drafts)">Dismiss</button>`
@@ -191,21 +199,22 @@ export default {
       const c = Number(store.costs?.cap_usd) || 0, sp = (store.costs?.items || []).reduce((s, x) => s + (Number(x.usd) || 0), 0), cm = (store.requests?.items || []).filter(r => ['approved', 'queued', 'running'].includes(r.status)).reduce((s, r) => s + (Number(r.est_cost) || 0), 0), after = sp + cm + T.drafts_usd;
       const conf = confirming === b.id && b.status === 'draft' ? `<div class="qconfirm${after > c + 1e-9 ? ' over' : ''}">Approve <b>${esc(b.name)}</b>: ${R.filter(r => r.status === 'draft').length} request${R.length === 1 ? '' : 's'} · <b>${money(T.drafts_usd)}</b> · cap: spent ${money(sp)} + committed ${money(cm)} + this ${money(T.drafts_usd)} = <b>${money(after)}</b> of ${money(c)} (${pctOf(after, c)})${after > c + 1e-9 ? ' · <b>over the cap</b>: queueing will be refused' : ''} · batch cap ${money(T.drafts_usd)}
         <button data-q="bconfirm" class="pri">Approve · ${money(T.drafts_usd)}</button><button data-q="bcancel">Cancel</button></div>` : '';
-      return `<div class="qbatch st-${g.state}" data-b="${esc(b.id)}"><div class="qbh"><a data-q="btog" class="qtw">${op ? '▾' : '▸'}</a><b>${esc(b.name || b.id)}</b><span class="chip gate gate-${g.state}" title="${esc(g.why)}">${g.state}</span>
+      return `<tbody class="qbatch st-${g.state}" data-b="${esc(b.id)}"><tr class="qgh"><td colspan="${NCOL}"><div class="qbh"><a data-q="btog" class="qtw">${op ? '▾' : '▸'}</a><b>${esc(b.name || b.id)}</b><span class="chip gate gate-${g.state}" title="${esc(g.why)}">${g.state}</span>
         <span class="qbn">${T.n} request${T.n === 1 ? '' : 's'} · ${T.shots} shot${T.shots === 1 ? '' : 's'} · est ${money(T.est_usd)}${T.spent_usd ? ` · spent ${money(T.spent_usd)}` : ''}${T.max_usd != null ? ` · batch cap ${money(T.max_usd)}` : ''}</span>
-        <span class="dim qbg">${prev ? `gate: after ${esc(prev.name || prev.id)} is reviewed` : 'first wave'}${b.via === 'agent' ? ' · proposed by the agent' : ''}</span><span class="sp"></span>${btns}</div>
-        ${conf}${['review', 'done'].includes(g.state) || T.spent_usd ? statsLine(B.batchStats(b, doc, shots)) : ''}
-        ${op ? table(shown(R), b) : ''}</div>`;
+        <span class="dim qbg">${[prev ? '' : 'first wave', b.via === 'agent' ? 'proposed by the agent' : ''].filter(Boolean).join(' · ')}</span><span class="sp"></span>${btns}</div>
+        ${conf}${['review', 'done'].includes(g.state) || T.spent_usd ? statsLine(B.batchStats(b, doc, shots)) : ''}</td></tr>
+        ${op ? rowsHtml(shown(R), b) : ''}</tbody>`;
     };
     const histHtml = (hist, shots, shown) => {
       const op = open.has('_hist') ? open.get('_hist') : false, st = B.takeStats(hist, shots), books = [...new Set(hist.map(r => r.history.book))];
-      return `<div class="qbatch qhist" data-b="_hist"><div class="qbh"><a data-q="btog" class="qtw">${op ? '▾' : '▸'}</a><b>History · job books</b><span class="chip gate gate-done">history</span><span class="qbn">${hist.length} request${hist.length === 1 ? '' : 's'} · ${esc(books.join(', '))}</span><span class="dim qbg">imported: done, never run again, no new cost</span></div>
-        ${statsLine(st, 'job books')}${op ? table(shown(hist).slice().reverse()) : ''}</div>`;
+      const cs = hist.map(r => r.history?.cost || {}), inL = cs.filter(counted).reduce((a, c) => a + (Number(c.usd) || 0), 0), notC = cs.filter(c => !counted(c)).reduce((a, c) => a + (Number(c.usd) || 0), 0);
+      return `<tbody class="qbatch qhist" data-b="_hist"><tr class="qgh"><td colspan="${NCOL}"><div class="qbh"><a data-q="btog" class="qtw">${op ? '▾' : '▸'}</a><b>History · job books</b><span class="chip gate gate-done">history</span><span class="qbn">${hist.length} request${hist.length === 1 ? '' : 's'} · ${esc(books.join(', '))}</span><span class="dim qbg">imported: done, never run again, no new cost</span></div>
+        ${statsLine(st, 'job books', `${money(inL)} spent${notC ? ` · ${money(notC)} est. (not counted)` : ''}`)}</td></tr>${op ? rowsHtml(shown(hist).slice().reverse()) : ''}</tbody>`;
     };
-    const histActions = (r) => { const c = r.history?.cost || {}; return `<span class="qdone" title="${esc(c.why || '')}">✓ history · ${(r.outputs || []).length}/${r.history.files ?? '?'} outputs registered · ${c.usd != null ? money(c.usd) : '$?'} ${c.counted ? '(in the ledger)' : c.status === 'not_counted' ? '(not counted yet)' : ''}</span>`; };
+    const histActions = (r) => { const c = r.history?.cost || {}; return `<span class="qdone${counted(c) ? '' : ' est'}" title="${esc(c.why || '')}">✓ history · ${(r.outputs || []).length}/${r.history.files ?? '?'} outputs registered · ${costLbl(r)}${counted(c) ? ' (in the ledger)' : ''}</span>`; };
     // a request inside a batch: no per-row approval (the batch is approved as a whole); a done one gets its verdict
     const batchActions = (r, b) => {
-      if (r.status === 'draft') return '<span class="dim">approved with its batch</span>';
+      if (r.status === 'draft') return B.gateState(b, store.requests).state === 'locked' ? '<span class="dim" title="no approval per request in a batch: its batch is approved as a whole once its gate opens">approve with the batch ↑ (once it unlocks)</span>' : '<span class="dim" title="no approval per request in a batch: approve the batch as a whole (its header)">approve with the batch ↑</span>';
       const v = B.verdicts(b, store.requests, SB.boardShots(store.board)).find(x => x.id === r.id), undo = b.status === 'reviewed' ? '' : '<a data-x="vundo">undo</a>';
       const vb = r.status !== 'done' || !v ? '' : v.verdict === 'picked' ? `<span class="qverd ok" title="the shot uses take ${v.clip?.take ?? '?'}">✓ take picked</span>`
         : v.verdict === 'rejected' ? `<span class="qverd no">✕ takes rejected</span>${undo}` : v.verdict === 'kept' ? `<span class="qverd ok">✓ kept</span>${undo}`

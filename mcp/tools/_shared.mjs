@@ -34,22 +34,25 @@ export async function server() {
 }
 // the next server() asks the server again instead of the answer cached for 2 s (the status tool)
 export const recheckServer = () => { checkedAt = 0; };
-// the server accepts a write only with its per-run token, which it puts in the page it serves
-let token = process.env.WB_TOKEN || null;
+// S9: the server accepts an agent's write with the AGENT token (header x-wb-agent-token), which it keeps in
+// <data folder>/.wb-agent-token (or env WB_AGENT_TOKEN). The server can then always tell this MCP server from the page:
+// whatever a tool sends, it is an agent (never the director). The data folder is the one the server reports
+// (/api/status data_dir), else this process's (WORKBENCH_DATA). The page's token is never read.
+let token = process.env.WB_AGENT_TOKEN || null;
 async function getToken(fresh = false) {
   if (token && !fresh) return token;
-  const html = await (await fetch(`${BASE_URL}/index.html?project=_`, { signal: AbortSignal.timeout(3000) })).text();
-  token = /<meta name="wb-token" content="([^"]+)">/.exec(html)?.[1] || null;
-  if (!token) throw new S.WbError(503, `no write token in ${BASE_URL}/index.html (is it the workbench server?)`);
-  return token;
+  const dirs = [...new Set([up?.data_dir, S.DATA_ROOT].filter(Boolean))];
+  for (const d of dirs) { try { const t = fs.readFileSync(path.join(d, '.wb-agent-token'), 'utf8').trim(); if (t) { token = t; return token; } } catch (e) { /* next */ } }
+  throw new S.WbError(503, `no agent token: ${dirs.map(d => path.join(d, '.wb-agent-token')).join(' or ')} not found (the workbench server writes it at start; or set WB_AGENT_TOKEN)`);
 }
 export async function http(method, p, project, body, timeout = 15000) {
   const u = `${BASE_URL}${p}${p.includes('?') ? '&' : '?'}project=${encodeURIComponent(project)}`;
+  if (body !== undefined && !up) await server();   // its data_dir: where the agent token is
   const go = async (fresh) => fetch(u, { method, signal: AbortSignal.timeout(timeout),
-    ...(body !== undefined ? { headers: { 'content-type': 'application/json', 'x-wb-token': await getToken(fresh) }, body: JSON.stringify(body) } : {}) });
+    ...(body !== undefined ? { headers: { 'content-type': 'application/json', 'x-wb-agent-token': await getToken(fresh) }, body: JSON.stringify(body) } : {}) });
   let r = await go(false), j = await r.json().catch(() => ({}));
   checkServerCode(r.headers.get('x-wb-code'));
-  if (r.status === 403 && body !== undefined && /x-wb-token/.test(j.error || '') && !process.env.WB_TOKEN) { r = await go(true); j = await r.json().catch(() => ({})); }   // the server restarted: new token
+  if (r.status === 403 && body !== undefined && /wrong token/.test(j.error || '') && !process.env.WB_AGENT_TOKEN) { r = await go(true); j = await r.json().catch(() => ({})); }   // the token file changed: read it again
   if (!r.ok) throw new S.WbError(r.status, j.error || `HTTP ${r.status}`);
   return j;
 }

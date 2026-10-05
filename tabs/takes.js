@@ -53,7 +53,7 @@ function cardHtml(t, shot, s) {
   const { dur } = info(t), name = T.takeName(t);
   return `<div class="tkc${t.media === s.sel ? ' on' : ''}${t.media === s.b ? ' b' : ''}${picked ? ' pk' : ''}" data-tk="${esc(t.media)}" data-tkind="${t.kind}" title="${esc(`${name} · ${t.label}${dur ? ' · ' + T.secs(dur, 1) : ''}${t.source === 'import' ? ' · imported' : ''}${picked ? ' · PICKED' : ''}${prop ? ' · proposed by the agent' : ''}\nclick: open · Shift+click: B for A/B · ⤢ full size`)}">`
     + `<div class="tkth">${t.thumb ? `<img src="${esc(mediaUrl(t.thumb))}" alt="" loading="lazy">` : t.kind === 'image' ? `<img src="${esc(mediaUrl(t.file))}" alt="" loading="lazy">` : '<span class="tknoth">▶</span>'}<i class="tkbar"></i>${takeBadge(shot.id, t.media)}${t.kind === 'video' ? '<u class="tkhv"></u>' : ''}<b class="tkz" data-tk-a="big" title="full size">⤢</b></div>`
-    + `<div class="tkl">${t.request || t.job ? `<b>#${esc(t.take ?? '?')}</b>` : `<b class="tkfn">${esc(name)}</b>`}${picked ? '<i class="tkpk" title="picked">★</i>' : prop ? '<i class="tkpp" title="the agent proposes it">◆</i>' : ''}${alt.length ? `<i class="tkal" title="${esc(alt.map(a => `alt for ${clk(a.t)} ${a.note}`).join('\n'))}">alt</i>` : ''}${dur ? `<span>${(dur / 1000).toFixed(1)}s</span>` : t.kind === 'image' ? '<span>still</span>' : ''}${t.request || t.job ? `<span class="tkrq">${esc(t.request || t.job)}</span>` : ''}</div></div>`;
+    + `<div class="tkl">${t.request || t.job ? (t.take != null ? `<b>#${esc(t.take)}</b>` : '') : `<b class="tkfn">${esc(name)}</b>`}${picked ? '<i class="tkpk" title="picked">★</i>' : prop ? '<i class="tkpp" title="the agent proposes it">◆</i>' : ''}${alt.length ? `<i class="tkal" title="${esc(alt.map(a => `alt for ${clk(a.t)} ${a.note}`).join('\n'))}">alt</i>` : ''}${dur ? `<span>${(dur / 1000).toFixed(1)}s</span>` : t.kind === 'image' ? '<span>still</span>' : ''}${t.request || t.job ? `<span class="tkrq">${esc(t.request || t.job)}</span>` : ''}</div></div>`;
 }
 function editorHtml(t, shot, s) {
   const { fps, dur } = info(t), r = s.range || { in: 0, out: null }, pick = shot.clip, picked = pick?.file === t.file;
@@ -85,7 +85,8 @@ export function takesHtml(shot) {
   const takes = shotTakes(shot), s = stateFor(shot, takes), t = takes.find(x => x.media === s.sel), pick = shot.clip;
   const head = `<div class="tkhd"><span class="dim">${takes.length ? `${takes.length} take${takes.length > 1 ? 's' : ''}` : 'no takes yet'}</span>${pick ? `<span class="tkpkd" title="${esc(pick.note || '')}">★ ${esc(T.takeName({ ...pick, job: store.mediaById?.[pick.media]?.job }))}${pick.out_ms != null ? ` ${(pick.in_ms / 1000).toFixed(2)}–${(pick.out_ms / 1000).toFixed(2)} s` : ''}${pick.alt?.length ? ` · ${pick.alt.length} alt` : ''}</span>` : '<span class="dim">· none picked</span>'}</div>`;
   if (!takes.length) return `<div class="tkw" data-shot="${esc(shot.id)}">${head}<div class="dim tkno">runner outputs of this shot's requests and media linked to it (media_update shots) show here</div></div>`;
-  return `<div class="tkw" data-shot="${esc(shot.id)}">${head}<div class="tkstrip0">${takes.map(x => cardHtml(x, shot, s)).join('')}</div>${proposalsHtml(shot, takes)}${t ? editorHtml(t, shot, s) : ''}</div>`;
+  // the cards (+ the agent's proposals) and the editor: one column in the Shot panel, side by side in Review › Takes
+  return `<div class="tkw" data-shot="${esc(shot.id)}"><div class="tkcol">${head}<div class="tkstrip0">${takes.map(x => cardHtml(x, shot, s)).join('')}</div>${proposalsHtml(shot, takes)}</div>${t ? editorHtml(t, shot, s) : ''}</div>`;
 }
 
 // ------------------------------------------------------------------ acts (take_act: page only)

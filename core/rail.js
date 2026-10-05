@@ -19,7 +19,7 @@ import '../tabs/breakdown.js';   // and the breakdown stage
 import '../tabs/charstage.js';   // and the characters stage
 import '../tabs/scenery.js';   // and the scenery stage (locations, props)
 import '../tabs/storyboard.js';   // and the storyboard stage
-import { STAGES, STATUS_LABEL, stagesView, projectFacts, stageById, stageTip } from '../js/flow.js';
+import { STAGES, STATUS_LABEL, SHOWN_LABEL, stagesView, projectFacts, stageById, stageTip } from '../js/flow.js';
 import { openCounts } from '../js/notes.js';
 import * as RV from '../js/revisions.js';
 
@@ -79,7 +79,7 @@ function render() {
   const v = view(), cur = WB()?.app?.active() === 'stage' ? current() : null;
   const next = v.next, oc = openCounts(store.notes);
   el.innerHTML = v.stages.map(s => { const k = oc.stages[s.id] || 0; return `<a data-stage="${s.id}" data-shown="${s.shown}" class="st-${s.shown}${s.id === cur ? ' on' : ''}" title="${esc(`${stageTip(s)}${k ? `\n${k} open note${k > 1 ? 's' : ''}` : ''}\n${stageById(s.id).does}\nAlt+Shift+${s.n} · right-click: status`)}"><i></i>${s.n} ${esc(s.title)}${s.shown === 'changed' ? '<b class="stw">⚠</b>' : ''}${k ? `<b class="rnc" title="${k} open note${k > 1 ? 's' : ''}">${k}</b>` : ''}</a>`; }).join('')
-    + `<span class="next" data-stage="${esc(next?.id || '')}" title="${esc(next ? `next: ${next.title}${next.blockers.length ? '\n· ' + next.blockers.join('\n· ') : ''}` : 'every stage is done')}">${next ? `next: <b>${esc(next.title)}</b>${next.blockers.length ? ' · ' + esc(next.blockers[0]) : ''}` : 'all stages done'}</span>`
+    + `<span class="next" data-stage="${esc(next?.id || '')}" title="${esc(next ? `next: ${next.title}${next.blockers.length ? '\n· ' + next.blockers.join('\n· ') : ''}` : 'every stage is done')}">${next ? `next: <b>${esc(next.title)}</b> · ${esc(SHOWN_LABEL[next.shown] || next.shown || '')}` : 'all stages done'}</span>`
     + roundHtml();
 }
 export function mountRail() {

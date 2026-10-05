@@ -236,7 +236,8 @@ add('Window', [
   { id: 'help.source', title: 'Source code on GitHub', group: 'Help', run: () => window.open(REPO_URL, '_blank', 'noopener') },
   { id: 'help.issue', title: 'Report a problem or suggest a feature', group: 'Help', run: () => window.open(REPO_URL + '/issues/new', '_blank', 'noopener') },
   { id: 'help.menu', title: 'Open the menu bar (keyboard)', group: 'Help', keys: ['F10'], run: () => { tabs().setTopbar(true); openBar('File', { keyboard: true }); } },
-  { id: 'help.about', title: 'About the workbench', group: 'Help', run: () => toast(`Director Workbench v2 · project ${PROJECT} · ${commands.list().length} commands`) },
+  // the version is package.json's, from the server's /api/status (review #2 F10); none shown when the server does not say
+  { id: 'help.about', title: 'About the workbench', group: 'Help', run: async () => { let v = ''; try { const j = await (await fetch('/api/status')).json(); v = j.version || j.app_version || ''; } catch (e) { /* static host */ } toast(`Director Workbench${v ? ' ' + v : ''} · project ${PROJECT} · ${commands.list().length} commands`); } },
 ]);
 // 1..9 = pages in registry order (1 Timeline, 2 Assets, 3 Review, 4 Settings, then custom pages); Alt+1..9 = columns
 for (let i = 1; i <= 9; i++) C.push({ group: 'Window', id: `window.tab${i}`, title: () => { const p = tabs()?.pages()[i - 1]; return `Page ${i}${p ? ': ' + p.title : ''}`; }, keys: [String(i)], when: () => !!tabs()?.pages()[i - 1], checked: (c) => tabs().pages()[i - 1]?.id === c.tab, run: () => tabs().show(tabs().pages()[i - 1].id) });

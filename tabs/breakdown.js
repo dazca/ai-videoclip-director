@@ -265,7 +265,7 @@ class Workspace {
       + (isTime('breakdown') ? '' : `<span class="bdvw"><a data-view="list" class="${this.view === 'list' ? 'on' : ''}">List</a><a data-view="matrix" class="${this.view === 'matrix' ? 'on' : ''}" title="items x scenes: click a cell to link / unlink">Matrix</a></span>`)
       + `<select class="bdkind" title="kind">${['all', ...BD.KINDS].map(k => `<option value="${k}"${k === this.kind ? ' selected' : ''}>${k === 'all' ? 'all kinds' : BD.KIND_LABEL[k]}</option>`).join('')}</select>`
       + `<label class="dim" title="show dropped items (greyed; restorable)"><input type="checkbox" class="bddrop"${this.showDropped ? ' checked' : ''}>dropped</label>`
-      + `<button data-a="add" title="a new item">+ item</button><button data-a="suggest" title="a first list from the scene text, beats and the intake (who, where): capitalised names, garments, objects, effects">Suggest from script</button><button data-a="extract" title="writes an ask for the agent: extract the breakdown from the script">Ask the agent to extract</button><button data-a="versions" class="${this.side === 'versions' ? 'on' : ''}" title="the versions panel: diff any two, restore">Versions ${this.doc.versions.length}</button>`;
+      + `<button data-a="add" title="a new item">+ item</button><button data-a="suggest" title="a first list from the scene text, beats and the intake (who, where): capitalised names, garments, objects, effects">Suggest from script</button><button data-a="versions" class="${this.side === 'versions' ? 'on' : ''}" title="the versions panel: diff any two, restore">Versions ${this.doc.versions.length}</button>`;
   }
   renderSel() {
     const el = this.$('.bdsel'), n = this.sel.size;
@@ -471,7 +471,7 @@ commands.register([
   { id: 'breakdown.save', group: 'Breakdown', title: 'Save breakdown version', when: () => V() && S.dirty, run: () => S.save() },
   { id: 'breakdown.discard', group: 'Breakdown', title: 'Discard unsaved breakdown edits', when: () => V() && S.dirty, run: () => S.discard() },
   { id: 'breakdown.suggest', group: 'Breakdown', title: 'Breakdown: suggest items from the script', run: async () => (await ensure())?.suggest() },
-  { id: 'breakdown.extract', group: 'Breakdown', title: 'Breakdown: ask the agent to extract it from the script', run: async () => (await ensure())?.extract() },
+  { id: 'breakdown.extract', group: 'Breakdown', title: 'Ask the agent to extract the breakdown from the script', run: async () => (await ensure())?.extract() },
   { id: 'breakdown.add', group: 'Breakdown', title: 'Breakdown: new item…', run: async () => (await ensure())?.addItem() },
   { id: 'breakdown.matrix', group: 'Breakdown', title: 'Breakdown: matrix view (items × scenes)', checked: () => S?.view === 'matrix', run: async () => { const s = await ensure(); s.view = s.view === 'matrix' ? 'list' : 'matrix'; prefs.set('bdView', s.view); s.compare = null; s.render(); } },
   { id: 'breakdown.compare', group: 'Breakdown', title: 'Compare breakdown versions…', when: () => !!store.breakdown?.versions?.length, run: async () => {
@@ -496,7 +496,7 @@ commands.register([
   { id: 'breakdown.showEntity', group: 'Breakdown', title: 'Show the entity', when: (c) => V() && !!store.breakdown?.states?.[one(c)]?.entity_id, run: (c) => S.showEntity(store.breakdown.states[one(c)].entity_id) },
   { id: 'breakdown.unlinkEntity', group: 'Breakdown', title: 'Unlink the entity', hidden: true, when: (c) => V() && !!store.breakdown?.states?.[one(c)]?.entity_id, run: (c) => S.unlink(one(c)) },
   { id: 'breakdown.note', group: 'Breakdown', title: 'Note on the item (Notes column)', when: (c) => V() && !!itemOf(c), run: (c) => S.noteOnItem(one(c)) },
-  { id: 'breakdown.ask', group: 'Breakdown', title: 'Ask the agent about the breakdown…', run: async () => (await ensure())?.ask() },
+  { id: 'breakdown.ask', group: 'Breakdown', title: 'Ask the agent anything about the breakdown… (a note)', run: async () => (await ensure())?.ask() },
   { id: 'breakdown.versions', group: 'Breakdown', title: 'Breakdown versions panel', checked: () => S?.side === 'versions', when: () => V(), run: () => S.setSide(S.side === 'versions' ? null : 'versions') },
   // "+ Add" an item of a kind (in the right-clicked scene when there is one)
   ...BD.KINDS.map(k => ({ id: `breakdown.add_${k}`, group: 'Breakdown', title: `Breakdown: add a ${BD.KIND_ONE[k]}…`, hidden: true, when: () => V(), run: (c) => S.addItem(k, c?.sceneId) })),

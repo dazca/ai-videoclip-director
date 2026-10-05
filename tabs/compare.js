@@ -42,7 +42,9 @@ export default {
             <div class="cmps">${esc(r.summary || '')}</div>
             <div class="dim">${r.notes_absorbed.length} absorbed${r.notes_replied?.length ? ` · ${r.notes_replied.length} replied` : ''} · ${r.files_changed.length} file${r.files_changed.length === 1 ? '' : 's'}${r.cost_delta ? ` · ${sgn(r.cost_delta)}` : ''}${r.git?.commit ? ` · git ${esc(r.git.commit)}` : ''}</div></div>`).join('')
         + (R.some(r => r.base) ? `<div class="cmpr0 r0${sel.a === 'R0' ? ' isa' : ''}"><b>R0</b> <span class="dim">before round 1</span></div>` : '')
-        + (R.length ? '' : '<p class="dim">Write notes in any stage, <b>Send round to Claude</b> (stage rail), and when Claude is done <b>Close revision</b>: each revision is a snapshot of the whole project you can compare and restore here.</p>');
+        + (R.length ? '' : '<p class="dim">Compare shows two revisions of the whole project side by side, per stage: the lyric lines changed (word diff), scenes and shots moved on a time line, breakdown items, asset heads as image A / B and the cost, each change with the notes behind it. No revision yet. A revision comes from a review round:</p>'
+          + '<ol><li>write notes in any stage (the Notes column, or right-click a row: + Add › note);</li><li><b>Send round to Claude</b> (the right end of the stage rail);</li><li>when Claude has worked through them, <b>Close revision</b> there: a snapshot you can compare and restore here.</li></ol>');
+      el.classList.toggle('none', !R.length);
     };
     const head = () => {
       const opts = options(), o = (v) => opts.map(x => `<option value="${esc(x.id)}"${x.id === v ? ' selected' : ''}>${esc(x.label)}</option>`).join('');

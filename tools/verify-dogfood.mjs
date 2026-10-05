@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 const WB = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
-const freePort = () => new Promise(ok => { const s = net.createServer().listen(0, () => { const p = s.address().port; s.close(() => ok(p)); }); });
+const freePort = () => new Promise(ok => { const s = net.createServer().listen(process.env.WB_VERIFY_PORT ? Number(process.env.WB_VERIFY_PORT) + ((globalThis.__wbVerifyPortN = (globalThis.__wbVerifyPortN ?? -1) + 1) % 10) : 0, () => { const p = s.address().port; s.close(() => ok(p)); }); });
 // the code a server runs from: everything the page and the server load (no data, no node_modules)
 const CODE_PARTS = ['serve.mjs', 'app.js', 'app.css', 'index.html', 'dock.html', 'README.md', 'package.json', 'lib', 'generators', 'js', 'tabs', 'core', 'templates', 'catalog', 'exporters/composition-data.mjs'];
 

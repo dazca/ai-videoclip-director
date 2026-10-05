@@ -7,17 +7,23 @@ import * as C from '../js/checks.js';
 
 const entOf = (id) => (store.entities || []).find(e => e.id === id) || null;
 const when = (at) => String(at || '').replace('T', ' ').slice(5, 16);
+// the badge says the verdict's own word: a "drift" verdict with a failed item reads "drift · likeness" (not "✗ likeness",
+// which is a fail's), so the badge and its popover ("verdict drift") agree
+function badgeOf(c, ent) {
+  const b = C.badge(c, ent);
+  return c.verdict === 'drift' && b.cls === 'fail' ? { cls: 'drift', label: `drift · ${b.label.replace(/^✗ /, '')}` } : b;
+}
 // a badge for the newest of these checks (null: no badge); `count` earlier checks are listed in the popover
 export function badgeHtml(list) {
   const c = list?.[0]; if (!c) return '';
-  const b = C.badge(c, entOf(c.against?.entity));
+  const b = badgeOf(c, entOf(c.against?.entity));
   return `<span class="ckb ck-${b.cls}" data-ck="${esc(c.id)}" tabindex="0" aria-label="${esc(`identity check: ${b.label}`)}">${esc(b.label)}${list.length > 1 ? `<i>${list.length}</i>` : ''}</span>`;
 }
 export const nodeBadge = (entId, node) => badgeHtml(C.nodeChecks(store.checks, entId, node, store.media || []));
 export const takeBadge = (shotId, mediaId) => badgeHtml(C.takeChecks(store.checks, shotId, mediaId));
 
 function popHtml(c) {
-  const ent = entOf(c.against?.entity), b = C.badge(c, ent), same = (store.checks?.checks || []).filter(x => C.targetKey(x.target) === C.targetKey(c.target) && x.id !== c.id);
+  const ent = entOf(c.against?.entity), b = badgeOf(c, ent), same = (store.checks?.checks || []).filter(x => C.targetKey(x.target) === C.targetKey(c.target) && x.id !== c.id);
   const items = (c.items || []).map(i => `<li class="${i.ok ? 'ok' : 'no'}"><b>${i.ok ? '✓' : '✗'}</b> ${esc(i.constant)}${i.note ? ` <i>${esc(i.note)}</i>` : ''}</li>`).join('');
   return `<div class="ckph"><span class="ckb ck-${b.cls}">${esc(b.label)}</span><b>identity check ${esc(c.id)}</b><span class="dim">${esc(c.by || 'agent')} · ${esc(when(c.created))}</span></div>`
     + `<div class="dim">${esc(c.target.kind)} ${esc(c.target.id)} against ${esc(ent?.name || c.against?.entity || '')} ${esc(c.against?.node || '')} · verdict ${esc(c.verdict)}</div>`

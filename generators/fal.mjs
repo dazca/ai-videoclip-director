@@ -27,6 +27,8 @@ const TEST = process.env.WB_TEST === '1' && process.env.WB_FAL_BASE;
 export const QUEUE = TEST ? process.env.WB_FAL_BASE.replace(/\/+$/, '') : 'https://queue.fal.run';
 export const STORAGE = TEST ? process.env.WB_FAL_BASE.replace(/\/+$/, '') : 'https://rest.alpha.fal.ai';
 const ORIGINS = new Set([new URL(QUEUE).origin, new URL(STORAGE).origin]);
+// where fal storage may tell us to PUT a ref's bytes (review #2 N8): https on fal's own hosts (the mock's origin in tests)
+const uploadOk = (url) => { try { const u = new URL(url); return TEST ? u.origin === new URL(STORAGE).origin : u.protocol === 'https:' && /(^|\.)(fal\.ai|fal\.run|fal\.media)$/i.test(u.hostname); } catch (e) { return false; } };
 const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.mkv': 'video/x-matroska' };
 const KLING_NEG = 'blur, distort, low quality, text, letters, logos, extra fingers, morphing face';   // falgen's default
 const SIZE = { '16:9': [2560, 1440], '9:16': [1440, 2560], '3:4': [1728, 2304], '1:1': [2048, 2048], '4:3': [2304, 1728] };   // seedream image_size (falgen)
@@ -64,8 +66,11 @@ export default {
   // upload one local ref to fal's CDN -> its public URL
   async upload(absFile, ctx) {
     const ctype = MIME[path.extname(absFile).toLowerCase()] || 'application/octet-stream';
-    const r = await call(`${STORAGE}/storage/upload/initiate?storage_type=fal-cdn-v3`, { method: 'POST', body: JSON.stringify({ content_type: ctype, file_name: path.basename(absFile) }) }, ctx);
+    // the name fal stores is <request>_<i><ext> (ctx.uploadName), never the file's own name (it may be a person's)
+    const name = typeof ctx?.uploadName === 'string' && /^[A-Za-z0-9_-]{1,80}\.[a-z0-9]{1,5}$/.test(ctx.uploadName) ? ctx.uploadName : `ref${path.extname(absFile).toLowerCase()}`;
+    const r = await call(`${STORAGE}/storage/upload/initiate?storage_type=fal-cdn-v3`, { method: 'POST', body: JSON.stringify({ content_type: ctype, file_name: name }) }, ctx);
     if (!r.upload_url || !r.file_url) throw new Error('fal storage: no upload_url / file_url');
+    if (!uploadOk(r.upload_url)) throw new Error(`fal storage: refusing to upload a ref to ${String(r.upload_url).slice(0, 80)} (not a fal storage host)`);
     const put = await fetch(r.upload_url, { method: 'PUT', headers: { 'content-type': ctype }, body: fs.readFileSync(absFile), signal: AbortSignal.timeout(300000) });
     if (!put.ok) throw new Error(`fal storage PUT ${put.status}`);
     return r.file_url;

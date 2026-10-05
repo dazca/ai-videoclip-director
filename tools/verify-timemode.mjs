@@ -7,7 +7,10 @@
 // their rows; the playhead line at y(t) after a seek; a click on an empty spot seeks to the ms under the pointer;
 // right-click > "+ Add at m:ss" > "+ note at this time" types a note on the row at that time; scrolling the stage keeps
 // the timeline's reading time; Final groups its rows by song section; the timeline's warp is the same behind a stage
-// (it stays laid out); the cost of placing the rows. Screenshots v19_<stage>.png: the stage in Time next to the timeline.
+// (it stays laid out); the cost of placing the rows. Review #2 (U13 / U17): a click on a row's text seeks to the row's
+// start; on a short axis a slot under two lines is one line (no text cut through or stacked), the scene headers show
+// whole lines only, a short row carries its text as a tooltip, and a script scene title keeps its width (no "T..").
+// Screenshots v19_<stage>.png: the stage in Time next to the timeline; v19_short_<stage>.png on the short axis.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -17,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 const WB = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
-const freePort = () => new Promise(ok => { const s = net.createServer().listen(0, () => { const p = s.address().port; s.close(() => ok(p)); }); });
+const freePort = () => new Promise(ok => { const s = net.createServer().listen(process.env.WB_VERIFY_PORT ? Number(process.env.WB_VERIFY_PORT) + ((globalThis.__wbVerifyPortN = (globalThis.__wbVerifyPortN ?? -1) + 1) % 10) : 0, () => { const p = s.address().port; s.close(() => ok(p)); }); });
 
 export async function verifyTimeMode({ browser, OUT }) {
   const checks = {};
@@ -118,6 +121,11 @@ export async function verifyTimeMode({ browser, OUT }) {
     await pg.mouse.click(pt.x, pt.y); await frames(2);
     const got = await pg.evaluate(() => Math.round(window.WB.timeline.player.time()));
     check('a click on an empty spot of the Time view moves the playhead to the ms under the pointer', Math.abs(got - want) <= 2 && want > 0, { want, got });
+    // U17 / I3: a click on a row's TEXT seeks to that row's start (t0), not to wherever the text sits
+    const wd = await pg.evaluate((ax, id) => { const a = eval(ax), e = a.sc.querySelector(`.lyl[data-line="${CSS.escape(id)}"]`), w = [...e.querySelectorAll('.w')].pop(), r = w.getBoundingClientRect(); window.WB.timeline.seek(0); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), t0: a.rowT0(e), under: a.timeAt(r.top + r.height / 2) }; }, AX, ly.out[5].id);
+    await pg.mouse.click(wd.x, wd.y); await frames(2);
+    const gotW = await pg.evaluate(() => Math.round(window.WB.timeline.player.time()));
+    check('a click on a row\'s text (a lyric line\'s last word) seeks to the row\'s start t0, not to the ms under the pointer', wd.t0 > 0 && Math.abs(gotW - wd.t0) <= 2, { ...wd, got: gotW });
     // right-click > + Add at m:ss > + note at this time: the Notes column's editor on the row at that time
     await pg.mouse.click(pt.x, pt.y, { button: 'right' }); await frames(2);
     const menu = await pg.evaluate(() => [...document.querySelectorAll('.pop .pi .lb')].map(e => e.textContent));
@@ -183,6 +191,40 @@ export async function verifyTimeMode({ browser, OUT }) {
     check('Final in Time: the rows grouped by song section in time order (each tagged with its stage), the rows without a song time last, none lost', fn.gs.length >= 2 && fn.sorted && fn.lastNone && fn.n === fn.all && fn.tag, fn);
     await sideBySide('v19_final');
     await pg.evaluate(() => window.WB.timeMode.setMode('final', 'list'));
+
+    // 6b. U13: a SHORT axis (the timeline's own fit for a short song): 1 s and 2 s shots, scenes of 2 s, at 1280 px. A row
+    // under two lines is one line (tmshort); its visible lines lie inside it (nothing cut through or stacked); the
+    // scene headers show whole lines only; a short row has its text as a tooltip; a script title keeps ≥ 120 px
+    const sh = await call('shots_update', { upsert: [{ id: 's1-intro', t1: 2000 }, { t0: 2000, t1: 4000, kind: 'insert', title: 'boot screen', text: 'CRT boot text scrolls line after line', camera: 'static' },
+      { id: 's5-outro', t1: 19000 }, { t0: 19000, t1: 20000, kind: 'insert', title: 'fade', text: 'the screen fades to a dot and the tone stops', camera: 'static' }], message: 'v19: short shots' });
+    if (sh.status !== 200) throw new Error('shots_update ' + sh.status + ' ' + JSON.stringify(sh.body));
+    await pg.setViewport({ width: 1280, height: 800, deviceScaleFactor: 1 });
+    await pg.evaluate(() => { const tl = window.WB.timeline; tl.pxPerSec = 16; tl.relayout(); tl.scrollToTime(0); });
+    await open('storyboard'); await until(() => document.querySelectorAll('.sblist .sbcard.tmsub').length >= 6); await frames(4); await wait(300);
+    const sbs = await pg.evaluate(() => {
+      const vis = (e) => e.offsetParent !== null && getComputedStyle(e).display !== 'none';
+      const cards = [...document.querySelectorAll('.sblist .sbcard.tmsub')].map(c => { const r = c.getBoundingClientRect();
+        const kids = [...c.children].filter(vis).map(k => { const b = k.getBoundingClientRect(); return { cls: k.className.split(' ')[0], top: b.top - r.top, bottom: b.bottom - r.top }; });
+        return { id: c.dataset.shot, h: Math.round(r.height), short: c.classList.contains('tmshort'), title: c.title || '', cut: kids.filter(k => k.top < r.height - 1 && k.bottom > r.height + 1).map(k => k.cls), lines: new Set(kids.filter(k => k.top < r.height - 1).map(k => Math.round(k.top))).size, nowrap: getComputedStyle(c.querySelector('.sbtx')).whiteSpace === 'nowrap' }; });
+      const heads = [...document.querySelectorAll('.sblist .sbscene.tmrow > .sbsh')].map(s => { const r = s.getBoundingClientRect(), row = s.parentElement.getBoundingClientRect();
+        const kids = [...s.children].filter(vis).map(k => k.getBoundingClientRect()).filter(b => b.height > 0);
+        return { scene: s.parentElement.dataset.scene, h: Math.round(row.height), inside: r.bottom <= row.bottom + 1, partial: kids.filter(b => b.top < r.bottom - 1 && b.bottom > r.bottom + 1).length }; });
+      return { cards, heads };
+    });
+    const shortCards = sbs.cards.filter(c => c.h < 30);
+    check('U13 storyboard on a short axis: a shot under two lines is ONE line (tmshort, nowrap, no child cut through its bottom edge) with its text as a tooltip; the scene headers show whole lines only (none cut, none past the row)',
+      shortCards.length >= 2 && shortCards.every(c => c.short && c.nowrap && !c.cut.length && c.lines === 1 && c.title.length > 3) && sbs.heads.length >= 3 && sbs.heads.every(x => x.inside && !x.partial), { short: shortCards, heads: sbs.heads });
+    await sideBySide('v19_short_storyboard');
+    await open('script'); await until(() => !!document.querySelector('.sclist.tmode .scrow.tmrow')); await frames(4); await wait(200);
+    const sct = await pg.evaluate(() => [...document.querySelectorAll('.sclist.tmode .sccard:not(.open) .sct')].map(e => ({ text: e.textContent, w: Math.round(e.getBoundingClientRect().width), clipped: e.scrollWidth > e.clientWidth + 1 })));
+    check('U13 script on a short axis at 1280 px: every scene title is whole, or keeps at least 120 px (never "T..")', sct.length >= 3 && sct.every(x => !x.clipped || x.w >= 120), sct);
+    // U17 in the script: a click on a lyric line's text in a scene row seeks to that line's time
+    const sl = await pg.evaluate((ax) => { const a = eval(ax), e = [...a.sc.querySelectorAll('.scl.tmsub')].at(-1), sp = e.querySelector('span:last-child'), r = sp.getBoundingClientRect(); sp.scrollIntoView({ block: 'center' }); const b = sp.getBoundingClientRect(); window.WB.timeline.seek(0); return { x: Math.round(b.left + Math.min(10, b.width / 2)), y: Math.round(b.top + b.height / 2), t0: a.rowT0(sp), want: Number(e.querySelector('[data-t]').dataset.t) }; }, AX);
+    await frames(2); await pg.mouse.click(sl.x, sl.y); await frames(2);
+    const gotS = await pg.evaluate(() => Math.round(window.WB.timeline.player.time()));
+    check('U17 script: a click on a lyric line\'s text inside a scene row seeks to that line\'s time', Math.abs(gotS - sl.want) <= 2, { ...sl, got: gotS });
+    await sideBySide('v19_short_script');
+    await pg.setViewport({ width: 1600, height: 900, deviceScaleFactor: 1 });
 
     // 7. back to List: the rows leave the axis (no tmode, no positioned rows)
     await open('lyrics');

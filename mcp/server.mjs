@@ -8,7 +8,8 @@
 // page refreshes the moment a tool writes. When the server is not running it reads/writes the same project files
 // directly (WORKBENCH_DATA, default <workbench>/data) with the same code (lib/store.mjs); only ui_focus needs the server.
 // Env: WORKBENCH_URL, WORKBENCH_DATA, WORKBENCH_PROJECT (initial current project), WORKBENCH_OFFLINE=1 (never use HTTP),
-// WB_TOKEN (the server's write token; by default read from <meta name="wb-token"> in the server's /index.html).
+// WB_AGENT_TOKEN (the agent token; by default read from <data folder>/.wb-agent-token, which the server writes: every write
+// of this server is an agent's, never the director's; the page's token is never read).
 //
 // The tools live in mcp/tools/<domain>.mjs, one file per lib/ops/<domain>.mjs; each registers its tools on the server
 // object of mcp/tools/_shared.mjs (with the transport and the shared schemas) when imported here. This file adds the

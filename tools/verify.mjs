@@ -80,7 +80,7 @@ function cleanup() {
 process.on('exit', cleanup);
 for (const s of ['SIGINT', 'SIGTERM']) process.on(s, () => process.exit(130));
 
-const freePort = () => new Promise((ok, bad) => { const s = net.createServer(); s.on('error', bad); s.listen(0, () => { const { port } = s.address(); s.close(() => ok(port)); }); });
+const freePort = () => new Promise((ok, bad) => { const s = net.createServer(); s.on('error', bad); s.listen(process.env.WB_VERIFY_PORT ? Number(process.env.WB_VERIFY_PORT) + ((globalThis.__wbVerifyPortN = (globalThis.__wbVerifyPortN ?? -1) + 1) % 10) : 0, () => { const { port } = s.address(); s.close(() => ok(port)); }); });
 // serve.mjs on a free port with WORKBENCH_DATA = the scratch folder; fails (instead of hanging) if it exits or stays silent
 async function startServer(project) {
   const port = await freePort();
@@ -109,7 +109,7 @@ async function writeHeaders(base, project) {
     || /\bWB_TOKEN\s*[:=]\s*["']([^"']+)["']/.exec(html)?.[1];
   if (!tok) { const c = await fetch(base + '/api/config').then(r => r.json()).catch(() => ({})); tok = c?.token || c?.write_token; }
   const cookie = (res?.headers.getSetCookie?.() || []).map(c => c.split(';')[0]).join('; ');
-  return { 'content-type': 'application/json', origin: base, ...(tok ? { 'x-wb-token': tok } : {}), ...(cookie ? { cookie } : {}) };
+  return { 'content-type': 'application/json', origin: base, 'sec-fetch-site': 'same-origin', ...(tok ? { 'x-wb-token': tok } : {}), ...(cookie ? { cookie } : {}) };
 }
 
 const { base: BASE } = await startServer(P);
@@ -874,7 +874,8 @@ try {
     { sc1, saved: s1 && { t0: s1.t0, t1: s1.t1, lines: s1.line_ids, beats: s1.beats.length }, snapped });
 
   // 4. Fill the gaps: an ask for the agent with the gaps; the agent fills them and the page follows live
-  await pg.evaluate(() => document.querySelector('.scbar [data-a=fill]').click());
+  const askAgentS = async (label) => { await pg.evaluate(() => document.querySelector('.sgbar [data-ask]')?.click()); await new Promise(r => setTimeout(r, 200)); return pg.evaluate((l) => { const it = [...document.querySelectorAll('.pop .pi')].find(e => (e.querySelector('.lb')?.textContent || '').startsWith(l)); it?.click(); return !!it; }, label); };   // the stage bar's one "Ask the agent…" menu
+  await askAgentS('Ask the agent to fill the gaps');
   await until(() => window.WB.store.notes.notes.some(n => n.ask === 'fill_gaps'));
   await fileUntil(NP, 'notes.json', (j) => j.notes.some(n => n.ask === 'fill_gaps'));
   const sg = (await op('script_get', {})).body;
@@ -1023,8 +1024,8 @@ try {
   await pg.goto(`${BASE}/?project=${NP}`, { waitUntil: 'domcontentloaded' });
   await pg.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
   await pg.reload({ waitUntil: 'domcontentloaded' }); await ready();
-  await combo(['Alt', 'Shift'], 'Digit3'); await until(() => window.WB.stages.current() === 'breakdown' && !!document.querySelector('.bdbar [data-a=extract]'), null, 8000);
-  const empty = await pg.evaluate(() => ({ stage: window.WB.stages.current(), empty: !!document.querySelector('.bdws .scempty [data-a=suggest]'), bar: !!document.querySelector('.bdbar [data-a=extract]') }));
+  await combo(['Alt', 'Shift'], 'Digit3'); await until(() => window.WB.stages.current() === 'breakdown' && !!document.querySelector('.bdws .scempty [data-a=extract]'), null, 8000);
+  const empty = await pg.evaluate(() => ({ stage: window.WB.stages.current(), empty: !!document.querySelector('.bdws .scempty [data-a=suggest]'), bar: !!document.querySelector('.bdws .scempty [data-a=extract]') && !!document.querySelector('.sgbar [data-ask]') }));
   await pg.screenshot({ path: path.join(OUT, 'v6_breakdown_empty.png') });
   check('a scripted project: the breakdown stage (Alt+Shift+3) starts empty, offering "Suggest from script" and "Ask the agent to extract"', cr.status === 200 && sc.status === 200 && empty.stage === 'breakdown' && empty.empty && empty.bar, { empty, scenes: sc.body });
 
@@ -1126,8 +1127,9 @@ try {
     { pick: pickRows.slice(0, 2), entity: E && { status: E.status, breakdown: E.breakdown, looks: E.looks?.map(l => l.id) }, states: { mara: BS[mara], rain: BS[rain] }, assets });
 
   // 8. Ask the agent to extract: an ask note; the agent answers with a new version (live, marked agent); the agent rules
-  await pg.evaluate(() => window.WB.stages.open('breakdown')); await until(() => window.WB.stages.current() === 'breakdown' && !!document.querySelector('.bdbar [data-a=extract]'));
-  await click('.bdbar [data-a=extract]');
+  await pg.evaluate(() => window.WB.stages.open('breakdown')); await until(() => window.WB.stages.current() === 'breakdown' && !!document.querySelector('.bdbar'));
+  const askAgent = async (label) => { await pg.evaluate(() => document.querySelector('.sgbar [data-ask]')?.click()); await new Promise(r => setTimeout(r, 200)); return pg.evaluate((l) => { const it = [...document.querySelectorAll('.pop .pi')].find(e => (e.querySelector('.lb')?.textContent || '').startsWith(l)); it?.click(); return !!it; }, label); };   // the stage bar's one "Ask the agent…" menu
+  await askAgent('Ask the agent to extract');
   await fileUntil(NP, 'notes.json', (j) => j.notes.some(n => n.ask === 'extract'));
   const bg = (await agent('breakdown_get', { with_script: false })).body, ask = bg.asks_for_agent.find(a => a.kind === 'extract');
   const au = await agent('breakdown_update', { upsert: [{ kind: 'prop', name: 'Bus ticket', description: 'verify agent: the ticket she keeps', links: [{ scene: 'sc04', beats: [] }] }], message: 'verify agent: the ticket' });

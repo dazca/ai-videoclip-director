@@ -413,7 +413,7 @@ class Board {
     this.$('.sbbar').innerHTML = `${ver}<span class="dim">· ${nn(this.draft.length, 'shot')} · <span class="${boarded === scs.length && scs.length ? 'okc' : 'gapc'}">${boarded}/${scs.length} scenes boarded</span> · <a data-side="gaps" class="${g.total ? 'gapc' : 'okc'}" title="everything still missing (side panel: Gaps)">${nn(g.total, 'gap')}</a></span><span class="sp"></span>`
       + (this.dirty ? `<span class="unsaved">unsaved edits</span><input class="lymsg" placeholder="what changed (optional)" spellcheck="false" value="${esc(msg)}"><button data-a="save" class="pri" title="Ctrl+Enter: a new version">Save version</button><button data-a="drdiff" title="compare the current version with your edits">diff</button><button data-a="discard">Discard</button>` : '')
       + `<label class="dim" title="cuts and new times snap to the nearest beat or downbeat of the song grid">snap <select class="sbsnap">${SB.SNAPS.map(x => `<option${x === this.snap ? ' selected' : ''}>${x}</option>`).join('')}</select></label>`
-      + `<button data-a="beats" title="one shot per scene beat or group of beats, for every scene without shots (a scene's own “from beats” redoes it)">Shots from beats</button><button data-a="askboard" title="a note asking the agent to storyboard (MCP storyboard_get / shots_update)">Ask the agent to storyboard</button><button data-a="fill" title="ask the agent for draft generation requests for the gaps">Fill the gaps</button>`
+      + `<button data-a="beats" title="one shot per scene beat or group of beats, for every scene without shots (a scene's own “from beats” redoes it)">Shots from beats</button>`
       + `<a class="sbest${over ? ' bad' : ''}" data-side="gaps" title="${esc(`the shots without a request or clip: est ${usd(g.estimate.usd)}; spent ${usd(cv.spent)} + committed ${usd(cv.committed)} + this = ${usd(total)} of the cap ${usd(cv.cap)}`)}">est ${usd(g.estimate.usd)} · ${usd(total)}/${usd(cv.cap)}</a>`;
   }
   renderList() {
@@ -541,7 +541,7 @@ class Board {
       + (!cv.cap ? '<div class="chwarn">The cap is $0: nothing paid can run. Set it in Review &gt; Costs (costs.json cap_usd).</div>' : over ? `<div class="chwarn">Over the cap by ${usd(total - cv.cap)}: turn some video shots into stills, drop shots, or raise the cap.</div>` : '') + '</div>';
     const grp = (title, rows, ok) => `<div class="sbgh"><b>${title}</b><i>${rows.length}</i></div>` + (rows.length ? rows.join('') : `<div class="sbgok">✓ ${ok}</div>`);
     const R = (go, a, b, c, link) => `<div class="sbgap" data-go="${esc(go)}"><span class="sbgt">${a}</span><span class="sbgx">${b}</span>${c ? `<span class="dim sbgc">${c}</span>` : ''}<a>${link} ›</a></div>`;
-    return `<div class="lyvh"><span class="dim">${nn(g.total, 'gap')} across the stages${this.dirty ? ' · with your unsaved edits' : ''}</span><button data-a="fill" class="pri" title="a note asking the agent for draft requests (MCP gaps_get)">Fill the gaps</button></div>${cost}`
+    return `<div class="lyvh"><span class="dim">${nn(g.total, 'gap')} across the stages${this.dirty ? ' · with your unsaved edits' : ''}</span><button data-a="fill" class="pri" title="a note asking the agent for draft requests (MCP gaps_get; also: the stage bar's Ask the agent…)">Ask the agent to fill the gaps</button></div>${cost}`
       + grp('Unscripted time', g.unscripted.map(x => R(`gap:${x.t0}`, esc(x.time), 'no scene', '', 'script')), 'every second of the song is scripted')
       + grp('Scenes without shots', g.no_shots.map(x => R(`scene:${x.scene}`, esc(x.scene), esc(x.title || 'untitled'), nn(x.beats, 'beat'), 'board')), 'every scene has shots')
       + grp('Shots without a frame', g.no_frame.map(x => R(`shot:${x.shot}`, esc(x.shot), esc(x.time), esc(x.scene || ''), 'draw')), 'every shot has a frame')
@@ -673,7 +673,7 @@ commands.register([
   { id: 'storyboard.discard', group: 'Storyboard', title: 'Discard unsaved storyboard edits', when: () => V() && S.dirty, run: () => S.discard() },
   { id: 'storyboard.fromBeats', group: 'Storyboard', title: 'Shots from beats (scenes without shots)', run: async () => (await ensure())?.fromBeats() },
   { id: 'storyboard.ask', group: 'Storyboard', title: 'Ask the agent to storyboard', run: async () => (await ensure())?.askStoryboard() },
-  { id: 'storyboard.fillGaps', group: 'Storyboard', title: 'Fill the gaps: ask the agent for draft generation requests', run: async () => (await ensure())?.fillGaps() },
+  { id: 'storyboard.fillGaps', group: 'Storyboard', title: 'Ask the agent to fill the gaps (draft generation requests)', run: async () => (await ensure())?.fillGaps() },
   { id: 'storyboard.gaps', group: 'Storyboard', title: 'Storyboard gaps (what is still missing, the estimate vs the cap)', run: async () => (await ensure())?.setSide('gaps') },
   { id: 'storyboard.openShot', group: 'Storyboard', title: 'Open shot in the storyboard…', run: async (c) => {
     const s = await ensure(); if (!s) return;
@@ -691,7 +691,7 @@ commands.register([
   { id: 'storyboard.request', group: 'Storyboard', title: 'Request the shot\'s next generation (draft)', when: (c) => V() && !!shotOf(c), run: (c) => S.requestGen(shotOf(c)) },
   { id: 'storyboard.approve', group: 'Storyboard', title: 'Approve the shot', when: (c) => V() && !!shotOf(c) && store.state('shot:' + shotOf(c)) !== 'approved', run: (c) => S.setStatus(shotOf(c), 'approved') },
   { id: 'storyboard.note', group: 'Storyboard', title: 'Note on the shot (Notes column)', when: (c) => V() && !!shotOf(c), run: (c) => S.noteOnShot(shotOf(c)) },
-  { id: 'storyboard.askNote', group: 'Storyboard', title: 'Ask the agent about the selected shot / the storyboard…', run: async () => (await ensure())?.ask() },
+  { id: 'storyboard.askNote', group: 'Storyboard', title: 'Ask the agent anything about the selected shot / the storyboard… (a note)', run: async () => (await ensure())?.ask() },
   // "+ shot": on a shot, a new one cut from it (on the grid); on a scene, one more (its last shot split, else one for the scene)
   { id: 'storyboard.addShot', group: 'Storyboard', title: 'Add a shot (this scene / after this shot)', when: (c) => V() && !!(c?.shotId || c?.sceneId || S.sel), run: (c) => c?.shotId && S.shot(c.shotId) ? S.split(c.shotId) : c?.sceneId ? S.addShot(c.sceneId) : S.split(S.sel) },
 ]);

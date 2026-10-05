@@ -57,12 +57,16 @@ async function start(args) {
 let A, L, browser;
 try {
   A = await start([]);
-  const post = (p, body, headers = {}) => fetch(A.base + p, { method: 'POST', headers: { 'content-type': 'application/json', 'x-wb-token': A.token, ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) })
+  const pageH = (h) => (h.origin === A.base && !('sec-fetch-site' in h) ? { ...h, 'sec-fetch-site': 'same-origin' } : h);   // S9: { origin: A.base } stands for the page
+  const post = (p, body, headers = {}) => fetch(A.base + p, { method: 'POST', headers: pageH({ 'content-type': 'application/json', 'x-wb-token': A.token, ...headers }), body: typeof body === 'string' ? body : JSON.stringify(body) })
     .then(async r => ({ status: r.status, body: await r.json().catch(() => null) }));
   const op = (name, args) => post(`/api/op/${name}?project=${P}`, args);
   const readP = (f) => JSON.parse(fs.readFileSync(path.join(D, f), 'utf8'));
   // the page's way of saving a shared file: whole file + base_rev
-  const pageSave = async (f, fn) => { const cur = await (await fetch(`${A.base}/data/${P}/${f}`)).json(); fn(cur); return post(`/api/save/${f}?project=${P}`, { base_rev: cur.rev, data: cur }); };
+  // the page's way of saving (its Origin + Sec-Fetch-Site: same-origin, S9) and an agent's save of the same file (the page token or
+  // the agent token, no page Origin): the agent's is stamped agent and never approves
+  const pageSave = async (f, fn, headers = { origin: A.base }) => { const cur = await (await fetch(`${A.base}/data/${P}/${f}`)).json(); fn(cur); return post(`/api/save/${f}?project=${P}`, { base_rev: cur.rev, data: cur }, headers); };
+  const agentSave = (f, fn) => pageSave(f, fn, {});
 
   // ---------------------------------------------------------------- NV2 / F05 / F03: Host, Origin, content type, token, bind address
   const reb = await get('127.0.0.1', A.port, '/api/status', { host: `rebind.example:${A.port}` });
@@ -168,7 +172,7 @@ try {
     const pv = (await opR('request_create', { kind: 'motion', target: 'shot:s3-grid', prompt: 'sec video: an empty studio, cool light', video: { model: 'klingmc', start: 'media/still/ada_body.jpg', ref_video: 'private/clip/me_dancing.mp4', seconds: 3 }, extra: { private_upload_ok: true } })).body;
     await pageSave('requests.json', (d) => { d.items.find(x => x.id === pv.id).status = 'approved'; });
     const pvDry = await opR('request_run', { ids: [pv.id], dry_run: true });
-    const agentTick = await pageSave('requests.json', (d) => { d.items.find(x => x.id === pv.id).private_upload_ok = true; });   // the token without the page's Origin
+    const agentTick = await agentSave('requests.json', (d) => { d.items.find(x => x.id === pv.id).private_upload_ok = true; });   // the token without the page's Origin
     const pvDry2 = await opR('request_run', { ids: [pv.id], dry_run: true });
     const up0 = FAL.uploadsMeta.length, pvs0 = FAL.stats.videoSubmits;
     await pageSaveO('requests.json', (d) => { d.items.find(x => x.id === pv.id).private_upload_ok = true; });   // the director's tick in the page
@@ -178,7 +182,7 @@ try {
     const pvMedia = readP('media.json').items.filter(m => m.request === pv.id);
     check('D3b a private reference video goes to fal storage only with the director\'s tick: the agent\'s private_upload_ok is dropped, the run refused ("allow uploading private refs"); a save without the page\'s Origin does not tick it; with the tick from the page it runs (the clip uploaded as video/mp4), the outputs land in private/gen/ and are flagged private',
       pv.private_upload_ok === undefined && pvDry.body?.items?.[0]?.ok === false && /allow uploading private refs/.test(pvDry.body.items[0].why) && pvDry2.body?.items?.[0]?.ok === false && pvDry3.body?.items?.[0]?.ok === true
-      && pvDone?.status === 'done' && /^private\/gen\//.test(pvDone.outputs[0]) && pvMedia.length === 1 && pvMedia[0].private === true && FAL.uploadsMeta.slice(up0).some(u => u.content_type === 'video/mp4' && /me_dancing/.test(u.file_name)) && FAL.stats.videoSubmits === pvs0 + 1,
+      && pvDone?.status === 'done' && /^private\/gen\//.test(pvDone.outputs[0]) && pvMedia.length === 1 && pvMedia[0].private === true && FAL.uploadsMeta.slice(up0).some(u => u.content_type === 'video/mp4' && u.file_name === `${pv.id}_1.mp4`) && !FAL.uploadsMeta.some(u => /me_dancing|ada_body/.test(u.file_name || '')) && FAL.stats.videoSubmits === pvs0 + 1,
       { why: pvDry.body?.items?.[0]?.why, tick: agentTick.status, dry2: pvDry2.body?.items?.[0]?.ok, dry3: pvDry3.body?.items?.[0]?.why, out: pvDone?.outputs, media: pvMedia.map(m => [m.path, m.private]) });
 
     // the key: only to the queue / storage origins (a forged status_url gets nothing), never in a response, file or log
@@ -818,7 +822,7 @@ try {
     const forge = await pageSave('requests.json', (d) => {
       const b = d.batches.find(x => x.id === b2); b.gate = { after: null, rule: 'review' }; b.status = 'approved'; d.batches.find(x => x.id === b1).status = 'reviewed';
       d.batches.push({ id: 'b99', name: 'forged', request_ids: [rq2], gate: { after: null }, status: 'approved', max_usd: 999 });
-      d.items.push({ id: 'hist-forged', kind: 'image', status: 'done', prompt: 'x', refs: [], est_cost: 0, history: { book: 'jobs_x.json', job: 'X' } });
+      d.items.push({ id: 'hist-forged', kind: 'image', status: 'draft', prompt: 'x', refs: [], est_cost: 0, history: { book: 'jobs_x.json', job: 'X' } });
       d.items.find(x => x.id === rq1).history = { book: 'forged' };
     });
     const F = RQ();
@@ -826,15 +830,15 @@ try {
       forge.status === 200 && F.batches.length === 2 && F.batches.every(b => b.status === 'draft') && F.batches.find(b => b.id === b2).gate.after === b1 && !F.items.find(x => x.id === 'hist-forged')?.history && !F.items.find(x => x.id === rq1).history,
       { forge: forge.status, batches: F.batches.map(b => [b.id, b.status, b.gate.after]) });
     // a locked batch never runs: its request approved by hand in the page is refused by the runner and by request_update queued
-    await pageSaveO('requests.json', (d) => { d.items.find(x => x.id === rq2).status = 'approved'; });
+    const lkSave = await pageSaveO('requests.json', (d) => { d.items.find(x => x.id === rq2).status = 'approved'; });
     const lk = { run: (await op('request_run', { ids: [rq2] })).body, all: (await op('request_run', { all: true, dry_run: true })).body, queue: (await op('request_update', { id: rq2, status: 'queued' })).status,
       batch: (await op('request_run', { batch: b2 })).body };
     let offline; try { offline = await S.ops.request_run(P, { ids: [rq2], wait: true }); } catch (e) { offline = { error: e.code }; }
     const pageApprove = await asPage('batch_act', { act: 'approve', id: b2 });
     await wait(300);
-    check('D4 a locked batch never runs: a request of the locked wave approved in the page is refused by request_run (ids, all, batch, offline), request_update queued is 409, approving the locked batch is 409 even from the page; nothing reached fal',
+    check('D4 a locked batch never runs: a request of the locked wave is not approved alone even from the page (403: approved with its batch), and is refused by request_run (ids, all, batch, offline), request_update queued is 409, approving the locked batch is 409 even from the page; nothing reached fal',
       lk.run?.started?.length === 0 && /locked until/.test(lk.run.refused[0].why) && !(lk.all?.items || []).some(x => x.id === rq2 && x.ok) && lk.queue === 409 && lk.batch?.started?.length === 0 && offline?.results?.length === 0 && /locked/.test(JSON.stringify(offline.refused))
-      && pageApprove.status === 409 && RQ().items.find(x => x.id === rq2).status === 'approved' && FAL.stats.submits === s0, { lk: { run: lk.run?.refused, queue: lk.queue }, offline: offline?.refused || offline, pageApprove: pageApprove.status });
+      && pageApprove.status === 409 && lkSave.status === 403 && RQ().items.find(x => x.id === rq2).status === 'draft' && FAL.stats.submits === s0, { lk: { run: lk.run?.refused, queue: lk.queue }, offline: offline?.refused || offline, pageApprove: pageApprove.status, lkSave: lkSave.status });
     // the per-batch cap: the director approves b01 with a cap below its estimate: the run is refused, nothing reached fal
     const ap = await asPage('batch_act', { act: 'approve', id: b1, max_usd: 0.05 });
     const capRun = await op('request_run', { batch: b1 }); await wait(300);
@@ -1244,6 +1248,132 @@ try {
     }
   }
   // ==================== D7 identity checks + D2 constants: END ====================
+
+  // ==================== review #2: S9 (page vs agent), N2-N9, I1 ====================
+  {
+    const raw = (p, body, headers) => fetch(A.base + p, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) }).then(async r => ({ status: r.status, client: r.headers.get('x-wb-client'), body: await r.json().catch(() => null) }));
+    const AGENT_TOKEN = fs.readFileSync(path.join(DATA, '.wb-agent-token'), 'utf8').trim();
+    const curl = { 'x-wb-token': A.token };                                                              // curl with the page's token, no Origin
+    const noSfs = { 'x-wb-token': A.token, origin: A.base };                                            // the Origin but no Sec-Fetch-Site
+    const cross = { 'x-wb-token': A.token, origin: A.base, 'sec-fetch-site': 'cross-site' };
+    const agentForged = { 'x-wb-agent-token': AGENT_TOKEN, 'x-wb-token': A.token, origin: A.base, 'sec-fetch-site': 'same-origin' };   // the agent token wins
+    const RQ = () => readP('requests.json');
+    // S9 tokens: the agent token is in <data>/.wb-agent-token (never served), an agent op with it alone is the agent's
+    const tokOk = await raw(`/api/op/notes_get?project=${P}`, {}, { 'x-wb-agent-token': AGENT_TOKEN });
+    const tokBad = await raw(`/api/op/notes_get?project=${P}`, {}, { 'x-wb-agent-token': 'f'.repeat(48) });
+    const tokServed = [(await get('127.0.0.1', A.port, '/data/.wb-agent-token', { host: `localhost:${A.port}` })).status, (await get('127.0.0.1', A.port, `/data/${P}/../.wb-agent-token`, { host: `localhost:${A.port}` })).status];
+    check('S9 tokens: the server writes the agent token to <data>/.wb-agent-token (a dot-file, never served); an op with it is the agent\'s (x-wb-client agent), a wrong one 403',
+      /^[0-9a-f]{48}$/.test(AGENT_TOKEN) && AGENT_TOKEN !== A.token && tokOk.status === 200 && tokOk.client === 'agent' && tokBad.status === 403 && tokServed.every(s => s >= 400), { ok: tokOk.status, client: tokOk.client, bad: tokBad.status, served: tokServed });
+    // S9 page acts: with the token but without the page (no Origin; the Origin without Sec-Fetch-Site; cross-site; the agent
+    // token with a forged Origin) every page act is 403
+    const doc0 = RQ(), bb = (doc0.batches || []).find(b => (b.request_ids || []).length);
+    const acts = {
+      take_act: { act: 'pick', shot: 's2-wall', media: 'm1' }, media_use: { media: 'm1', as: 'identity', id: 'ada' }, media_upload: { upload: 'abcdefgh12', size: 10, offset: 0, data: '' },
+      batch_act: { act: 'approve', id: bb?.id || 'b01' }, jobbooks_import: {}, asset_act: { type: 'character', id: 'ada', act: 'approve', tree: 'identity' }, character_act: { id: 'ada', act: 'approve' },
+      ref_upload: { type: 'character', id: 'ada', name: 'x.png', data: tinyPngB64() }, round_send: {}, revision_close: { summary: 'x' }, revision_restore: { revision: 'R1' },
+      final_lock: { force: true }, final_unlock: {}, proposal_act: { set: 'ps01', item: 'a', act: 'pick' }, breakdown_promote: { item: 'bi01' },
+    };
+    const actRes = {};
+    for (const [name, body] of Object.entries(acts)) {
+      actRes[name] = [];
+      for (const h of [curl, noSfs, cross, agentForged]) actRes[name].push((await raw(`/api/op/${name}?project=${P}`, { ...body, via: 'page' }, h)).status);
+    }
+    check('S9 every page act (take_act, media_use / media_upload, batch_act, jobbooks_import, asset_act / character_act, ref_upload, round send / close / restore, final lock / unlock, proposal pick, breakdown_promote) is 403 from curl with the page token and no Origin, with the Origin but no Sec-Fetch-Site, cross-site, and with the agent token and a forged Origin (even claiming via "page")',
+      Object.values(actRes).every(a => a.every(s => s === 403)), actRes);
+    // S9 saves: an agent's save (no page) cannot approve, lock, mark done, set ok or dismiss the director's note; it is stamped agent
+    const dr = (await op('request_create', { kind: 'identity', prompt: 's9 draft', est_cost: 0.12, tool: 'fal-ai/nano-banana-2/edit' })).body;
+    const save = async (f, fn, h) => { const cur = await (await fetch(`${A.base}/data/${P}/${f}`)).json(); fn(cur); return raw(`/api/save/${f}?project=${P}`, { base_rev: cur.rev, data: cur }, h); };
+    const sv = {};
+    for (const [k, h] of Object.entries({ curl, noSfs, agentForged })) {
+      sv[k] = [
+        (await save('requests.json', (d) => { d.items.find(x => x.id === dr.id).status = 'approved'; }, h)).status,
+        (await save('approvals.json', (d) => { d.items['shot:s5-outro'] = { state: 'approved' }; }, h)).status,
+        (await save('approvals.json', (d) => { d.items['shot:s5-outro'] = { state: 'locked' }; }, h)).status,
+        (await save('stages.json', (d) => { const s = d.stages.find(x => x.id === 'script'); if (s) s.status = 'done'; else d.stages.push({ id: 'script', status: 'done' }); }, h)).status,
+        (await save('scenes.json', (d) => { d.states = { ...(d.states || {}), sc02: { status: 'ok' } }; }, h)).status,
+        (await save('breakdown.json', (d) => { d.states = { ...(d.states || {}), bi01: { status: 'ok' } }; }, h)).status,
+      ];
+    }
+    const dn = (await post(`/api/save/notes.json?project=${P}`, { base_rev: readP('notes.json').rev, data: { ...readP('notes.json'), notes: [...readP('notes.json').notes, { id: 's9-dn', target: { stage: 'script', kind: 'scene', id: 'sc01' }, text: 's9: the director', status: 'open', replies: [] }] } }, { origin: A.base })).status;
+    const dnAgent = (await save('notes.json', (d) => { d.notes.find(x => x.id === 's9-dn').status = 'dismissed'; }, curl)).status;
+    const agentNew = await save('requests.json', (d) => { d.items.push({ id: 'rs9agent', kind: 'identity', prompt: 'x', refs: [], est_cost: 0.1, status: 'draft', by: 'director' }); }, curl);
+    const R9 = RQ(), dr9 = R9.items.find(x => x.id === dr.id), an = R9.items.find(x => x.id === 'rs9agent');
+    check('S9 an agent\'s save (curl with the token, the Origin without Sec-Fetch-Site, the agent token with a forged Origin) cannot approve a request, approve / lock an item, mark a stage done, set a scene or item ok, nor dismiss the director\'s note (403); its new content is stamped by agent, via agent',
+      Object.values(sv).every(a => a.every(s => s === 403)) && dn === 200 && dnAgent === 403 && dr9.status === 'draft' && !dr9.log.some(e => e.via === 'page') && readP('approvals.json').items['shot:s5-outro']?.state !== 'approved'
+      && agentNew.status === 200 && an.by === 'agent' && an.log[0].via === 'agent' && readP('notes.json').notes.find(x => x.id === 's9-dn').status === 'open', { sv, dn, dnAgent, an: an && [an.by, an.log] });
+    const pageOk = await save('requests.json', (d) => { d.items.find(x => x.id === dr.id).status = 'approved'; }, { 'x-wb-token': A.token, origin: A.base, 'sec-fetch-site': 'same-origin' });
+    check('S9 the page (its token + Origin + Sec-Fetch-Site: same-origin) approves; the log says by director, via page',
+      pageOk.status === 200 && pageOk.client === 'page' && RQ().items.find(x => x.id === dr.id).log.at(-1).via === 'page', { status: pageOk.status, client: pageOk.client });
+
+    // N2: a flagged-private file named another way (./, //, x/..) is the same private ref: stored canonical, refused without the tick
+    const md2 = readP('media.json'); md2.items.find(m => m.path === 'media/still/bo_face.jpg').private = true; S.writeJSON(path.join(D, 'media.json'), md2);
+    const variants = ['./media/still/bo_face.jpg', 'media//still/bo_face.jpg', 'media/x/../still/bo_face.jpg', path.join(D, 'media', 'still', 'bo_face.jpg')];
+    const made = [];
+    for (const v of variants) {
+      const r = (await op('request_create', { kind: 'identity', prompt: `n2 ${v}`, refs: [v], est_cost: 0.12, tool: 'fal-ai/nano-banana-2/edit' })).body;
+      await pageSave('requests.json', (d) => { d.items.find(x => x.id === r.id).status = 'approved'; });
+      const dry = (await op('request_run', { ids: [r.id], dry_run: true })).body?.items?.[0];
+      made.push({ ref: r.refs?.[0], ok: dry?.ok, why: dry?.why });
+    }
+    const escape = await op('request_create', { kind: 'identity', prompt: 'n2 escape', refs: ['../secret.png'], est_cost: 0.1, tool: 'fal-ai/nano-banana-2/edit' });
+    // a ref typed into requests.json by hand (after the approval) is judged on the file it names: refused, outputs under private/gen
+    const hand = (await op('request_create', { kind: 'identity', prompt: 'n2 hand', refs: ['media/still/studio.jpg'], est_cost: 0.12, tool: 'fal-ai/nano-banana-2/edit' })).body;
+    await pageSave('requests.json', (d) => { d.items.find(x => x.id === hand.id).status = 'approved'; });
+    const hd = readP('requests.json'); hd.items.find(x => x.id === hand.id).refs = ['media/x/../still//bo_face.jpg']; hd.rev++; S.writeJSON(path.join(D, 'requests.json'), hd);
+    const handDry = (await op('request_run', { ids: [hand.id], dry_run: true })).body?.items?.[0];
+    const RunMod = await import('../lib/run.mjs');
+    check('N2 a ref to a file flagged private in media.json written as ./x, x//y, x/../y or an absolute path is stored as the one canonical path and refused without the director\'s tick; a ref leaving the project is 400; a hand-typed variant is still refused by the runner',
+      made.every(m => m.ref === 'media/still/bo_face.jpg' && m.ok === false && /allow uploading private refs/.test(m.why || '')) && escape.status === 400
+      && handDry?.ok === false && /private ref/.test(handDry.why || '') && S.refPrivate(P, 'media/x/../still//bo_face.jpg') && !S.refPrivate(P, 'media/still/studio.jpg'), { made, escape: escape.status, hand: handDry?.why });
+    // outputs of a private-ref request go under private/gen (the planned out_dir), whatever spelling the ref has
+    const tickHand = await pageSave('requests.json', (d) => { d.items.find(x => x.id === hand.id).private_upload_ok = true; });
+    const handDry2 = (await op('request_run', { ids: [hand.id], dry_run: true })).body?.items?.[0];
+    check('N2 with the director\'s tick the hand-typed private ref plans its outputs under private/gen/', tickHand.status === 200 && handDry2?.ok === true && /^private\/gen\//.test(handDry2.out_dir || ''), { out: handDry2?.out_dir, why: handDry2?.why });
+
+    // N3: request ids are immutable from page saves; a batched request is never renamed, removed or approved alone; an edit voids
+    const bq = bb?.request_ids?.[0];
+    const ren = await pageSave('requests.json', (d) => { const x = d.items.find(r => r.id === bq); if (x) { x.id = bq + 'x'; x.status = 'approved'; } });
+    const rem = await pageSave('requests.json', (d) => { d.items = d.items.filter(r => r.id !== bq); });
+    const newAp = await pageSave('requests.json', (d) => { d.items.push({ id: 'rn3new', kind: 'identity', prompt: 'x', refs: [], est_cost: 0.1, status: 'approved' }); });
+    const bAp = await pageSave('requests.json', (d) => { const x = d.items.find(r => r.id === bq); if (x) x.status = 'approved'; });
+    const ed = (await op('request_create', { kind: 'identity', prompt: 'n3 edit', refs: ['media/still/bo_face.jpg'], est_cost: 0.12, tool: 'fal-ai/nano-banana-2/edit' })).body;
+    await pageSave('requests.json', (d) => { const x = d.items.find(r => r.id === ed.id); x.status = 'approved'; x.private_upload_ok = true; });
+    const edS = await pageSave('requests.json', (d) => { d.items.find(r => r.id === ed.id).prompt = 'n3 edit: something else'; });
+    const edR = RQ().items.find(r => r.id === ed.id);
+    check('N3 a page save cannot rename (400) or remove (400) a request, make a new one approved (400) or approve a batched request alone (403); editing an approved request\'s prompt sends it back to draft and unticks "allow uploading private refs" (the runner refuses it)',
+      !!bq && ren.status === 400 && rem.status === 400 && newAp.status === 400 && bAp.status === 403 && RQ().items.some(r => r.id === bq) && !RQ().items.some(r => r.id === bq + 'x')
+      && edS.status === 200 && edR.status === 'draft' && !edR.private_upload_ok && !S.privateUploadOk(edR) && !S.approvalOk(edR), { bq, ren: ren.status, rem: rem.status, newAp: newAp.status, bAp: bAp.status, ed: [edS.status, edR.status, edR.private_upload_ok] });
+
+    // N4: a lock whose process is alive is never taken over for a pause shorter than 30 min (a long upload); a dead one is
+    const lockAt = (id, pid, ageMs) => { const d = path.join(D, 'gen', id); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, '.lock'), JSON.stringify({ pid, at: '2026-10-05T00:00:00', beat: Date.now() - ageMs })); return path.join(d, '.lock'); };
+    const l20 = lockAt('rn4alive20', A.c.pid, 20 * 60e3), l31 = lockAt('rn4alive31', A.c.pid, 31 * 60e3), lDead = lockAt('rn4dead', 999999, 1000);
+    const removed = RunMod.cleanStaleLocks(P);
+    check('N4 stale locks: a live runner\'s lock with a 20-min-old beat (a long upload) is kept; one silent for 31 min or whose process is gone is taken over',
+      fs.existsSync(l20) && !fs.existsSync(l31) && !fs.existsSync(lDead) && removed.includes('rn4alive31') && removed.includes('rn4dead') && !removed.includes('rn4alive20'), { removed });
+    fs.rmSync(path.join(D, 'gen', 'rn4alive20'), { recursive: true, force: true });
+
+    // N5: an imported history request shows spent only from a ledger row
+    const hist = RQ().items.filter(r => r.history);
+    check('N5 history requests carry actual_cost_usd only when their cost is recorded / counted (an estimate stays in history.cost)',
+      hist.every(r => (r.history.cost?.counted ? r.actual_cost_usd != null : r.actual_cost_usd == null)), hist.map(r => [r.id, r.history.cost?.status, r.actual_cost_usd]));
+
+    // N7: GIF and MOV get their own MIME types
+    fs.copyFileSync(path.join(D, 'media', 'still', 'studio.jpg'), path.join(D, 'media', 'still', 'n7.gif'));
+    const gif = await get('127.0.0.1', A.port, `/data/${P}/media/still/n7.gif`, { host: `localhost:${A.port}` });
+    check('N7 a .gif is served as image/gif (nosniff)', gif.status === 200 && /^image\/gif/.test(gif.headers['content-type'] || ''), gif.headers['content-type']);
+
+    // N9: media_import never re-links a file already linked to a request
+    fs.copyFileSync(path.join(MB, 'roots', 'private', 'face.png'), path.join(MB, 'roots', 'n9.png'));
+    const [ra, rb] = RQ().items.filter(r => !r.history).slice(0, 2).map(r => r.id);
+    const i1 = await op('media_import', { paths: ['roots/n9.png'], request: ra }), i2 = await op('media_import', { paths: ['roots/n9.png'], request: rb });
+    const m9 = readP('media.json').items.find(m => m.path === 'roots/n9.png');
+    check('N9 media_import links a registered file to a request only when it has none (no re-link of a take)', i1.status === 200 && i2.status === 200 && m9?.request === ra && /request kept/.test(JSON.stringify(i2.body?.already || [])), { m: m9?.request, i2: i2.body?.already });
+
+    // I1: an agent's constants edit is marked
+    const cu = await op('entity_upsert', { kind: 'character', id: 'ada', fields: { constants: ['i1: a silver ring on the LEFT hand'] } });
+    const ada = JSON.parse(fs.readFileSync(path.join(D, 'entities', 'characters', 'ada.json'), 'utf8'));
+    check('I1 entity_upsert constants by an agent records constants_by {by: agent, via: agent} (the editor shows "changed by the agent")', cu.status === 200 && ada.constants_by?.via === 'agent', ada.constants_by);
+  }
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {
   if (browser) await browser.close().catch(() => {});
