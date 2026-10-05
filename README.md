@@ -70,7 +70,8 @@ scene or beat, an item, an asset / tree / node + image pin, a shot, a time) / `n
 notes are dismissed only by the director), and the old `notes_list` / `note_add` / `note_resolve` (the timeline); review rounds:
 `round_get` (the round the director sent: its notes by stage with the content they point at) / `round_absorb` (a note done,
 linked to the change) / `round_reply` / `round_finish`, and `revisions_get` (the revisions R1, R2, …, and a per-stage compare
-of two); `approvals_get` / `approve` / `request_changes`, `requests_list` /
+of two); proposals: `proposals_add` (3 free choices on a scene, a shot, a lyric line, a look: SVG made with code, sanitised
+on the server, or a short text) / `proposals_get` (the sets, the director's picks and mix notes, the "3 more" asks); `approvals_get` / `approve` / `request_changes`, `requests_list` /
 `request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`), `costs_get` (one total over costs.json and
 `media_add`, `notes_list` / `note_add` / `note_resolve`, `approvals_get` / `approve` / `request_changes`, `requests_list` /
 `request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`; `takes`), `request_run` (run approved requests: the runner) / `generators_get`, `costs_get` (one total over costs.json and
@@ -130,6 +131,18 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   carries the chip of the note that caused it. **restore** (two clicks) puts the project files back to a revision (the
   current state is snapshotted first; your notes stay as they are). File › Mirror revisions to git (off by default)
   also commits each revision into `data/<project>/.history`, a git repository of its own, if git is on PATH.
+- **Proposals** (SPEC v4 §3): where a choice is visual or open, the agent attaches 3 small choices, each an SVG made with
+  code (composition, framing, silhouettes, colour blocks, a camera arrow) or a short text, with a title and a why. They
+  show as a compact strip next to the target (a scene's sketch and idea, a shot's frame in the Shot panel, a lyric line,
+  a look or a location variant; a closed scene shows tiny thumbnails, a shot card a ◇ badge); click a thumbnail for a
+  larger view. **Pick**: an SVG becomes the scene sketch's underlay / the frame sketch's base layer, a text replaces the
+  line / the scene text / the shot's action in your draft (Ctrl+Z puts it back); **Mix**: pick + a note telling the agent
+  what to change; **3 more**: an ask for the agent (its next proposals on that target answer it); **×** dismiss. The ◇
+  on a lyric line's tools asks for 3 alternatives. Generate > **Prepare proposals** asks the agent for starting choices
+  on a stage; Generate > **Make free layouts** makes 3 SVG layouts per scene and shot right away, with no agent and no
+  cost (wide / medium / close, rule-of-thirds silhouettes in the cast's colours, a camera arrow read from the beats).
+  After a first save of the lyrics, script or storyboard (and in the new-project wizard, unticked) the page offers to
+  prepare starting proposals; it never runs by itself. Picks are yours: the agent reads them (`proposals_get`).
 - **New project** (File > New project, and automatically on an empty project): a wizard, **name -> lyrics (paste) ->
   song (optional path on this machine) -> Create**; opens the new project on the lyrics stage. File > New empty
   project keeps the old one-line prompt.
@@ -361,6 +374,7 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `sketches/<id>.json` / `.png` / `.mask.png` | a sketch: `{id, w, h, paper, underlay{src, opacity, fit}, strokes[], mask[], pins[{n, x, y, text}], title?, created, updated, by, via}` (format: `core/sketch/sketch.js`), the flattened image and the edit mask; written by `sketch_save`, registered in `media.json` (`kind: "sketch"`, `sketch`, `mask`, `scenes[]`, `pins`); under `private/sketches/` when drawn over a private image; not snapshotted |
 | `.snapshots/<yyyymmdd-hhmmss>-<slug>/` | copies of the small JSON files (no peaks, thumbs, `_src`, settings, revisions.json) + `.meta.json {id, at, message, auto, files, revision?, immutable?}` |
 | `revisions.json` | the review rounds and revisions (written by the server only; the page reads it): `{v: 1, rev, rounds[{n, status: sent/finished/closed, sent_at, sent_by, notes[ids], ask (the note to the agent), base (the snapshot when sent), finished_at?, summary?, closed_at?, revision?}], revisions[{id: "R3", n, round, created, summary, notes_absorbed[], notes_replied[], files_changed[], cost_usd, cost_delta, snapshot, base, by, via, git?: {commit} \| {skipped}}], restores[{at, revision, previous}]}`. A revision's snapshot is never changed; restoring one snapshots the current state first and keeps notes.json. Logic: `js/revisions.js`, `lib/ops/rounds.mjs` |
+| `proposals.json` + `proposals/<set>-<item>.svg` | proposals (written by the server only; the page reads it): `{v: 1, rev, sets[{id: "ps03", target{stage, kind, id}, round, by, via, source: agent/local, created, answers?[note ids], items[{id: "a", title, why, svg?: "proposals/ps03-a.svg" \| text?, status: open/picked/mixed/dismissed, note?, at?, by?, via?}]}]}`. Every SVG was sanitised (`lib/svg-sanitize.mjs`) and is shown only as an image. One pick per set; picks are the director's. Logic: `js/proposals.js`, `lib/ops/proposals.mjs`, the local generator `js/proposals-local.js` |
 | `.history/` | only with `settings.json` `revisions_git: true` and git on PATH: a git repository of its own with one commit per revision (the snapshot's files); never served, never the workbench's repository |
 
 ## How an agent edits them
@@ -486,6 +500,15 @@ small files are served in one read so no handle stays open.
   replies `by: "director", via: "page"`, keeps an existing note's author, via, created, target, round and an agent's
   words, stamps a status change `closed_by: "director"`, only grows `legacy_seen`, and refuses an old (v1) list or a
   bad target / status / id (400). Note texts are rendered as text everywhere (Notes columns, the timeline, Review).
+- Proposals: picking, mixing and dismissing (`proposal_act`) are the page's acts only (the server passes `via: "page"`
+  for its own Origin; no MCP tool; the agent surface, a foreign Origin and offline get 403); `proposals.json` is not a
+  page save (403). `proposals_add` sanitises every SVG with an allow-list (elements: shapes, paths, text, groups,
+  gradients, markers, clip paths, masks, patterns, `<use href="#id">`; attributes: geometry, paint, text, transforms) and
+  refuses the rest with the reason: script, foreignObject, image, links, `<style>`, animate / set, on* handlers, external,
+  `javascript:` or `data:` references (also entity-encoded), `url()` other than `url(#id)`, CSS escapes and expressions,
+  DOCTYPE / entities / CDATA / processing instructions, more than 64 KB, a viewBox outside 0-10000 or 1:4-4:1. The kept
+  markup is written out again from the parsed tree (values re-escaped). The page shows proposals only as `<img src>` and
+  the server serves them with the sandboxing CSP and nosniff. Titles, whys and texts render as text.
 - Review rounds and revisions: sending a round (`round_send`), closing (`revision_close`) and restoring
   (`revision_restore`) a revision are the page's acts only (the server passes `via: "page"` for its own Origin; no MCP
   tool; the agent surface and offline get 403). `revisions.json` is not a page save (403). A page save of `notes.json`

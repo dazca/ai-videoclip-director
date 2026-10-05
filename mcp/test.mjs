@@ -12,7 +12,8 @@
 // warnings, restore, diff), shot notes and asks, gaps_get (draft requests, the estimate vs the cap); notes.json v2: the migration of
 // every old note store without loss, notes_get / notes_add / notes_status, the old note tools as aliases, wait_for on a note),
 // review rounds and revisions (round_get / round_absorb / round_reply / round_finish, the page-only send / close / restore, the
-// compare, the opt-in mirror),
+// compare, the opt-in mirror), proposals (proposals_add with the SVG sanitiser, proposals_get, the page-only picks, the "3 more"
+// asks answered by the next set, the free local generator),
 // resources, the director-session prompt, the guard rules (edit voids approval, director-only approvals, media kind,
 // CSRF / Host / token checks, path traversal and the PRIVATE rule) and the offline (files only) mode. The temp folder
 // is removed at the end, whatever happens; data/demo must be byte-identical afterwards.
@@ -125,7 +126,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve', 'character_get', 'character_iteration_add', 'character_note_add', 'look_create',
     'asset_get', 'asset_iteration_add', 'asset_note_add', 'variant_create',
     'storyboard_get', 'shots_update', 'shot_note_add', 'shot_note_resolve', 'gaps_get', 'notes_get', 'notes_add', 'notes_status', 'request_run', 'generators_get',
-    'round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get'];
+    'round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get', 'proposals_add', 'proposals_get'];
   check('tools/list has every tool', EXPECT.every(t => tools.includes(t)), { count: tools.length, missing: EXPECT.filter(t => !tools.includes(t)) });
   const schemaOk = (await mcp.listTools()).tools.every(t => t.description?.length > 40 && t.inputSchema?.type === 'object');
   check('every tool has a description and a JSON schema', schemaOk);
@@ -1212,6 +1213,50 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   check('revision_restore (page) R1: the files go back (sc01 without the R2 title), the state before is a snapshot, the notes are kept as they are, revisions.json keeps R1 and R2 (+ the restore)',
     rs.status === 200 && !/mcp R2 title/.test(titleNow) && fs.existsSync(path.join(RD, '.snapshots', rs.body.previous)) && RJ('notes.json').notes.some(n => n.id === 'ln90' && n.absorbed_in === 'R1') && RJ('revisions.json').revisions.length === 2 && RJ('revisions.json').restores.length === 1,
     { restore: rs.body?.restored || rs.body, titleNow });
+}
+// 17. proposals (SPEC v4 §3): the agent adds sets (SVG made with code, sanitised; or short texts) and reads the director's
+// picks; picking is the page's (no tool; 403 over HTTP and offline); a "3 more" ask is answered by the next set on its
+// target; the free local generator makes 3 layouts per scene / shot
+{
+  const PP = 'mcp-proposals';
+  S.duplicateProject(PROJECT, PP, true);
+  const PPD = path.join(DATA, PP), PJ = (f) => JSON.parse(fs.readFileSync(path.join(PPD, f), 'utf8'));
+  const pageOp = (name, body = {}) => post(`/api/op/${name}?project=${PP}`, body, { origin: URL_ });
+  const svg = (c) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 90"><rect width="160" height="90" fill="${c}"/><circle cx="53" cy="40" r="9" fill="#111"/><text x="4" y="86" font-size="8">thirds</text></svg>`;
+  const tools = (await mcp.listTools()).tools.map(t => t.name);
+  const scT = { stage: 'script', kind: 'scene', id: 'sc01' };
+  const add = await call(mcp, 'proposals_add', { project: PP, target: scT, items: [{ title: 'Wide', why: 'the place', svg: svg('#eee') }, { title: 'Medium', why: 'the action', svg: svg('#ddd') }, { title: 'An idea', why: 'a text', text: 'the screen fades up from black' }] });
+  const bad = await call(mcp, 'proposals_add', { project: PP, target: scT, items: [{ title: 'x', svg: '<svg viewBox="0 0 10 10" onload="alert(1)"/>' }] });
+  const badT = await call(mcp, 'proposals_add', { project: PP, target: { stage: 'script', kind: 'scene', id: 'sc77' }, items: [{ title: 'x', text: 'y' }] });
+  const agentPick = await post(`/api/op/proposal_act?project=${PP}`, { set: add.set?.id, item: 'a', act: 'pick' });
+  let offErr = null; try { S.ops.proposal_act(PP, { set: add.set?.id, item: 'a', act: 'pick' }); } catch (e) { offErr = e.code; }
+  check('proposals_add: a set of 3 on a scene (SVGs written to proposals/<set>-<item>.svg, sanitised; a text), the answer says what changed; a hostile SVG and a missing scene are refused; the agent cannot pick (no tool, 403 over HTTP and offline)',
+    tools.includes('proposals_add') && tools.includes('proposals_get') && !tools.includes('proposal_act') && add.set?.items?.length === 3 && /^proposals\.json: set ps01 on scene sc01 with 3 items/.test(add.changed)
+    && fs.existsSync(path.join(PPD, 'proposals', 'ps01-a.svg')) && add.set.items[2].text && /on\* handlers|event handlers/.test(bad.error || '') && /404/.test(badT.error || '') && agentPick.status === 403 && offErr === 403,
+    { changed: add.changed, bad: bad.error, badT: badT.error, agentPick: agentPick.status, offErr });
+  // the director picks in the page; mixes another; asks for 3 more; the agent reads it all and answers the ask
+  const pick = await pageOp('proposal_act', { set: 'ps01', item: 'b', act: 'pick' });
+  const mix = await pageOp('proposal_act', { set: 'ps01', item: 'c', act: 'mix', note: 'fade from white instead' });
+  const n0 = await (await fetch(`${URL_}/data/${PP}/notes.json`)).json();
+  n0.notes.push({ id: 'sn77', target: scT, text: '3 more proposals for scene sc01', status: 'open', to: 'agent', ask: 'proposals', replies: [] });
+  const sv = await post(`/api/save/notes.json?project=${PP}`, { base_rev: n0.rev, data: n0 }, { origin: URL_ });
+  const got = await call(mcp, 'proposals_get', { project: PP, target: scT });
+  const more = await call(mcp, 'proposals_add', { project: PP, target: scT, items: [{ title: 'Close', why: 'her eyes', svg: svg('#ccc') }, { title: 'Top shot', why: 'the floor', svg: svg('#bbb') }, { title: 'Dutch', why: 'unease', svg: svg('#aaa') }] });
+  const askNow = PJ('notes.json').notes.find(n => n.id === 'sn77');
+  check('proposals_get: the sets with each item\'s status, the director\'s picks (one per set: the mix replaced the pick) with the mix note, the open "3 more" ask; the next proposals_add on that scene answers the ask (absorbed, with a reply)',
+    pick.status === 200 && mix.status === 200 && mix.body.note && sv.status === 200 && got.sets?.[0]?.items?.map(i => i.status).join() === 'open,open,mixed' && got.picks?.length === 1 && got.picks[0].note === 'fade from white instead'
+    && got.asks?.some(a => a.id === 'sn77') && more.answered?.includes('sn77') && askNow?.status === 'absorbed' && /ps02/.test(askNow.replies?.at(-1)?.text || ''),
+    { statuses: got.sets?.[0]?.items?.map(i => i.status), picks: got.picks, asks: got.asks?.map(a => a.id), answered: more.answered, ask: askNow?.status });
+  // the free local generator: 3 layouts per scene and shot, $0, nothing twice
+  const loc = await pageOp('proposals_local', { scope: 'all' }), loc2 = await pageOp('proposals_local', { scope: 'all' });
+  const sets = PJ('proposals.json').sets.filter(x => x.source === 'local');
+  check('proposals_local: 3 sanitised SVG layouts per scene / shot without open proposals ($0; sc01 skipped: it has open ones); run again: nothing new',
+    loc.status === 200 && loc.body.cost_usd === 0 && loc.body.added.length === sets.length && sets.length >= 3 && sets.every(x => x.items.length === 3 && x.items.every(i => fs.existsSync(path.join(PPD, i.svg))))
+    && loc.body.skipped.includes('scene sc01') && loc2.body.added.length === 0,
+    { added: loc.body?.added?.length, skipped: loc.body?.skipped, again: loc2.body?.added?.length });
+  // the director-session briefing mentions them
+  const pr = await mcp.getPrompt({ name: 'director-session', arguments: { project: PP } });
+  check('the director-session briefing counts the proposals and tells the agent how to add them', /Proposals: \d+ set/.test(pr.messages[0].content.text) && /proposals_add/.test(pr.messages[0].content.text));
 }
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {

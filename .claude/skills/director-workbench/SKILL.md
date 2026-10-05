@@ -25,6 +25,29 @@ formats and how to add features.
    notes (refused) and never absorb one you did not act on. Confirm the plan before large changes.
 5. `round_get`: has the director **sent a review round**? If `status` is "sent", that round is your job first (see
    "Review rounds" below); "collecting" means they are still writing notes.
+6. `proposals_get`: what the director **picked** (and the mix notes: what to change), and the open asks for proposals
+   ("3 more" on a target, "Prepare proposals" on a stage). See "Proposals" below.
+
+## Proposals (3 free choices instead of one answer)
+
+Where a choice is visual or open, give the director something to choose from, so they never start from a blank page:
+- **Where**: a scene's sketch (`{stage: "script", kind: "scene", id}`: SVG layouts) or its idea (texts); a shot's frame
+  (`{stage: "storyboard", kind: "shot", id}`: SVG frames); a lyric line (`{stage: "lyrics", kind: "line", id}`: texts); a
+  look (`{stage: "characters", kind: "tree", id: "ada/look:x"}`) or a location variant (`{stage: "scenery", kind:
+  "tree", id: "studio/variant:dusk"}`): SVG mood boards (colour blocks, a silhouette) or texts.
+- **How**: `proposals_add {target, items: [{title, why, svg | text}]}`, 3 items by default, each with a short title and
+  one line of why. Write the SVG with code: `viewBox="0 0 160 90"` (16:9), a sky / ground split, rule-of-thirds
+  silhouettes (a circle and a rounded rect), colour blocks from the scene's palette, a camera arrow (`<marker>` +
+  `marker-end="url(#ah)"`), a small label. Only shapes, paths, text, gradients, markers and `<use href="#id">`: no
+  script, images, links, `<style>`, on* or external refs (refused with the reason; fix and retry). Make the three
+  really different (framing, side, move, mood), not three variations of one idea.
+- **When**: at the start of a stage (after the script draft: a sketch set per scene; after the shots: a frame set per
+  shot without a frame; for each look), when the director asks for "3 more" (an ask on the target: your next
+  `proposals_add` on it answers it), or on a stage-wide "Prepare proposals" ask (add sets where they help most, then
+  `notes_status {id, status: "absorbed", reply}`).
+- **After**: `proposals_get` `picks` is what they chose; a **mix** is a pick plus a note to you (also an open note on the
+  target, in the next round): apply it. Build the next step from the pick (the sketch over it, the sheet request with
+  the mood, the line). You never pick, mix or dismiss (no tool). Free: no image model, no request.
 
 ## Review rounds (the director's notes, absorbed in one go)
 
@@ -165,6 +188,8 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
   `costs_get` before proposing; the tools refuse queueing above the cap. Record the real cost when done. Prefer
   `request_run` (it enforces all of this) to calling a provider yourself.
 - Never approve on the director's behalf, never mark their notes resolved without doing what they asked.
+- Never pick, mix or dismiss a proposal (the director's, in the page), and never write `proposals.json` or
+  `proposals/*.svg` by hand: `proposals_add` sanitises and records them.
 - Never `round_absorb` a note you did not apply, and never call `round_finish` before every note of the round is
   absorbed or replied. A round is not an approval: closing the revision is the director's.
 - Never touch PRIVATE files (crops of real photos, anything under a `private/` folder or flagged private) beyond
@@ -190,3 +215,6 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
 - "Storyboard the chorus" -> `storyboard_get` {scene}, `shots_update` upsert one shot per beat (snap beats), a frame
   sketch for the key shot, then `ui_focus` view "stage" and a `shot_note_add` asking for review.
 - "What is left before we can render?" -> `gaps_get`: the groups, the draft requests and the estimate vs the cap.
+- "Give me options for the chorus shot" -> `storyboard_get` {scene}, then `proposals_add` on the shot with 3 SVG frames
+  (wide low angle / over the shoulder / top shot), `ui_focus` view "stage" select the shot; after their pick,
+  `proposals_get` and draw the frame over it (`sketch_save` with `underlay` = the picked SVG path).

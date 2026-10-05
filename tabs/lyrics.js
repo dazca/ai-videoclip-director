@@ -15,6 +15,7 @@ import * as F from '../js/flow.js';
 import { NotesColumn } from '../core/notescol.js';
 import { history } from '../core/history.js';
 import { menus } from '../core/menus.js';
+import { stripHtml, register as registerProposals, offerPrepare } from '../core/proposals.js';
 
 const WB = () => window.WB;
 const visible = () => WB()?.app?.active() === 'stage' && WB().stages?.current() === 'lyrics';
@@ -47,7 +48,7 @@ class Workspace {
         : { el: e, targets: [{ stage: 'lyrics', kind: 'section', id: e.closest('.lysec').dataset.sec }] }),
       current: () => { const s = this.sel, f = this.el.querySelector('.lyl:focus')?.dataset.line; const L = s && this.findLine(s.line)?.l;
         return L ? { stage: 'lyrics', kind: 'line', id: s.line, w: [s.w0, s.w1], quote: F.words(L.text).slice(s.w0, s.w1 + 1).join(' ') } : f ? { stage: 'lyrics', kind: 'line', id: f } : null; } });
-    store.on((w) => { if (['lyrics', 'all', 'stages', 'notes'].includes(w)) { if (this.editing) this.pending = true; else this.render(); } });
+    store.on((w) => { if (['lyrics', 'all', 'stages', 'notes', 'proposals'].includes(w)) { if (this.editing) this.pending = true; else this.render(); } });
     this.render();
   }
   get doc() { return store.lyrics; }
@@ -87,6 +88,7 @@ class Workspace {
     let id = null; this.busy = true;
     try { await store.mutate('lyrics.json', (d) => { id = F.addVersion(d, body, { by: 'director', via: 'page', message }).id; }, { label: 'save lyrics version' }); } finally { this.busy = false; }
     this.base = this.doc.current; this.draft = structuredClone(this.cur?.sections || []); this.saveDraft();
+    offerPrepare('lyrics');
     toast(`lyrics saved as ${id}${store.song?.audio?.mix ? ' · timings kept, new lines estimated' : ' · timings estimated (no song yet)'}`);
     this.render();
   }
@@ -159,8 +161,9 @@ class Workspace {
         for (const x of ns) { const r = x.target.w ? F.anchorWords(l.text, x.target) : null; if (r) for (let i = r[0]; i <= r[1]; i++) marks.add(i); }
         const ws = F.words(l.text).map((w, i) => `<span class="w${marks.has(i) ? ' nw' : ''}" data-i="${i}">${esc(w)}</span>`).join(' ');
         const changed = this.cur && !F.flatLines(this.cur).some(x => x.id === l.id && x.text === l.text);
-        return `<div class="lyl${ns.length ? ' hasn' : ''}${changed ? ' chg' : ''}" data-line="${esc(l.id)}" tabindex="0"><span class="lyn">${k}</span><span class="lyt" ${t ? `data-t="${t.t0}" title="${t.timing === 'estimated' ? 'estimated: ' : ''}${fmt(t.t0, true)} – ${fmt(t.t1, true)} (click: show in the timeline)"` : 'title="no timing yet (saved versions get one)"'}>${t ? (t.timing === 'estimated' ? '~' : '') + fmt(t.t0) : '·'}</span><span class="lytx">${ws || '<span class="dim">(empty)</span>'}</span>
-          <span class="lytools"><b data-l="up" title="move up (Alt+Up)">↑</b><b data-l="down" title="move down (Alt+Down)">↓</b><b data-l="add" title="add a line below (Shift+Enter)">+</b><b data-l="edit" title="edit (Enter, F2, double-click)">✎</b><b data-l="note" title="note on this line, in the Notes column (Alt+N; select words first to pin it to them)">✉</b><b data-l="del" title="delete the line">×</b></span></div>`;
+        const pp = stripHtml({ stage: 'lyrics', kind: 'line', id: l.id }, { quiet: true, label: 'alternatives' });
+        return `<div class="lyl${ns.length ? ' hasn' : ''}${changed ? ' chg' : ''}${pp ? ' hasp' : ''}" data-line="${esc(l.id)}" tabindex="0"><span class="lyn">${k}</span><span class="lyt" ${t ? `data-t="${t.t0}" title="${t.timing === 'estimated' ? 'estimated: ' : ''}${fmt(t.t0, true)} – ${fmt(t.t1, true)} (click: show in the timeline)"` : 'title="no timing yet (saved versions get one)"'}>${t ? (t.timing === 'estimated' ? '~' : '') + fmt(t.t0) : '·'}</span><span class="lytx">${ws || '<span class="dim">(empty)</span>'}</span>
+          <span class="lytools"><b data-l="up" title="move up (Alt+Up)">↑</b><b data-l="down" title="move down (Alt+Down)">↓</b><b data-l="add" title="add a line below (Shift+Enter)">+</b><b data-l="edit" title="edit (Enter, F2, double-click)">✎</b><b data-l="note" title="note on this line, in the Notes column (Alt+N; select words first to pin it to them)">✉</b><b data-l="propose" title="ask the agent for 3 alternatives to this line (proposals: you pick one)">◇</b><b data-l="del" title="delete the line">×</b></span>${pp}</div>`;
       }).join('') + `</div>`).join('');
     if (this.flash) { const e = poem.querySelector(`[data-line="${CSS.escape(this.flash)}"]`); e?.scrollIntoView({ block: 'center' }); e?.classList.add('flash'); setTimeout(() => e?.classList.remove('flash'), 1200); this.flash = null; }
   }
@@ -299,6 +302,7 @@ class Workspace {
         if (a === 'edit') return this.editLine(id);
         if (a === 'del') return this.undoable(`delete ${id}`, () => this.edit((d) => { const f = this.findLine(id); f?.s.lines.splice(f.i, 1); }));
         if (a === 'note') { this.sel = null; return this.noteOnSelection(id); }
+        if (a === 'propose') { if (!F.flatLines(this.cur).some(x => x.id === id)) return toast('save the lyrics first: proposals sit on a saved line'); return WB().proposals.more({ stage: 'lyrics', kind: 'line', id }); }
       }
       const sb = t.closest('[data-s]'), sid = t.closest('.lysec')?.dataset.sec;
       if (sb && sid) {
@@ -339,6 +343,15 @@ class Workspace {
   // "Ask the agent": an ask in the Notes column (on the selected words / line, else the whole poem)
   ask() { const t = this.nc.o.current() || { stage: 'lyrics', kind: 'stage', id: null }; this.clearSel(); this.nc.edit(t, { to: true }); }
 }
+
+// ------------------------------------------------------------------ proposals: a picked text replaces the line in the draft (core/proposals.js)
+registerProposals('lyrics', async ({ target, item }) => {
+  if (!S) await WB().stages.open('lyrics');
+  if (target.kind !== 'line' || item.svg) return null;
+  const f = S.findLine(target.id); if (!f) throw new Error(`line ${target.id} is not in the draft`);
+  const before = structuredClone(S.draft); S.edit(() => { f.l.text = item.text.replace(/\s+/g, ' ').trim(); }); const after = structuredClone(S.draft);
+  return { what: `line ${target.id} (unsaved: Save version keeps it)`, undo: () => S.setDraft(before), redo: () => S.setDraft(after) };
+});
 
 // ------------------------------------------------------------------ commands (registered at load: core/rail.js imports this module)
 const L = (c) => visible() && !!S;

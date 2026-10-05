@@ -43,18 +43,19 @@ win: `WB_PROJECT`, `WORKBENCH_DATA`, `WORKBENCH_MEDIA_BASE`, `FAL_KEY`.
 | `lib/ops/` | the data layer by domain (table below): `_shared.mjs` (files, config, media paths + the PRIVATE rule, `projDir` / `read` / `write` / `mutate`, time helpers, thumbnails, the director gates, the `ops` object); each domain file adds its ops with `Object.assign(ops, {...})` |
 | `mcp/server.mjs`, `mcp/test.mjs`, `mcp/client.mjs` | MCP server (stdio: imports the tool files, adds the resources and the `director-session` prompt, connects), its end-to-end test, and the one-shot CLI client (`node mcp/client.mjs <tool> '<json>'`) |
 | `mcp/tools/` | the MCP tools by domain, one file per `lib/ops/<domain>.mjs`; `_shared.mjs` holds the transport (`op`, `http`, `server`, `projectOf`), `wrap`, the shared zod schemas and the one `mcp` server object the files register on |
+| `lib/svg-sanitize.mjs` | the SVG sanitiser for proposals: a strict tokenizer, an allow-list of elements and attributes, values re-escaped; refuses (with the reason) script, on*, foreignObject, external / javascript: refs, url() but url(#id), DOCTYPE, CDATA, > 64 KB, a bad viewBox |
 | `lib/run.mjs` | the request runner (D3a): plans, locks, claims (approval + cap), runs through a generator, writes `gen/<request>/`, records the cost once, registers and links the outputs; resolves the fal key; `runEvents` (serve.mjs forwards them as SSE `{run}`). The only code that calls a paid API |
 | `generators/` | generator plugins `{id, label, kinds, configured, supports, estimate, submit, poll, fetch}`: `fal.mjs` (nb2 edit / t2i, seedream edit; fal queue + storage), `openwith.mjs` ("Open in another app": a prompt pack), `comfyui.mjs` (a stub) |
 | `js/prices.js` | the ONE price table (list prices with the day each was verified): every estimate in the page, the server and the tools |
 | `js/recipe.js`, `templates/photoreal_recipe.json`, `docs/PHOTOREAL.md` | the photoreal recipe: the default prompt template (blocks per model), its data, and the guide that explains it |
 | `index.html`, `app.js`, `app.css` | the page shell |
-| `core/` | command registry + keymap, menus, palette, undo history (`history.push({label, undo, redo})` for a stage draft edit), selection, projects/exports, preview dock, default commands (+ the timeline "+ Add", `notes.addHere`), `rail.js` (stage rail + stage commands + open-notes counts + the review round at its right end: "Round N · K open notes", Send round to Claude, the agent's progress, Close revision, the revision chip; `WB.rounds`), `notescol.js` (the Notes column every stage mounts: row-aligned cells, typing, threads, its width (`width` / `maxWidth`), API in its header), `wizard.js` (new-project wizard), `sketch/` (the sketch tool: `mountSketch` / `openSketch`, API in its header) |
-| `js/` | store (data + live reload), timeline (the warp), columns, player, verify hooks, `notes.js` (ONE notes model for every stage and the timeline: notes.json v2, targets, validation, the migration of the old stores, the old shapes; shared with `lib/ops/notes.mjs` and `serve.mjs`), `revisions.js` (review rounds and revisions: revisions.json, the round in flight, its progress, the compare helpers; shared with `lib/ops/rounds.mjs`), `flow.js` (the guided flow: stages + lyrics model), `scenes.js` (stage 2: scenes, intake, gaps, snapping), `breakdown.js` (stage 3: items, links, merge / split, the "Suggest from script" pre-pass), `assets.js` (stages 4 and 5: the asset workspace logic for characters, locations and props: iteration trees, branches, variants and their axes, statuses, estimates, prompts, the variant per scene) and `characters.js` (the stage-4 names on top of it), `storyboard.js` (stage 6: shots, tiling on the beat grid, "shots from beats", the assets a shot needs and their variants, estimates, gaps), all shared with `lib/store.mjs` |
+| `core/` | command registry + keymap, menus, palette, undo history (`history.push({label, undo, redo})` for a stage draft edit), selection, projects/exports, preview dock, default commands (+ the timeline "+ Add", `notes.addHere`), `rail.js` (stage rail + stage commands + open-notes counts + the review round at its right end: "Round N · K open notes", Send round to Claude, the agent's progress, Close revision, the revision chip; `WB.rounds`), `notescol.js` (the Notes column every stage mounts: row-aligned cells, typing, threads, its width (`width` / `maxWidth`), API in its header), `wizard.js` (new-project wizard, with the unticked "Prepare starting proposals"), `proposals.js` (the proposals strip every target with proposals shows: cards, Pick / Mix / 3 more / ×, the large view, `register(stage, apply)` for what a pick does, "Prepare proposals" and "Make free layouts" (Generate menu, palette), the offer after a save; API in its header), `sketch/` (the sketch tool: `mountSketch` / `openSketch`, API in its header) |
+| `js/` | store (data + live reload), timeline (the warp), columns, player, verify hooks, `notes.js` (ONE notes model for every stage and the timeline: notes.json v2, targets, validation, the migration of the old stores, the old shapes; shared with `lib/ops/notes.mjs` and `serve.mjs`), `revisions.js` (review rounds and revisions: revisions.json, the round in flight, its progress, the compare helpers; shared with `lib/ops/rounds.mjs`), `proposals.js` (proposals.json: sets, items, targets, the "3 more" / "Prepare" ask texts; shared with `lib/ops/proposals.mjs`), `proposals-local.js` (the free local generator: 3 SVG layouts per scene / shot from the script, the beats and the palette), `flow.js` (the guided flow: stages + lyrics model), `scenes.js` (stage 2: scenes, intake, gaps, snapping), `breakdown.js` (stage 3: items, links, merge / split, the "Suggest from script" pre-pass), `assets.js` (stages 4 and 5: the asset workspace logic for characters, locations and props: iteration trees, branches, variants and their axes, statuses, estimates, prompts, the variant per scene) and `characters.js` (the stage-4 names on top of it), `storyboard.js` (stage 6: shots, tiling on the beat grid, "shots from beats", the assets a shot needs and their variants, estimates, gaps), all shared with `lib/store.mjs` |
 | `tabs/` | one module per view; `tabs/registry.js` lists pages and sub-views; `stage.js` (stage workspaces), `lyrics.js` (stage 1), `script.js` (stage 2), `breakdown.js` (stage 3), `assetws.js` (the generic asset workspace + its commands), `charstage.js` (stage 4 on it; `characters.js` is the Assets sub-view), `scenery.js` (stage 5 on it: locations and props), `storyboard.js` (stage 6: the board, the shot panel, the gaps, the estimate vs the cap), `final.js` (stage 7, a placeholder: the shots and their states); `notes.js` is Review › Notes (every note in one table); `compare.js` is Review › Compare (two revisions per stage, each change with its note; restore); each stage mounts the Notes column (`core/notescol.js`) |
 | `docs/SPEC_v3_GUIDED.md` | the guided creation flow (seven stages); phase 1 = stage rail, wizard, lyrics stage; phase 2 = the script stage + sketch files; phase 3 = the breakdown stage; phase 4 = the characters stage; phase 5 = the scenery stage (locations, props) on the generic asset workspace; phase 6 = the storyboard stage (shots per scene, gaps) |
 | `catalog/` | the free starter catalogue (CC0 / public-domain bases: bodies, poses, face angles, garments, locations, props; `catalog.json`, `LICENSES.md`), served read-only for stage 4 |
 | `importers/` | `new_project.mjs` (song + lyrics -> project), `azemar_*` (the owner's production, kept as a worked example) |
-| `tools/` | `verify.mjs` (UI suite; its stage-4 / 5 blocks are `verify-characters.mjs` (v7), `verify-scenery.mjs` (v8), `verify-storyboard.mjs` (v9) and `verify-dogfood.mjs` (v10: proposals, image import, request warnings, merged costs, the recipe form, the stale bar), `verify-notes.mjs` (v11: the migration of the old note stores, the Notes column per stage and on the timeline, the right-click "+ Add" menus + Ctrl+Z, the counters), `verify-runner.mjs` (v12: the Queue's Approve / Reject / Run, live progress, outputs as nodes, Settings > Generator, on a mock fal) and `verify-rounds.mjs` (v13: a full review round in the page and over MCP, Close revision, Compare, restore, the page-only acts, the git mirror off by default, the Notes column's width), each runnable alone; `verify-stages.mjs` (F1: stage status from content, per stage empty / partial / done / regressed, the rail screenshots `f1_*.png`; run after it by `npm run verify`)), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `mock-fal.mjs` (a mock fal for every runner test: never the real one), `run.mjs` (the runner CLI), `make_demo.mjs`, `chrome.mjs` |
+| `tools/` | `verify.mjs` (UI suite; its stage-4 / 5 blocks are `verify-characters.mjs` (v7), `verify-scenery.mjs` (v8), `verify-storyboard.mjs` (v9) and `verify-dogfood.mjs` (v10: proposals, image import, request warnings, merged costs, the recipe form, the stale bar), `verify-notes.mjs` (v11: the migration of the old note stores, the Notes column per stage and on the timeline, the right-click "+ Add" menus + Ctrl+Z, the counters), `verify-runner.mjs` (v12: the Queue's Approve / Reject / Run, live progress, outputs as nodes, Settings > Generator, on a mock fal) and `verify-rounds.mjs` (v13: a full review round in the page and over MCP, Close revision, Compare, restore, the page-only acts, the git mirror off by default, the Notes column's width) and `verify-proposals.mjs` (v14: proposals added over MCP, the strips on a scene, a shot, a lyric line and a look, Pick -> the sketch underlay / the frame's base layer / the line text + Ctrl+Z, Mix, "3 more", the free local generator, "Prepare proposals", the wizard offer), each runnable alone; `verify-stages.mjs` (F1: stage status from content, per stage empty / partial / done / regressed, the rail screenshots `f1_*.png`; run after it by `npm run verify`)), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `mock-fal.mjs` (a mock fal for every runner test: never the real one), `run.mjs` (the runner CLI), `make_demo.mjs`, `chrome.mjs` |
 | `exporters/hyperframes-html/` | HTML package of a HyperFrames composition: `export.mjs`, `verify.mjs`, `serve.mjs` (see Export) |
 | `data/<project>/` | one folder per project; only `data/_template/` and `data/demo/` are in git |
 
@@ -72,6 +73,7 @@ that owns them and imported by the others); ops call each other through `ops.<na
 | breakdown | `breakdown.mjs` | `breakdown.mjs` | stage 3: `breakdown_*` (`breakdown_promote` is page only: no tool) |
 | assets, characters | `assets.mjs` | `assets.mjs` | entities (`entities_list`, `entity_get`, `entity_upsert`) and stages 4-5 (`asset_*`, `character_*`, `look_create`, `variant_create`, `base_propose`, `node_import_propose`; `asset_act` / `character_act` / `ref_upload` are page only: no tool) |
 | storyboard | `storyboard.mjs` | `storyboard.mjs` | the shots.json shots (`shots_list`, `shot_get`, `shot_update`) and stage 6 (`storyboard_get`, `shots_update`, `shot_note_*`, `gaps_get`) |
+| proposals | `proposals.mjs` | `proposals.mjs` | sets of free choices on a target (`proposals_add` with the SVG sanitiser, `proposals_get`; `proposal_act` is page only: no tool), the free local generator (`proposals_local`) |
 | rounds, revisions | `rounds.mjs` | `rounds.mjs` | review rounds (`round_get`, `round_absorb`, `round_reply`, `round_finish`; `round_send` is page only: no tool) and revisions R<n> (`revisions_get`, `revision_compare`; `revision_close` / `revision_restore` are page only: no tool), the opt-in git mirror |
 
 A new domain: a `lib/ops/<domain>.mjs` imported (or re-exported) by `lib/store.mjs`, and a `mcp/tools/<domain>.mjs`
@@ -197,6 +199,13 @@ relative to the media base; any other path is relative to the project folder. Fu
   `settings.json` `revisions_git: true` and git on PATH each revision is also a commit in `.history/` (a repository of its
   own). Logic: `js/revisions.js`, `lib/ops/rounds.mjs`.
 
+- `proposals.json` (the server's only; the page reads it) + `proposals/<set>-<item>.svg`: proposals, `{v: 1, rev,
+  sets[{id "ps03", target{stage, kind, id}, round, by, via, source: agent|local, created, answers?[note ids], items[{id "a",
+  title, why, svg?: "proposals/ps03-a.svg" (sanitised) | text?, status: open|picked|mixed|dismissed, note? (a mix), at?, by?,
+  via?}]}]}`. Targets: lyrics `line` / `section`; script `scene` (sketch layouts, scene ideas); storyboard `shot` (frames) /
+  `scene`; characters / scenery `asset` / `tree` (`"ada/look:x"`, `"studio/variant:dusk"`). One pick per set; picks, mixes
+  and dismissals are the director's (page only). Logic: `js/proposals.js`, `lib/ops/proposals.mjs`.
+
 Editing by hand: read the file, change it, **bump `rev`** on the shared files, write it whole via temp file + rename.
 The server watches the folder and every open page reloads the changed file. Keep ids stable and `t0 < t1`.
 
@@ -320,6 +329,18 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <same export witho
    `round_finish {summary}`. The page shows your progress live. Closing the revision (R<n>: an immutable snapshot +
    `revisions.json`), comparing and restoring are the director's (page only; no tool). `revisions_get {compare: [a, b]}`
    ("R<n>", "R0" = before the first round, "now") reads the per-stage diff with the notes behind each change.
+4d. **Proposals** (free; SPEC v4 §3). Where a choice is visual or open (a scene sketch or idea, a shot frame, a look, a
+   location variant, a lyric line), offer the director 3 choices instead of one answer: `proposals_add {target, items:
+   [{title, why, svg | text}]}`. An SVG is code you write (composition, framing, rule-of-thirds silhouettes, colour blocks,
+   a camera arrow; `viewBox="0 0 160 90"` for 16:9; ≤ 64 KB); the server sanitises it and refuses anything outside its
+   allow-list with the reason (fix and retry). A text is a short alternative (a line, a scene idea, a shot action). The
+   director picks (an SVG becomes the scene sketch's underlay / the frame sketch's base layer; a text fills the line /
+   scene text / shot action in their draft), mixes (a pick + a note to you on the target: apply it like any note) or
+   dismisses, in the page only (`proposal_act`: no tool, 403). `proposals_get` gives the sets, `picks` (what they chose,
+   with mix notes) and `asks`: a "3 more" on a target is answered by your next `proposals_add` on that target
+   (absorbed automatically); a stage-wide "Prepare proposals" ask: add sets where they help most (scene sketches from the
+   script, shot frames from the beats, look moods), then `notes_status {id, status: "absorbed", reply}`. Without an
+   agent the page's "Make free layouts" (`proposals_local`) makes 3 deterministic layouts per scene / shot.
 5. **Snapshot before big edits** (`snapshot_save`); a restore snapshots the current state first, so it is undoable.
 6. Register every new file (`media_add`, or automatically on `request_update` done) so it shows up in the page.
 
@@ -348,6 +369,16 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <same export witho
   in the round in flight and its change (known stage, a project file without `..`, a version word, a summary); `/data/`
   never serves a dot-folder or dot-file (`.snapshots`, `.history`); the git mirror is opt-in (`settings.json`
   `revisions_git`) and always names its own repository (`--git-dir=data/<p>/.history/.git`).
+- Proposals: `proposal_act` (pick / mix / dismiss / reopen / restore) is page only (via "page" from this server's Origin;
+  no MCP tool; 403 to the agent surface, a foreign Origin and offline); `proposals.json` is not a page save (403).
+  `proposals_add` checks the target (a known stage / kind for proposals, the row exists now: 404), 1-6 items, a title, a
+  why ≤ 300, exactly one of svg / text; every SVG goes through `lib/svg-sanitize.mjs` (an allow-list of elements and
+  attributes, re-serialised from the parsed tree; no script, foreignObject, image, a, style element, animate / set, on*,
+  href except `#id` on `<use>`, url() except `url(#id)`, javascript: / data: anywhere even entity-encoded, CSS escapes /
+  expressions, DOCTYPE / entities / CDATA / processing instructions, more than 64 KB, a viewBox outside 0-10000 or
+  1:4-4:1: 400 with the reason); the page shows an SVG only as `<img src>` (never inline), served with the sandboxing
+  CSP (tools/security-test.mjs runs a battery of SVG XSS payloads, and a hand-written SVG with script shown in the page).
+  Titles, whys and texts are rendered escaped.
 - Notes (`notes.json` v2): `notes_add` checks the target (known stage and kind; ids without `..`, `.`, `\` or markup;
   the row exists in the current version: 404; word ranges on the line, `t` inside the song, pins 0..1; text 1-8000
   characters; else 400). An agent may reply, absorb (with a reply) and reopen, and dismiss only its own notes: a director's
@@ -487,6 +518,8 @@ initial project. Tools:
 | `notes_list`, `note_add`, `note_resolve` | the timeline's notes (pinned to time) in the old shape; resolve = absorbed, with a reply |
 | `round_get` | the review round the director sent: its notes by stage, each with the content it points at, the progress, the revision it becomes; "collecting" when none was sent |
 | `round_absorb`, `round_reply`, `round_finish` | a round's note done (linked to the change {stage, file, version, summary}), answered (stays open), the round done (a summary; approves nothing) |
+| `proposals_add` | attach 3 (1-6) proposals to a target (a scene, a shot, a lyric line, a look / variant tree, an asset): `{title, why, svg | text}`; SVG sanitised on the server (refused with the reason); answers an open "3 more" on that target; returns what changed |
+| `proposals_get` | the proposal sets (target / stage / open / set filters) with each item's status and file, the director's `picks` (and mix notes), the open `asks` for proposals |
 | `revisions_get` | the revisions R1, R2, … (summary, notes absorbed, files changed, cost delta, git), the round in flight; `compare: [a, b]` = per-stage diff (lyric lines, scenes / shots on the time line, breakdown items, asset heads A / B, cost) with the notes behind each change |
 | `approvals_get`, `approve`, `request_changes` | approval states |
 | `requests_list`, `request_create`, `request_update` | the generation queue and its lifecycle (`asset` links a stage-4 / 5 generation to an asset tree; `char` is deprecated: a warning, stored as `asset`); `recipe` builds the prompt from the photoreal blocks; `warnings[]` |
@@ -585,9 +618,13 @@ listed in `GENERATORS` (`lib/run.mjs`). Tests never call fal: `tools/mock-fal.mj
   it over a node image for an edit: strokes, mask and pins go into the request). A new asset kind: a `TYPE` entry in
   `js/assets.js` (root tree, variant prefix and field, words, axes, request kinds, estimates) and a `UI` entry in
   `tabs/assetws.js`; a stage module mounts `new AssetWorkspace(el, {types, stage, pref})` and calls `assetCommands`.
+- **Proposals on a new target**: render `stripHtml(target)` from `core/proposals.js` next to the row (it takes the row's
+  width, left of the Notes column; `{compact: true}` in a closed row, `{quiet: true}` to show nothing without proposals),
+  re-render on `store.on('proposals')`, and `register(stage, ({target, item, act}) => ({what, undo, redo}))` for what a
+  pick does there (one undo step with the recorded pick); add the stage / kind to `js/proposals.js` `TARGETS`.
 - **A page-only act** (the director's decision): an op in its `lib/ops/<domain>.mjs` that fails unless `via === 'page'`, and one
   line in `serve.mjs` setting `body.via` from the request's Origin (see `breakdown_promote`, `character_act`,
-  `asset_act`, `ref_upload`); no MCP tool; a security check that the agent surface gets 403.
+  `asset_act`, `ref_upload`, `round_send`, `proposal_act`); no MCP tool; a security check that the agent surface gets 403.
 - **An agent op / MCP tool**: a function in the `Object.assign(ops, {...})` of its `lib/ops/<domain>.mjs` (it is then
   also `POST /api/op/<name>`; see "Where to add an op or a tool"), and a `mcp.registerTool` in `mcp/tools/<domain>.mjs`
   with a zod schema and a description an agent can follow; cover it in `mcp/test.mjs`.

@@ -29,6 +29,7 @@ import * as BD from '../js/breakdown.js';
 import * as SC from '../js/scenes.js';
 import * as N from '../js/notes.js';
 import { NotesColumn } from '../core/notescol.js';
+import { stripHtml, register as registerProposals } from '../core/proposals.js';
 
 const WB = () => window.WB;
 const OPENVERSE = 'https://api.openverse.org/v1/images/';
@@ -84,7 +85,7 @@ export class AssetWorkspace {
       top: () => { const e = this.ent(); return { label: e ? `notes on ${e.name || e.id}` : 'notes', targets: e ? [this.tg('asset'), { stage: this.stage, kind: 'stage', id: null }] : [{ stage: this.stage, kind: 'stage', id: null }],
         match: (n) => n.target.kind === 'asset' || n.target.kind === 'stage', sub: (n) => n.target.kind === 'stage' ? `all ${this.stage}` : '' }; },
       rows: () => this.noteRows(), current: () => this.sel ? this.tg('node', this.sel) : null });
-    store.on((w) => { if (['all', 'requests', 'breakdown', 'scenes', 'notes'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
+    store.on((w) => { if (['all', 'requests', 'breakdown', 'scenes', 'notes', 'proposals'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
     this.render();
   }
   // ---------------------------------------------------------------- notes (notes.json v2, the Notes column)
@@ -378,7 +379,10 @@ export class AssetWorkspace {
   }
   // the agent's base proposal (root tab) and its import proposals for this tree: accept / dismiss in one click
   proposalHtml(e, it, tree) {
-    let h = '';
+    // proposals (core/proposals.js): moods / layouts / texts for this look or variant tree (and, on the root tab, for
+    // the asset itself); the director picks, the agent reads the pick (proposals_get)
+    let h = A.isRoot(tree) ? stripHtml(this.tg('asset'), { quiet: true, label: e.name || e.id }) + stripHtml(this.tg('tree', tree), { quiet: true, label: this.T.rootWord })
+      : stripHtml(this.tg('tree', tree), { label: `${this.T.vWord} moods` });
     const bp = A.isRoot(tree) ? it.base_proposal : null;
     if (bp) h += `<div class="chprop base"><div class="chprh"><b>The agent proposes a base</b><span class="dim">${esc(bp.by || 'agent')} · ${when(bp.at)}${e.base ? ' · replaces the current base' : ''}</span><span class="sp"></span><button data-a="bpaccept" class="pri" title="it becomes the base (your act; the agent cannot set it)">Accept base</button><button data-a="bpdismiss">Dismiss</button></div>`
       + (bp.text ? `<div class="chprt">“${esc(bp.text)}”</div>` : '') + ((bp.refs || []).length ? `<div class="chpicked">${bp.refs.map(r => `<span class="chref" title="${esc([r.title, r.source, r.path].filter(Boolean).join(' · '))}">${lock(r.path, r.private)}<img src="${esc(imgUrl(r.path))}" alt=""><span><b>${esc(r.source)}</b></span></span>`).join('')}</div>` : '')
@@ -642,6 +646,10 @@ export class AssetWorkspace {
   }
   renderBodyLater() { clearTimeout(this._rb); this._rb = setTimeout(() => { if (!this.typing()) this.renderBar(); const f = this.$('.chbf'); if (f && !f.querySelector('.unsaved')) f.insertAdjacentHTML('afterbegin', '<span class="unsaved">unsaved base</span><button data-a="savebase">Save base</button>'); }, 150); }
 }
+
+// a pick on a look / variant / asset is the director's choice: recorded (proposal_act), the agent reads it with
+// proposals_get and makes the sheet request from it; nothing else changes in the page
+for (const st of ['characters', 'scenery']) registerProposals(st, async () => ({ what: 'the agent reads your pick (proposals_get) for the next sheet' }));
 
 // ------------------------------------------------------------------ commands (registered at load: core/rail.js imports the stage modules)
 // one set per workspace: pre "chars" (Characters) or "scenery" (Scenery); ids {root, approve, newV} name the acts
