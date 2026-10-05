@@ -1381,3 +1381,24 @@ button.on { color: var(--acc); }
 .fnlist.fntime .fntg b { color: #c3b2e8; } .fnlist.fntime .fntg a { font-variant-numeric: tabular-nums; }
 .fnsg { flex: none; width: 66px; font-style: normal; font-size: 10px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
 .sclist.tmode .scrow.open { height: auto; min-height: var(--tmh); z-index: 5; overflow: visible; content-visibility: visible; box-shadow: 0 3px 12px rgba(0,0,0,.6); background: var(--bg); }
+
+/* ---------------- D7 identity checks (core/checkbadge.js) and D2 character constants (tabs/assetws.js) */
+.ckb { display: inline-flex; align-items: center; gap: 2px; font: 600 9.5px/12px "Segoe UI", Arial, sans-serif; padding: 0 3px; color: #fff; white-space: nowrap; cursor: help; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.ckb i { font-style: normal; font-weight: 400; opacity: .75; }
+.ck-ok { background: var(--ok); } .ck-drift { background: var(--rev); } .ck-fail { background: var(--bad); }
+.chnode .ckb { position: absolute; left: 1px; top: 58px; z-index: 2; max-width: 88px; }
+.tkth .ckb { position: absolute; left: 0; bottom: 0; z-index: 3; max-width: 100%; }
+.chnh .ckb { margin-left: 4px; }
+.ckpop { position: fixed; z-index: 9000; display: none; max-width: 340px; min-width: 200px; background: var(--bg2); border: 1px solid #4f79c0; box-shadow: 0 4px 14px rgba(0,0,0,.6); padding: 5px 7px; font-size: 11px; line-height: 14px; pointer-events: none; }
+.ckpop .ckph { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.ckpop ul { margin: 4px 0; padding: 0; list-style: none; }
+.ckpop li { padding: 1px 0; } .ckpop li b { display: inline-block; width: 12px; } .ckpop li.ok b { color: #3fae6a; } .ckpop li.no b { color: #e06060; } .ckpop li.no { color: #f0c0c0; }
+.ckpop li i { color: var(--dim); }
+.ckpop .ckpn { margin: 3px 0; color: var(--fg); } .ckpop .ckpf { margin-top: 3px; font-style: italic; }
+.chconst { border-bottom: 1px solid var(--line); }
+.chconst .ccon { display: flex; align-items: center; gap: 4px; color: var(--dim); cursor: pointer; } .chconst .ccon input { margin: 0; }
+.cclist { padding: 2px 6px; display: flex; flex-direction: column; gap: 1px; }
+.ccrow { display: grid; grid-template-columns: 16px 110px 1fr 14px; gap: 4px; align-items: center; height: 19px; }
+.ccrow input[type=checkbox] { margin: 0; } .ccrow input:not([type=checkbox]) { height: 17px; font-size: 11px; min-width: 0; }
+.ccrow .cclabel { color: #c8b06a; } .ccrow b { cursor: pointer; color: var(--dim); text-align: center; } .ccrow b:hover { color: var(--fg); }
+.chconst .chbf a { font-size: 11px; }

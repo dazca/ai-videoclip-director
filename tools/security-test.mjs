@@ -1187,6 +1187,63 @@ try {
     check('F02 take selection: a hostile note on the pick renders as text (the Shot panel\'s takes, the note field) and never runs', tk.inert && /onerror/.test(tk.note) && tk.cards >= 2, tk);
     await tpg.close();
   }
+  // ==================== D7 identity checks + D2 constants: BEGIN (a separate section) ====================
+  // check_add writes checks.json only (never an approval or a pick, whatever the body says); its targets must exist; checks.json
+  // is not a page save; the constants act is page only; hostile notes, item notes and constants render as text (badge, hover, editor)
+  {
+    const crypto = await import('node:crypto');
+    const sha = (f) => { try { return crypto.createHash('sha1').update(fs.readFileSync(path.join(D, f))).digest('hex'); } catch (e) { return null; } };
+    const { checksFixture } = await import('./verify-checks.mjs');
+    checksFixture(D, path.join(MB, 'roots'));
+    const n2 = await op('character_iteration_add', { id: 'ada', request: 'rv21look', image: 'gen/rv21look/rv21look_0.jpg' });
+    const NODE = `ada/${n2.body?.node?.id}`;
+    const ent = readP('entities/characters/ada.json'); ent.constants = [{ text: 'clip <img src=x onerror="window.__ck3=1"> LEFT', label: '<b onmouseover="window.__ck4=1">side</b>', check: true }]; fs.writeFileSync(path.join(D, 'entities/characters/ada.json'), JSON.stringify(ent, null, 1));
+    const files = ['approvals.json', 'requests.json', 'storyboard.json', 'takes.json', 'notes.json'], before = files.map(sha);
+    const fromPage = await post(`/api/op/check_add?project=${P}`, { target: { kind: 'node', id: NODE }, against: { entity: 'ada' }, verdict: 'ok' }, { origin: A.base });
+    const forged = await op('check_add', { target: { kind: 'node', id: NODE }, against: { entity: 'ada' }, verdict: 'fail', note: '<img src=x onerror="window.__ck=1">', via: 'page', status: 'approved', approve: true, director_approved: true, pick: { shot: 's2-wall' },
+      items: [{ constant: 0, ok: false, note: '<svg onload="window.__ck2=1">' }] });
+    const after = files.map(sha), ck = readP('checks.json');
+    check('D7: check_add (agent or page) writes checks.json only: approvals.json, requests.json, the storyboard (picks), takes.json and notes.json are byte-identical even with status / approve / director_approved / pick / via:"page" in the body; the stored check is via "agent" with no such fields',
+      forged.status === 200 && fromPage.status === 200 && JSON.stringify(after) === JSON.stringify(before) && ck.checks.length === 2 && ck.checks.every(c => c.via === 'agent' && !('status' in c) && !('approve' in c) && !('pick' in c)),
+      { forged: forged.status, fromPage: fromPage.status, changed: files.filter((f, i) => after[i] !== before[i]) });
+    const bad = await Promise.all([
+      op('check_add', { target: { kind: 'node', id: 'ada/n99' }, against: { entity: 'ada' }, verdict: 'ok' }),
+      op('check_add', { target: { kind: 'node', id: '../x/n01' }, against: { entity: 'ada' }, verdict: 'ok' }),
+      op('check_add', { target: { kind: 'take', id: 's2-wall/nope' }, against: { entity: 'ada' }, verdict: 'ok' }),
+      op('check_add', { target: { kind: 'take', id: 's9-none/C1_0' }, against: { entity: 'ada' }, verdict: 'ok' }),
+      op('check_add', { target: { kind: 'media', id: 'nope' }, against: { entity: 'ada' }, verdict: 'ok' }),
+      op('check_add', { target: { kind: 'media', id: '<script>' }, against: { entity: 'ada' }, verdict: 'ok' }),
+      op('check_add', { target: { kind: 'shot', id: 's2-wall' }, against: { entity: 'ada' }, verdict: 'ok' }),
+      op('check_add', { target: { kind: 'node', id: NODE }, against: { entity: 'ghost' }, verdict: 'ok' }),
+      op('check_add', { target: { kind: 'node', id: NODE }, against: { entity: 'ada', node: 'n77' }, verdict: 'ok' }),
+      op('check_add', { target: { kind: 'node', id: NODE }, against: { entity: 'ada' }, verdict: 'approved' }),
+    ]);
+    check('D7: check_add targets must exist (a missing node, a take that is not one of that shot\'s, a missing shot or media, a missing character or comparison node: 404) and be well formed (a path in an id, markup, an unknown kind, an unknown verdict: 400); nothing written',
+      bad.map(r => r.status).join() === '404,400,404,404,404,400,400,404,404,400' && readP('checks.json').checks.length === 2, bad.map(r => `${r.status} ${String(r.body?.error || '').slice(0, 40)}`));
+    const saveCk = await post(`/api/save/checks.json?project=${P}`, { base_rev: ck.rev, data: { ...ck, checks: [] } }, { origin: A.base });
+    const agentConst = await op('asset_act', { type: 'character', id: 'ada', act: 'constants', constants: ['x'] });
+    const claimed = await op('asset_act', { type: 'character', id: 'ada', act: 'constants', constants: ['x'], via: 'page' });
+    check('D7: checks.json is not a page save (403); D2: the constants act is the page\'s (agent 403, also with via:"page" in the body)', saveCk.status === 403 && agentConst.status === 403 && claimed.status === 403 && readP('checks.json').checks.length === 2,
+      { saveCk: saveCk.status, agentConst: agentConst.status, claimed: claimed.status });
+    if (browser) {
+      const cpg = await browser.newPage();
+      await cpg.setViewport({ width: 1400, height: 900 });
+      await cpg.goto(`${A.base}/?project=${P}`, { waitUntil: 'domcontentloaded' });
+      await cpg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 });
+      await cpg.evaluate(() => window.WB.stages.open('characters')); await wait(600);
+      await cpg.evaluate(() => window.WB.characters.open('ada')); await wait(300);
+      await cpg.evaluate(() => window.WB.characters.ws.setTab('identity')); await wait(400);
+      const ed = await cpg.evaluate(() => ({ text: document.querySelector('.chconst .cctext')?.value || '', label: document.querySelector('.chconst .cclabel')?.value || '' }));
+      await cpg.evaluate(() => window.WB.characters.ws.setTab('looks')); await wait(500);
+      await cpg.hover('.chnode .ckb').catch(() => {}); await wait(300);
+      const r = await cpg.evaluate(() => ({ inert: window.__ck === undefined && window.__ck2 === undefined && window.__ck3 === undefined && window.__ck4 === undefined && !document.querySelector('.ckpop img, .ckpop svg, .ckb img, .chconst img, .ckpop b[onmouseover]'),
+        badge: document.querySelector('.chnode .ckb')?.textContent || '', pop: document.querySelector('.ckpop')?.textContent || '' }));
+      check('F02 D7: hostile check notes, item notes and constants (text and label) render as text in the badge, its hover detail and the constants editor, and never run',
+        r.inert && /onerror/.test(r.pop) && /onload/.test(r.pop) && /^✗ /.test(r.badge) && /onerror/.test(ed.text) && /onmouseover/.test(ed.label), { ...r, pop: r.pop.slice(0, 160), ed });
+      await cpg.close();
+    }
+  }
+  // ==================== D7 identity checks + D2 constants: END ====================
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {
   if (browser) await browser.close().catch(() => {});

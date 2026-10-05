@@ -30,6 +30,8 @@ import * as SC from '../js/scenes.js';
 import * as N from '../js/notes.js';
 import { NotesColumn } from '../core/notescol.js';
 import { stripHtml, register as registerProposals } from '../core/proposals.js';
+import * as CK from '../js/checks.js';
+import { nodeBadge, wireCheckPopover } from '../core/checkbadge.js';
 
 const WB = () => window.WB;
 const OPENVERSE = 'https://api.openverse.org/v1/images/';
@@ -85,7 +87,8 @@ export class AssetWorkspace {
       top: () => { const e = this.ent(); return { label: e ? `notes on ${e.name || e.id}` : 'notes', targets: e ? [this.tg('asset'), { stage: this.stage, kind: 'stage', id: null }] : [{ stage: this.stage, kind: 'stage', id: null }],
         match: (n) => n.target.kind === 'asset' || n.target.kind === 'stage', sub: (n) => n.target.kind === 'stage' ? `all ${this.stage}` : '' }; },
       rows: () => this.noteRows(), current: () => this.sel ? this.tg('node', this.sel) : null });
-    store.on((w) => { if (['all', 'requests', 'breakdown', 'scenes', 'notes', 'proposals'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
+    store.on((w) => { if (['all', 'requests', 'breakdown', 'scenes', 'notes', 'proposals', 'checks', 'settings', 'media'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
+    wireCheckPopover();
     this.render();
   }
   // ---------------------------------------------------------------- notes (notes.json v2, the Notes column)
@@ -374,8 +377,32 @@ export class AssetWorkspace {
   rootHtml(e) {
     const T = this.T, it = this.iter(e), nodes = A.treeNodes(it, T.root);
     const reqs = this.reqs(e).filter(r => r.char.tree === T.root);
-    return this.proposalHtml(e, it, T.root) + (nodes.length ? `<details class="chbasefold"${this.showBase ? ' open' : ''}><summary>base: ${(e.base?.refs || []).length} refs${e.base?.text ? ' · ' + esc(e.base.text.slice(0, 80)) : ''} <span class="dim">(click to change; a new ${esc(T.sheetWord)} starts a new root)</span></summary>${this.baseHtml(e)}</details>` : this.baseHtml(e))
+    return this.proposalHtml(e, it, T.root) + (e.kind === 'character' ? this.constantsHtml(e) : '') + (nodes.length ? `<details class="chbasefold"${this.showBase ? ' open' : ''}><summary>base: ${(e.base?.refs || []).length} refs${e.base?.text ? ' · ' + esc(e.base.text.slice(0, 80)) : ''} <span class="dim">(click to change; a new ${esc(T.sheetWord)} starts a new root)</span></summary>${this.baseHtml(e)}</details>` : this.baseHtml(e))
       + this.reqsHtml(reqs) + this.treeHtml(it, T.root) + this.nodeHtml(e, it);
+  }
+  // ---------------------------------------------------------------- D2: the character's constants (+ D7 identity checks)
+  // the details that must stay identical in every image, one row each: a tick = on the identity checklist, a short name
+  // for the badge ("clip side"), the text. "Seed from base" proposes rows from the base description; Save = asset_act constants.
+  // the draft is kept only once the director edits it (edit = true); until then it is the saved list, so a save that comes
+  // back through the store shows the saved constants
+  cdraft(e = this.ent(), edit = false) { const d = (this.cdrafts ||= {})[e.id]; if (d) return d; const l = CK.constantsList(e).map(c => ({ ...c })); if (edit) this.cdrafts[e.id] = l; return l; }
+  constDirty(e = this.ent()) { const d = this.cdrafts?.[e?.id]; return !!d && JSON.stringify(CK.constantsList({ constants: d })) !== JSON.stringify(CK.constantsList(e)); }
+  constantsHtml(e) {
+    const d = this.cdraft(e), on = store.settings?.identity_checks === true, nck = d.filter(c => c.check && c.text.trim()).length;
+    const rows = d.map((c, i) => `<div class="ccrow" data-ci="${i}"><input type="checkbox" class="ccchk"${c.check ? ' checked' : ''} title="on the identity checklist (the agent checks it on every new output)"><input class="cclabel" value="${esc(c.label || '')}" placeholder="${esc(CK.shortName(c) || 'short name')}" maxlength="${CK.CONST_LABEL_MAX}" spellcheck="false" title="a short name for the badge (✗ clip side)"><input class="cctext" value="${esc(c.text)}" placeholder="e.g. orange starburst enamel clip above the LEFT ear" maxlength="${CK.CONST_TEXT_MAX}" spellcheck="false"><b data-a="ccrm" title="remove">×</b></div>`).join('');
+    return `<div class="chconst"><div class="chbh"><b>Constants</b><span class="dim">${d.length ? `${d.length} · ${nck} on the checklist` : 'the details that must stay identical in every image'}</span><span class="sp"></span>`
+      + `<label class="ccon" title="when an output lands (a run, an import, a node), the agent gets a note asking for an identity check against these constants and the approved identity (free; nothing runs)"><input type="checkbox" class="ccask"${on ? ' checked' : ''}> ask for an identity check when an output lands</label></div>`
+      + (rows ? `<div class="cclist">${rows}</div>` : '')
+      + `<div class="chbf"><a data-a="ccadd">+ constant</a>${e.base?.text ? '<a data-a="ccseed" title="propose rows from the base description; keep, edit or drop each, then save">Seed from base</a>' : ''}<span class="dim">they go into the identity lock of every photoreal prompt; the agent checks the ticked ones on new outputs</span><span class="sp"></span>${this.constDirty(e) ? '<span class="unsaved">unsaved</span><button data-a="ccsave" class="pri">Save constants</button><a data-a="ccundo">revert</a>' : ''}</div></div>`;
+  }
+  async saveConstants() {
+    const e = this.ent(), d = this.cdraft(e);
+    try { const r = await this.act('constants', { constants: d.filter(c => c.text.trim()) }); delete this.cdrafts[e.id]; toast(`${e.name}: ${r.constants.length} constants saved (${r.constants.filter(c => c.check).length} on the checklist)`); }
+    catch (er) { /* toasted by act */ }
+  }
+  async setIdentityChecks(on) {
+    await store.setSettings((s) => { if (on) s.identity_checks = true; else delete s.identity_checks; });
+    toast(on ? 'identity checks on: when an output lands, the agent is asked to check it against the constants' : 'identity checks off');
   }
   // the agent's base proposal (root tab) and its import proposals for this tree: accept / dismiss in one click
   proposalHtml(e, it, tree) {
@@ -450,7 +477,7 @@ export class AssetWorkspace {
     const card = (n) => {
       const cls = [n.id === st.head ? 'head' : '', n.id === st.approved ? 'appr' : '', A.pending(it, n) ? 'new' : '', n.choice === 'reverted' ? 'rev' : '', n.choice === 'branch' ? 'br' : '', n.id === this.sel ? 'on' : ''].filter(Boolean).join(' ');
       const ghosts = open.filter(r => r.char.from === n.id).map(r => `<span class="chghost" title="${esc(r.char.text || r.prompt)}">${esc(r.status)}</span>`).join('');
-      return `<div class="chnode ${cls}" data-node="${esc(n.id)}" title="${esc(`${n.id}${n.edit?.text ? ': ' + n.edit.text : ''}\n${n.choice || (A.pending(it, n) ? 'new: keep, branch or revert' : '')}${n.id === st.head ? '\nhead' : ''}${n.id === st.approved ? '\napproved' : ''}`)}">${lock(n.image, n.private)}<img src="${esc(imgUrl(n.image))}" alt="" loading="lazy"><span class="chnl"><b>${esc(n.id)}</b>${n.id === st.approved ? '<i class="ok">✓</i>' : n.id === st.head ? '<i class="hd">●</i>' : A.pending(it, n) ? '<i class="nw">new</i>' : ''}${n.edit?.pins?.length ? `<i class="pn">${n.edit.pins.length}📌</i>` : ''}${n.origin === 'imported' ? '<i class="im" title="imported: an existing image, no request">⇩</i>' : ''}</span><span class="chne">${esc(n.edit?.text || this.nodeWord(n))}</span>${ghosts}</div>`;
+      return `<div class="chnode ${cls}" data-node="${esc(n.id)}" title="${esc(`${n.id}${n.edit?.text ? ': ' + n.edit.text : ''}\n${n.choice || (A.pending(it, n) ? 'new: keep, branch or revert' : '')}${n.id === st.head ? '\nhead' : ''}${n.id === st.approved ? '\napproved' : ''}`)}">${lock(n.image, n.private)}<img src="${esc(imgUrl(n.image))}" alt="" loading="lazy">${this.ent()?.kind === 'character' ? nodeBadge(this.ent().id, n) : ''}<span class="chnl"><b>${esc(n.id)}</b>${n.id === st.approved ? '<i class="ok">✓</i>' : n.id === st.head ? '<i class="hd">●</i>' : A.pending(it, n) ? '<i class="nw">new</i>' : ''}${n.edit?.pins?.length ? `<i class="pn">${n.edit.pins.length}📌</i>` : ''}${n.origin === 'imported' ? '<i class="im" title="imported: an existing image, no request">⇩</i>' : ''}</span><span class="chne">${esc(n.edit?.text || this.nodeWord(n))}</span>${ghosts}</div>`;
     };
     return `<div class="chtree"><div class="chsh">tree <span class="dim">${nn(A.treeNodes(it, tree).length, 'node')} · ${strips.length} branch${strips.length > 1 ? 'es' : ''} · ● head ✓ approved · ⇩ imported · click a node</span>${imp}</div>`
       + strips.map((s, i) => `<div class="chstrip"><span class="chfork">${s.fork ? `↳ ${esc(s.fork)}` : i ? 'root' : 'main'}</span>${s.nodes.map(card).join('<i class="charr">›</i>')}</div>`).join('') + '</div>';
@@ -459,7 +486,7 @@ export class AssetWorkspace {
     const n = A.nodeById(it, this.sel); if (!n) return '';
     const parent = A.nodeById(it, n.parent) || A.nodeById(it, n.from_identity), st = A.treeState(it, n.tree), locked = !!st.approved;
     const isPending = A.pending(it, n), word = A.isRoot(n.tree) ? this.T.rootWord : this.T.vWord;
-    const head = `<div class="chnh"><b>${esc(n.id)}</b><span class="dim">${esc(n.kind)} · ${n.via === 'agent' ? 'agent' : esc(n.by || '')} · ${when(n.at)} · ${esc(n.request || (n.origin === 'imported' ? 'imported' : ''))}</span>${n.id === st.head ? '<span class="chok">head</span>' : ''}${n.choice ? `<span class="dim">${esc(n.choice)}</span>` : ''}<span class="sp"></span>`
+    const head = `<div class="chnh"><b>${esc(n.id)}</b><span class="dim">${esc(n.kind)} · ${n.via === 'agent' ? 'agent' : esc(n.by || '')} · ${when(n.at)} · ${esc(n.request || (n.origin === 'imported' ? 'imported' : ''))}</span>${n.id === st.head ? '<span class="chok">head</span>' : ''}${n.choice ? `<span class="dim">${esc(n.choice)}</span>` : ''}${e.kind === 'character' ? nodeBadge(e.id, n) : ''}<span class="sp"></span>`
       + (parent ? `<button data-a="cmp" class="${this.mode === 'compare' ? 'on' : ''}" title="side by side with ${esc(parent.id)}">Compare with ${esc(parent.id)}</button>` : '')
       + (!locked ? `<button data-a="edit" class="${this.mode === 'edit' ? 'on' : ''}" title="text + a sketch over this image + an optional mask + pins → a draft request">Edit from ${esc(n.id)}</button>` : '')
       + (!locked && n.id !== st.head && !isPending ? `<button data-a="tohead" title="continue from this node (revert to it)">Make head</button>` : '')
@@ -583,6 +610,11 @@ export class AssetWorkspace {
       if (a === 'mklook') return this.makeLookFromItem(t.dataset.i);
       if (a === 'reqlook') return this.requestVariant();
       if (a === 'savebase') return this.saveBase();
+      if (a === 'ccadd') { this.cdraft(undefined, true).push({ text: '', check: true }); this.render(); return this.$('.ccrow:last-child .cctext')?.focus(); }
+      if (a === 'ccrm') { this.cdraft(undefined, true).splice(Number(t.closest('[data-ci]').dataset.ci), 1); return this.render(); }
+      if (a === 'ccseed') { const d = this.cdraft(undefined, true), add = CK.seedConstants(this.ent().base?.text, d); d.push(...add); toast(add.length ? `${add.length} constant${add.length > 1 ? 's' : ''} proposed from the base: keep, edit or drop, then Save` : 'nothing new in the base description'); return this.render(); }
+      if (a === 'ccsave') return this.saveConstants();
+      if (a === 'ccundo') { delete this.cdrafts[this.cur]; return this.render(); }
       if (a === 'reqid') return this.requestRoot();
       if (a === 'rmref') { this.draft().refs.splice(Number(t.dataset.i), 1); return this.render(); }
       if (a === 'ovsearch') return this.searchOpenverse(this.$('.chovq')?.value);
@@ -620,6 +652,10 @@ export class AssetWorkspace {
       if (t.matches('.chbtext')) { this.draft().text = t.value; this.$('.chbf') && (this.$('.chbf').querySelector('.unsaved') || this.renderBodyLater()); return; }
       if (t.matches('.chcatq')) { this.catQ = t.value; clearTimeout(this._cq); this._cq = setTimeout(() => { const pos = t.selectionStart; this.render(); const n = this.$('.chcatq'); n?.focus(); n?.setSelectionRange(pos, pos); }, 250); }
       if (t.matches('.chedtext')) this.edText = t.value;
+      if (t.matches('.cctext, .cclabel')) {
+        const c = this.cdraft(undefined, true)[Number(t.closest('[data-ci]').dataset.ci)]; if (c) { if (t.matches('.cctext')) c.text = t.value; else c.label = t.value; }
+        const f = t.closest('.chconst')?.querySelector('.chbf'); if (f && !f.querySelector('.unsaved') && this.constDirty()) f.insertAdjacentHTML('beforeend', '<span class="unsaved">unsaved</span><button data-a="ccsave" class="pri">Save constants</button><a data-a="ccundo">revert</a>');
+      }
       if (this.vf && t.matches('.asaxc')) this.vf.axes[t.dataset.ax] = t.value;
       if (this.vf && t.matches('.asvname')) this.vf.name = t.value;
       if (this.vf && t.matches('.asvnotes')) this.vf.notes = t.value;
@@ -629,6 +665,8 @@ export class AssetWorkspace {
       if (t.matches('.chcatkind')) { this.catKind[this.type] = t.value; return this.render(); }
       if (t.matches('.chovlic')) { this.ov.lic = t.value; return; }
       if (t.matches('.chphotos')) return this.addPhotos([...t.files]);
+      if (t.matches('.ccchk')) { const c = this.cdraft(undefined, true)[Number(t.closest('[data-ci]').dataset.ci)]; if (c) c.check = t.checked; return this.render(); }
+      if (t.matches('.ccask')) return this.setIdentityChecks(t.checked);
       if (t.matches('.asusesel')) { t.blur(); return this.setUse(t.dataset.scene, t.value); }
       if (t.matches('.asuseadd') && t.value) { t.blur(); return this.setUse(t.value, ''); }
       if (t.matches('.asaxc') && this.vf) { t.blur(); return this.render(); }
@@ -638,7 +676,7 @@ export class AssetWorkspace {
       if (this.sk?.api?.el.contains(t)) return;
       if (t.matches('.chovq')) { ev.stopPropagation(); if (ev.key === 'Enter') this.searchOpenverse(t.value); return; }
       if (t.matches('.asvname, .asvnotes, .asaxc')) { ev.stopPropagation(); if (ev.key === 'Enter') { if (t.matches('.asaxc')) this.vf.axes[t.dataset.ax] = t.value; this.createVariant(); } if (ev.key === 'Escape') { this.vf = null; this.render(); } return; }
-      if (t.matches('input, textarea, select')) { ev.stopPropagation(); if (ev.key === 'Escape') t.blur(); if (ev.key === 'Enter' && t.matches('.chppath')) this.addPhotoPath(t.value); return; }
+      if (t.matches('input, textarea, select')) { ev.stopPropagation(); if (ev.key === 'Escape') t.blur(); if (ev.key === 'Enter' && t.matches('.chppath')) this.addPhotoPath(t.value); if (ev.key === 'Enter' && t.matches('.cctext, .cclabel') && this.constDirty()) { t.blur(); this.saveConstants(); } return; }
       if (ev.key === 'Escape' && this.pinMode) { ev.stopPropagation(); this.pinMode = false; return this.render(); }
       if (ev.key === 'Escape' && this.sel) { ev.stopPropagation(); this.sel = null; this.mode = 'view'; this.render(); }
     });
