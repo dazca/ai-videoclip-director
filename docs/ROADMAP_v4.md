@@ -623,3 +623,8 @@ Rules for the loop:
 - Budget: the cap stays as configured; whether $70 includes Suno is still open (ask Dani).
 - Identity checks: the agent's visual checklist first; a local face model only if Dani wants it.
 - Hosting at director.azemar.eu: later (group G), on Dani's go.
+
+## Progress log
+- 2026-10-05: done: A1–A12 (dogfood her v3), DOGFOOD_looks 1–15 (13 deferred), F1, F3, G4, B1–B5, B6–B8, D1, D3a, D9 (fal + open-with; ComfyUI stub), D5 partial (merged ledger, per-take cost).
+- In progress: B9–B10 (proposals), C1–C3 (final approvals).
+- Next: review pass (spec + security), D3b (video), D6 (take selection), D8 (import media UI), D4 (waves / pilot gates), time-aligned stage toggle, G (hosted mode, on Dani's go).
