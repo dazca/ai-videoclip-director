@@ -3,7 +3,7 @@
 // alone:   node tools/verify-rounds.mjs [outDir]
 // Self-contained: a scratch copy of data/demo, its own server on a free port, an MCP client (the official SDK, over
 // stdio, against that server); all deleted at the end. The full cycle: the director writes notes in the page (lyrics,
-// script, storyboard, a character node, the timeline) -> the rail says "Round 1 · 5 open notes" -> one click on "Send
+// script, storyboard, a character node, the timeline) -> the rail says "Round 1 · your open notes: 5" -> one click on "Send
 // round to Claude" (one ask, notes.json round 2, a base snapshot) -> the agent reads round_get (content inlined),
 // rewrites a lyric line, moves a scene, adds a shot, proposes a new identity image (the director accepts it in the
 // page), round_absorb's four notes and round_reply's one, while the rail shows its progress -> round_finish -> "Close
@@ -82,11 +82,11 @@ export async function verifyRounds({ browser, OUT }) {
         await add({ stage: 'timeline', kind: 'time', id: null, t: 15000 }, 'a strobe on this bar?')];
       return { line: line.id, ids };
     });
-    await until((k) => document.querySelector('#rail .rnd')?.textContent.includes(`${k} open notes`), 5);
+    await until((k) => document.querySelector('#rail .rnd')?.textContent.includes(`your open notes: ${k}`), 5);
     const r1 = await rail();
     await railShot('v13_round_counter');
-    check('the rail shows "Round 1 · 5 open notes" and a "Send round to Claude" button (enabled); collecting = round_get says nothing was sent',
-      r1?.phase === 'collecting' && /Round 1 · 5 open notes/.test(r1.text) && r1.btn === 'Send round to Claude' && !r1.dis && r0?.dis === true && imp.status === 200,
+    check('the rail shows "Round 1 · your open notes: 5" and a "Send round to Claude" button (enabled); collecting = round_get says nothing was sent',
+      r1?.phase === 'collecting' && /Round 1 · your open notes: 5/.test(r1.text) && r1.btn === 'Send round to Claude' && !r1.dis && r0?.dis === true && imp.status === 200,
       { r0, r1, imp: imp.status });
     const g0 = await tool('round_get');
 
@@ -152,7 +152,7 @@ export async function verifyRounds({ browser, OUT }) {
     check('"Close revision R1": revisions.json {id R1, round 1, created, summary (the agent\'s), notes_absorbed (4), notes_replied (1), files_changed, cost_delta} + an immutable snapshot; the rail is back to "Round 2 · 1 open note" with an R1 chip; no .history (git mirror off by default)',
       R1?.id === 'R1' && R1.round === 1 && R1.notes_absorbed.length === 4 && R1.notes_replied.length === 1 && ['lyrics.json', 'scenes.json', 'storyboard.json', 'entities/characters/ada.json'].every(f => R1.files_changed.includes(f))
       && R1.cost_delta === 0 && /4 notes applied/.test(R1.summary) && meta.revision === 'R1' && meta.immutable && RV2.rounds[0].status === 'closed' && !R1.git
-      && !fs.existsSync(path.join(PD, '.history')) && /Round 2 · 1 open note/.test(r5?.text || '') && r5.chip === 'R1',
+      && !fs.existsSync(path.join(PD, '.history')) && /Round 2 · your open notes: 1/.test(r5?.text || '') && r5.chip === 'R1',
       { R1: { ...R1, snapshot: undefined }, r5 });
     const http403 = await fetch(`${BASE}/data/${P}/.snapshots/${R1.snapshot}/lyrics.json`).then(r => r.status);
 
@@ -200,15 +200,16 @@ export async function verifyRounds({ browser, OUT }) {
       RV3.revisions.length === 2 && RV3.revisions[1].round === null && armed === 'confirm restore?' && /on the downbeat/.test(titleNow) && !/R2 title/.test(titleNow) && hasBefore && J('notes.json').notes.length === notesBefore && jump,
       { titleNow, armed, before, jump });
 
-    // 8. the Notes column fills the width at 1600 px in every stage (no dead area to its right)
+    // 8. the Notes column: one width in every stage at 1600 px, at the right edge of the stage's rows
     const widths = {};
     for (const s of ['lyrics', 'script', 'breakdown', 'characters', 'scenery', 'storyboard', 'final']) {
       await stage(s);
       widths[s] = await pg.evaluate(() => { const c = window.WB.notesCol?.visible?.(); if (!c) return null; const l = c.layer.getBoundingClientRect(), h = c.sc.getBoundingClientRect(); return { left: Math.round(l.left), right: Math.round(l.right), w: Math.round(l.width), host: Math.round(h.right), gap: Math.round(h.right - l.right) }; });
       if (s === 'lyrics' || s === 'storyboard') await shot(`v13_width_${s}`);
     }
-    check('the Notes column ends at the right edge of every stage at 1600 px (at most a scrollbar away) and is 236-800 px wide (the lyrics: what the poem leaves)',
-      Object.values(widths).every(x => x && x.gap <= 18 && x.w >= 236 && x.w <= 800), widths);
+    const ws = Object.values(widths).filter(Boolean).map(x => x.w);
+    check('the Notes column ends at the right edge of its rows in every stage at 1600 px (at most a scrollbar away), 260-420 px wide and the SAME width in every stage (25% of the stage)',
+      Object.values(widths).every(x => x && x.gap <= 18 && x.w >= 260 && x.w <= 420) && Math.max(...ws) - Math.min(...ws) <= 2, widths);
   } catch (e) { console.error('v13 aborted:', e.stack || e); checks.aborted = { pass: false, detail: String(e.message || e) }; }
   finally {
     await client?.close().catch(() => {});

@@ -91,10 +91,10 @@ export async function verifyScenery({ browser, BASE, DATA, OUT, post, writeHeade
   await combo(['Alt', 'Shift'], 'Digit5'); await wait(600);
   const list = await pg.evaluate(() => ({ stage: window.WB.stages.current(), heads: [...document.querySelectorAll('.chws .chlh b')].map(b => b.textContent), rows: [...document.querySelectorAll('.chws .chrow')].map(r => ({ ent: r.dataset.ent || null, ghost: r.classList.contains('ghost'), name: r.querySelector('.chnm')?.textContent, st: r.querySelector('.chst')?.textContent, scenes: r.querySelectorAll('.chsc .bdsc').length })), tabs: [...document.querySelectorAll('.chtabs [data-tab]')].map(t => t.dataset.tab) }));
   await shot('v8_scenery_list');
-  check('the scenery stage (Alt+Shift+5) lists the breakdown locations and props in two groups with their scenes and status; a location not yet an entity shows as such; tabs Base / Variants / Scenes / Notes',
+  check('the scenery stage (Alt+Shift+5) lists the breakdown locations and props in two groups with their scenes and status; a location not yet an entity shows as such; tabs Base / Variants / Scenes / History (its notes: the Notes column)',
     cr.status === 200 && pr.bi01?.entity_id === 'the-pier' && pr.bi03?.entity_id === 'lantern' && list.stage === 'scenery' && JSON.stringify(list.heads) === '["Locations","Props"]'
     && list.rows.length === 5 && list.rows[0].ent === 'the-pier' && list.rows[0].scenes === 2 && /needs a base/.test(list.rows[0].st) && list.rows.some(r => r.ghost && r.name === 'Lighthouse') && list.rows.filter(r => r.ent === 'lantern' || r.ent === 'letter').length === 2
-    && JSON.stringify(list.tabs) === '["base","variants","scenes","notes"]',
+    && JSON.stringify(list.tabs) === '["base","variants","scenes","history"]',
     { list, pr: Object.values(pr).map(x => x?.entity_id) });
 
   // 2. the location base: the catalogue opens on locations; a pick + a description; "Request base plate" -> a draft
@@ -229,8 +229,8 @@ export async function verifyScenery({ browser, BASE, DATA, OUT, post, writeHeade
   const chars = await pg.evaluate(() => ({ stage: window.WB.stages.current(), rows: [...document.querySelectorAll('.sghost[data-stage=characters] .chrow')].map(r => r.dataset.char || null), tabs: [...document.querySelectorAll('.sghost[data-stage=characters] .chtabs [data-tab]')].map(t => t.dataset.tab), base: !!document.querySelector('.sghost[data-stage=characters] .chbf [data-a=reqid]'), label: document.querySelector('.sghost[data-stage=characters] .chbf [data-a=reqid]')?.textContent }));
   await shot('v8_characters_still');
   const ST = readJ('stages.json')?.stages?.find(s => s.id === 'scenery');
-  check('the scenery stage is in progress (rail); the characters stage still opens on the shared workspace (Mara, Identity / Looks / Scenes / Notes, "Request identity sheet"); no request left the machine',
-    /st-(in_progress|needs_you)/.test(rail || '') && ST?.status === 'in_progress' && chars.stage === 'characters' && chars.rows.includes('mara') && JSON.stringify(chars.tabs) === '["identity","looks","scenes","notes"]' && /Request identity sheet/.test(chars.label || '') && !outside.length,
+  check('the scenery stage is in progress (rail); the characters stage still opens on the shared workspace (Mara, Identity / Looks / Scenes / History, "Request identity sheet"); no request left the machine',
+    /st-(in_progress|needs_you)/.test(rail || '') && ST?.status === 'in_progress' && chars.stage === 'characters' && chars.rows.includes('mara') && JSON.stringify(chars.tabs) === '["identity","looks","scenes","history"]' && /Request identity sheet/.test(chars.label || '') && !outside.length,
     { rail, stage: ST?.status, chars, outside });
 
   await pg.close();

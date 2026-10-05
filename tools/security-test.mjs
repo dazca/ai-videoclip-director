@@ -595,6 +595,27 @@ try {
     check('revisions: closing works from the page (R1); .snapshots, .history and dot files under /data are never served (403); a restore or a compare of an unknown / malformed revision is refused (404 / 400); the compare is read only for the agent (200)',
       cl.status === 200 && cl.body.id === 'R1' && !fs.existsSync(path.join(D, '.history')) && snapGet === 403 && histGet === 403 && dotGet === 403 && rsBad.status === 404 && rsNo.status === 404 && cmpBad.status === 400 && cmpOk.status === 200,
       { cl: cl.status, snapGet, histGet, dotGet, rsBad: rsBad.status, rsNo: rsNo.status, cmpBad: cmpBad.status, cmpOk: cmpOk.status });
+    // the git mirror never runs what a handed-over .history/.git brings (review S3): a hook is not run (hooksPath: an empty
+    // folder of ours), and a config key git init does not write (core.fsmonitor, a filter, an alias...) skips the mirror
+    if (spawnSync('git', ['--version']).status === 0) {
+      const H = path.join(D, '.history'), G = path.join(H, '.git'), PW = path.join(D, 'pwned.txt');
+      const stF = path.join(D, 'settings.json'), st0 = fs.existsSync(stF) ? fs.readFileSync(stF, 'utf8') : null;
+      fs.writeFileSync(stF, JSON.stringify({ ...(st0 ? JSON.parse(st0) : {}), revisions_git: true }));
+      spawnSync('git', ['init', '-q', H]);
+      const NL = String.fromCharCode(10);
+      fs.writeFileSync(path.join(G, 'hooks', 'pre-commit'), ['#!/bin/sh', 'echo hook > "$GIT_DIR/../../pwned.txt"', ''].join(NL), { mode: 0o755 });
+      const hk = await asPage('revision_close', { summary: 'sec: a hook in the mirror' });
+      fs.appendFileSync(path.join(G, 'config'), ['[core]', '\tfsmonitor = "node -e require(\'fs\').writeFileSync(\'pwned.txt\',\'fsm\')"', ''].join(NL));
+      const fm = await asPage('revision_close', { summary: 'sec: fsmonitor in the mirror config' });
+      fs.rmSync(path.join(G, 'config')); spawnSync('git', ['init', '-q', H]); fs.appendFileSync(path.join(G, 'config'), ['[filter "x"]', '\tclean = node -e 1', ''].join(NL));
+      const fl = await asPage('revision_close', { summary: 'sec: a filter in the mirror config' });
+      const pw = fs.existsSync(PW) || fs.existsSync(path.join(H, 'pwned.txt'));
+      if (st0 == null) fs.rmSync(stF); else fs.writeFileSync(stF, st0);
+      fs.rmSync(H, { recursive: true, force: true }); fs.rmSync(PW, { force: true });
+      check('git mirror (S3): a pre-commit hook in a handed-over .history/.git never runs (the commit is made, hooks off); a config key git init does not write (core.fsmonitor, a filter) skips the mirror with the reason; nothing was executed',
+        hk.status === 200 && !!hk.body?.git?.commit && fm.status === 200 && /not the workbench's own/.test(fm.body?.git?.skipped || '') && /fsmonitor/.test(fm.body.git.skipped) && /filter/.test(fl.body?.git?.skipped || '') && !pw,
+        { hk: hk.body?.git, fm: fm.body?.git, fl: fl.body?.git, pw });
+    } else check('git mirror (S3): git is not on PATH (skipped)', true);
   }
 
   // ---------------------------------------------------------------- proposals (SPEC v4 §3): the SVG sanitiser and the director's picks
@@ -638,6 +659,9 @@ try {
       thin_viewbox: '<svg viewBox="0 0 1000 10"/>',
       too_big: `<svg viewBox="0 0 10 10">${'<rect width="1" height="1"/>'.repeat(3000)}</svg>`,
       xml_stylesheet: '<?xml-stylesheet href="https://evil.example/x.css"?><svg viewBox="0 0 10 10"/>',
+      // review S7: an image-set() in a style, a CSS escape in a presentation attribute
+      style_image_set: '<svg viewBox="0 0 10 10"><rect style="background-image:image-set(\'http://evil.example/x\' 1x)"/></svg>',
+      fill_css_escape: '<svg viewBox="0 0 10 10"><rect fill="\\75 rl(http://evil.example/x)"/></svg>',
     };
     const refused = {}, leaked = [];
     for (const [k, v] of Object.entries(XSS)) { try { S.sanitizeSvg(v); leaked.push(k); } catch (e) { refused[k] = e.code; } }

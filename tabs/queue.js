@@ -7,11 +7,14 @@
 //   {id, kind, target, prompt, refs[], est_cost, takes?, status: draft|approved|queued|running|done|failed|rejected|withdrawn, by, at,
 //    outputs?[], warnings?[] (request_create's: e.g. a look sheet with no approved identity), recipe? (the photoreal
 //    blocks), generator?, linked?, handoff?, last_run?}
+// Private refs (a real photo: the PRIVATE rule, or media flagged private) carry a lock badge; fal uploads every ref to its
+// storage (a public URL), so a request with one runs only once the director ticks "allow uploading private refs" on it
+// (off by default; recorded by the server in the request's log, undone by an edit; lib/run.mjs refuses the run without it).
 // "+ New request": a draft request from the page. "Apply photoreal recipe" builds the prompt from editable blocks
 // (references + identity lock, subject + wardrobe, action, place, light, camera, texture, medium, the avoid guard) for
 // the chosen model (js/recipe.js, templates/photoreal_recipe.json, docs/PHOTOREAL.md); the estimate comes from the one
 // price table (js/prices.js).
-import { store, toast } from '../js/store.js';
+import { store, toast, isPrivatePath } from '../js/store.js';
 import { fmt } from '../js/timeline.js';
 import { esc, mediaAttr } from '../core/esc.js';
 import { buildRecipe, constantsOf, FIELDS, MODELS, FRAMINGS } from '../js/recipe.js';
@@ -59,7 +62,14 @@ export default {
     const genOf = (r) => (['draft', 'approved', 'failed'].includes(r.status) ? null : r.generator || r.handoff?.generator) || store.settings?.generators?.[genKindOf(r)] || 'fal';
     const sel = new Set();   // ticked draft rows (Approve / Reject selected)
     const money = (x) => `$${(Number(x) || 0).toFixed(2)}`;
-    const thumbs = (list, cls = '') => list.map(p => { const img = /\.(png|jpe?g|webp|gif)$/i.test(String(p)); return `<a class="qthumb ${cls}" href="${mediaAttr(p)}" target="_blank" title="${esc(p)}">${img ? `<img src="${mediaAttr(p)}" alt="" loading="lazy">` : ''}<span>${esc(String(p).split('/').pop())}</span></a>`; }).join('');
+    const privRef = (p) => isPrivatePath(p) || !!store.mediaByPath?.[p]?.private;
+    const thumbs = (list, cls = '') => list.map(p => { const img = /\.(png|jpe?g|webp|gif)$/i.test(String(p)), pv = cls !== 'out' && privRef(p); return `<a class="qthumb ${cls}${pv ? ' priv' : ''}" href="${mediaAttr(p)}" target="_blank" title="${esc(p)}${pv ? ' · private: a real photo, local only' : ''}">${img ? `<img src="${mediaAttr(p)}" alt="" loading="lazy">` : ''}<span>${pv ? '🔒 ' : ''}${esc(String(p).split('/').pop())}</span></a>`; }).join('');
+    // a fal run uploads every ref to fal storage (a public URL): a private one needs the director's tick on the request
+    const privBox = (r) => {
+      const n = (r.refs || []).filter(privRef).length; if (!n || genOf(r) !== 'fal' || ['done', 'rejected', 'withdrawn'].includes(r.status)) return '';
+      const on = r.private_upload_ok === true;
+      return `<label class="qpriv${on ? ' on' : ''}" title="fal takes references as URLs: a run uploads each ref to fal storage, where it gets a public URL. Off: the run is refused."><input type="checkbox" data-x="privok"${on ? ' checked' : ''}> allow uploading private refs <span class="dim">(🔒 ${n} → fal storage, public URL)</span></label>`;
+    };
     const PHASE = { running: 'started', upload: 'uploading refs', submit: 'submitted', queued: 'in the provider queue', retrying: 'retrying the status', take_done: 'take done', skip: 'output exists: skipped', take_failed: 'take failed', refused: 'refused', handed_off: 'pack exported' };
     const progress = (r) => {
       const x = store.runs?.[r.id]; if (!x) return r.status === 'queued' ? 'queued' : 'running…';
@@ -102,7 +112,7 @@ export default {
           <td>${t != null ? `<a data-t="${Number(t) || 0}">${esc(r.target)} ${fmt(t)}</a>` : esc(r.target || '')}</td>
           <td><textarea data-x="prompt" rows="3" ${['draft', 'approved'].includes(r.status) ? '' : 'readonly'}>${esc(r.prompt)}</textarea>${(r.warnings || []).length ? `<div class="chreqw">${r.warnings.map(w => `<span>⚠ ${esc(w)}</span>`).join('')}</div>` : ''}</td>
           <td><input data-x="cost" type="number" step="0.01" min="0" value="${Number(r.est_cost) || 0}" style="width:4.5em"${['draft', 'approved'].includes(r.status) ? '' : ' disabled'}>${r.takes > 1 ? `<div class="dim qtakes" title="the estimate covers every take">${r.takes} takes · ${money((Number(r.est_cost) || 0) / r.takes)} each</div>` : ''}</td>
-          <td class="refs">${thumbs(r.refs || [])}${(r.outputs || []).length ? `<span class="qarrow">→</span>${thumbs(r.outputs, 'out')}` : ''}</td>
+          <td class="refs">${thumbs(r.refs || [])}${(r.outputs || []).length ? `<span class="qarrow">→</span>${thumbs(r.outputs, 'out')}` : ''}${privBox(r)}</td>
           <td class="dim">${esc((r.at || '').replace('T', ' ').slice(5, 16))}</td>
           <td class="qbtns">${actions(r)}</td></tr>`; }).join('')}</table>` : '<p class="dim">no requests yet</p>'}`;
     };
@@ -145,6 +155,7 @@ export default {
       const id = row.dataset.id, r = store.requests?.items?.find(x => x.id === id), x = e.target.dataset.x;
       if (!r) return;
       if (x === 'pick') { if (e.target.checked) sel.add(id); else sel.delete(id); render(); return; }
+      if (x === 'privok') { await store.setRequest(id, { private_upload_ok: e.target.checked }); toast(e.target.checked ? `${id}: its private refs may be uploaded to fal storage when it runs` : `${id}: private refs stay local (a fal run is refused)`); return; }
       if (x === 'approve') return store.setRequest(id, { status: 'approved' });
       if (x === 'unapprove' || x === 'redraft') return store.setRequest(id, { status: 'draft' });
       if (x === 'reject') return store.setRequest(id, { status: 'rejected', ...(r.status !== 'draft' ? { why: 'rejected by the director in Review > Queue' } : {}) });

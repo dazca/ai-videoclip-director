@@ -9,9 +9,8 @@
 //   const nc = new NotesColumn({ stage, scroller, rows: () => [Row], top?: {label, targets}, current?: () => target,
 //                                width?: (stageWidth) => px, maxWidth?, allStages? })
 //   allStages: the rows carry targets of other stages (the Final list): every stage's notes are matched (scope narrows them)
-//   The column's width follows the stage: by default ~22% of it (236..400 px); a stage whose rows have a natural width
-//   (the lyrics) passes width = what its rows leave, so nothing is left empty to the right (236..maxWidth, default 640;
-//   the lyrics: 800).
+//   The column's width is the same in every stage: 25% of the stage's width (260..420 px), always the last column before
+//   any side panel (width / maxWidth override it; no stage does today).
 //   Row = { el | els: [first, last], targets: [target, ...] (the first is the default), match?(note) -> bool,
 //           sub?(note) -> short label ("“night bus”", "sh03", "n03 📍"), targetAt?(element) -> target }
 //   nc.edit(target, {text?})  open the editor on the row that holds target (a word range, a pin, a sub-row)
@@ -22,6 +21,7 @@ import { store, esc, prefs, toast } from '../js/store.js';
 import * as N from '../js/notes.js';
 
 const WB = () => window.WB;
+export const NC_MIN = 260, NC_MAX = 420;   // the Notes column's width: 25% of the stage, clamped
 export const columns = new Set();   // every mounted column (the context menu finds the one under the pointer)
 const when = (at) => at ? String(at).replace('T', ' ').slice(5, 16) : '';
 const keyOf = (t) => t ? `${t.stage}|${t.kind}|${t.id ?? ''}` : '';
@@ -113,9 +113,10 @@ export class NotesColumn {
   clearGrown() { for (const e of this.sc.querySelectorAll('.nc-grown')) { e.style.minHeight = ''; e.classList.remove('nc-grown'); } }
   place() {
     if (!this.on || !this.visible || !this.rows.length || !this.layer.isConnected) return;
-    // 0. the width: what the stage leaves (o.width), else a share of it; set on the host (its padding and the layer)
-    const W = this.sc.clientWidth, max = this.o.maxWidth || (this.o.width ? 640 : 400);
-    const want = Math.round(Math.max(236, Math.min(this.o.width ? this.o.width(W) : W * 0.22, max)));
+    // 0. the width: ONE rule for every stage: a quarter of the stage's width (the whole workspace, side panels included),
+    // 260..420 px, so the column has the same width in every stage at a given window size (o.width overrides it)
+    const W = this.sc.clientWidth, SW = this.sc.closest('.sghost')?.clientWidth || W;
+    const want = Math.round(Math.max(NC_MIN, Math.min(this.o.width ? this.o.width(W) : SW * 0.25, this.o.maxWidth || NC_MAX, Math.max(NC_MIN, W - 200))));
     if (W && want !== this.w) { this.w = want; this.sc.style.setProperty('--ncw', `${want}px`); }
     const cells = [...this.layer.querySelectorAll('.nccell')];
     // 1. the rows at their own height, the cells at theirs

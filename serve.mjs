@@ -132,7 +132,7 @@ fs.watch(DATA_ROOT, { recursive: true }, (_ev, name) => {
   if (!name) { clearTimeout(watchTimer.get('*')); watchTimer.set('*', setTimeout(() => notify('*', ['*']), 80)); return; }   // Windows drops names when its event buffer overflows
   const f = name.replace(/\\/g, '/');
   // (gen/: the runner's outputs, job.json and lock: the page follows requests.json and media.json instead; .history: the git mirror)
-  if (f.endsWith('.tmp') || f.includes('/.snapshots') || f.includes('/.history') || f.includes('/thumbs/') || /\/gen(\/|$)/.test(f)) return;
+  if (f.endsWith('.tmp') || f.endsWith('.lock') || f.includes('/.snapshots') || f.includes('/.history') || f.includes('/thumbs/') || /\/gen(\/|$)/.test(f)) return;
   const i = f.indexOf('/'); if (i < 0) return;
   clearTimeout(watchTimer.get(f));
   watchTimer.set(f, setTimeout(() => notify(f.slice(0, i), [f.slice(i + 1)]), 80));
@@ -196,7 +196,7 @@ function readBody(req, limit) {
 // absorbed_in and change (the round's link to what the agent changed), and an agent's note keeps its words (only the director's own text can be edited); a status change is
 // stamped closed_by director / via page; legacy_seen only grows (a deleted migrated note never comes back); anything that
 // is not a v2 doc (an old page saving the v1 list) is refused (400: reload).
-function stampPage(name, data, cur) {
+function stampPage(name, data, cur, fromPage = true) {
   const at = new Date().toISOString().slice(0, 19);
   if (name === 'requests.json' && Array.isArray(data.items)) {
     const was = new Map((cur.items || []).map(r => [r.id, r]));
@@ -206,7 +206,11 @@ function stampPage(name, data, cur) {
       // withdrawn = its author took the draft back: the director withdraws their own drafts; an agent's draft they reject
       if (r.status === 'withdrawn' && c?.status !== 'withdrawn' && (!c || c.status !== 'draft' || S.requestAuthor(c) !== 'director')) throw new S.WbError(400, `request ${r.id}: only the director's own draft can be withdrawn in the page (an agent's draft: Reject)`);
       if (!c || c.status !== r.status) log.push({ at, by: 'director', via: 'page', status: r.status });
-      return { ...r, log };
+      // "allow uploading private refs" is the director's tick: recorded in the server-owned log (lib/ops/_shared.mjs privateUploadOk)
+      const pu = fromPage ? r.private_upload_ok === true : c?.private_upload_ok === true;   // without the page's Origin: unchanged
+      if (pu !== (c?.private_upload_ok === true)) log.push({ at, by: 'director', via: 'page', private_upload: pu });
+      const out = { ...r, log }; if (pu) out.private_upload_ok = true; else delete out.private_upload_ok;
+      return out;
     });
   }
   if (name === 'approvals.json' && data.items && typeof data.items === 'object') {
@@ -349,10 +353,16 @@ http.createServer(async (req, res) => {
         if (!S.WRITABLE.has(name)) { res.writeHead(403); return res.end('not writable'); }
         const file = path.join(S.projDir(project), name);
         if (name === 'notes.json') S.notesDoc(project);   // the old stores are migrated before a page save of the v2 list
-        const cur = S.readJSON(file, { rev: 0 }, true) || { rev: 0 };
-        if ((cur.rev || 0) !== body.base_rev) return json(res, 409, cur);
-        const data = stampPage(name, { ...body.data, rev: (cur.rev || 0) + 1 }, Object.defineProperty({ ...cur }, '__project', { value: project, enumerable: false }));
-        S.writeJSON(file, data);
+        // under the file's lock (lib/ops/_shared.mjs withFileLock): another process's write between the rev check and this
+        // write would be lost otherwise
+        const r = S.withFileLock(file, () => {
+          const cur = S.readJSON(file, { rev: 0 }, true) || { rev: 0 };
+          if ((cur.rev || 0) !== body.base_rev) return { stale: cur };
+          const data = stampPage(name, { ...body.data, rev: (cur.rev || 0) + 1 }, Object.defineProperty({ ...cur }, '__project', { value: project, enumerable: false }), fromPage);
+          S.writeJSON(file, data); return { data, cur };
+        });
+        if (r.stale) return json(res, 409, r.stale);
+        const { data, cur } = r;
         S.afterPageSave(project, name, data, cur);   // lyrics.json: the song's lines follow the current version
         return json(res, 200, { rev: data.rev });
       }
@@ -384,7 +394,7 @@ http.createServer(async (req, res) => {
       if (p === '/api/projects/delete') return json(res, 200, S.deleteProject(body.id));
       if (p === '/api/snapshot') return json(res, 200, S.snapshot(project, body.message));
       if (p === '/api/restore') {
-        const r = S.restore(project, body.snapshot, { agent: body.by === 'agent' });
+        const r = S.restore(project, body.snapshot, { agent: !fromPage || body.by === 'agent' });
         setTimeout(() => notify(project, [...r.changed, ...r.removed]), 120);   // explicit: the watcher may have overflowed
         return json(res, 200, r);
       }

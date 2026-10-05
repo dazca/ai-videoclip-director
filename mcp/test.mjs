@@ -14,7 +14,8 @@
 // review rounds and revisions (round_get / round_absorb / round_reply / round_finish, the page-only send / close / restore, the
 // compare, the opt-in mirror), proposals (proposals_add with the SVG sanitiser, proposals_get, the page-only picks, the "3 more"
 // asks answered by the next set, the free local generator), final approvals (final_get, the page-only lock: a locked project
-// refuses agent writes, proposals included),
+// refuses agent writes, proposals included), the review fixes (a failed request back to draft in a duplicate / restore,
+// private refs uploaded only with the director's tick),
 // resources, the director-session prompt, the guard rules (edit voids approval, director-only approvals, media kind,
 // CSRF / Host / token checks, path traversal and the PRIVATE rule) and the offline (files only) mode. The temp folder
 // is removed at the end, whatever happens; data/demo must be byte-identical afterwards.
@@ -25,7 +26,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { tinyPngB64 } from '../tools/tiny-png.mjs';
@@ -1292,6 +1293,84 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     { agentLock: agentLock.status, lk: lk.body, w1: w1.error?.slice(0, 90), w2: w2.error?.slice(0, 60), w3: w3.error?.slice(0, 60), locked: r1.locked?.revision });
   const ul = await pageOp('final_unlock'), w4 = await call(mcp, 'notes_add', { project: FP, target: { stage: 'final', kind: 'stage', id: null }, text: 'mcp: after unlock' });
   check('unlock (page): the agent writes again; the lock stays in revisions.json locks[] with unlocked_at', ul.status === 200 && !w4.error && FJ('revisions.json').lock === null && FJ('revisions.json').locks?.[0]?.unlocked_at, { ul: ul.status, w4: w4.error });
+}
+
+// 19. the review fixes of 2026-10-05: (S1) one director approval pays for one run: a FAILED request (runnable: the runner
+// retries it) goes back to draft in a duplicate and through a snapshot restore; the copy has no git mirror and no
+// revisions of the original; (S4) a fal run that would upload a private ref is refused until the director ticks "allow
+// uploading private refs" on the request in the page (a save without the page's Origin cannot tick it; an edit unticks it)
+{
+  const RVP = 'mcp-review', RD = path.join(DATA, RVP);
+  S.duplicateProject(PROJECT, RVP, true);
+  const RJ = (f) => JSON.parse(fs.readFileSync(path.join(RD, f), 'utf8'));
+  const c0 = RJ('costs.json'); c0.cap_usd = 100; fs.writeFileSync(path.join(RD, 'costs.json'), JSON.stringify(c0));
+  const pageSave = async (fn, headers = { origin: URL_ }) => { const cur = RJ('requests.json'); fn(cur); return post(`/api/save/requests.json?project=${RVP}`, { base_rev: cur.rev, data: cur }, headers); };
+  const r1 = await call(mcp, 'request_create', { project: RVP, kind: 'shot-still', target: 'shot:s5-outro', prompt: 'review S1', est_cost: 0.12, tool: 'fal-ai/nano-banana-2/edit' });
+  await pageSave((d) => { d.items.find(x => x.id === r1.id).status = 'approved'; });
+  for (const st of ['queued', 'running']) S.ops.request_update(RVP, { id: r1.id, status: st });
+  S.ops.request_update(RVP, { id: r1.id, status: 'failed', why: 'mcp test: provider error' });
+  const snapF = S.snapshot(RVP, 'with a failed request');
+  fs.mkdirSync(path.join(RD, '.history', '.git', 'hooks'), { recursive: true }); fs.writeFileSync(path.join(RD, '.history', '.git', 'hooks', 'pre-commit'), '#!/bin/sh\necho pwned > ../pwned\n');
+  S.duplicateProject(RVP, RVP + '-copy', false);
+  const CD = path.join(DATA, RVP + '-copy'), cr = JSON.parse(fs.readFileSync(path.join(CD, 'requests.json'), 'utf8')).items.find(x => x.id === r1.id);
+  const cdry = await call(mcp, 'request_run', { project: RVP + '-copy', ids: [r1.id], dry_run: true });
+  S.ops.request_update(RVP, { id: r1.id, status: 'draft' });
+  const rs = S.restore(RVP, snapF.id, { agent: true }), after = RJ('requests.json').items.find(x => x.id === r1.id);
+  const odry = await call(mcp, 'request_run', { project: RVP, ids: [r1.id], dry_run: true });
+  check('S1: a failed request goes back to draft in a duplicate (approve again; its dry run is refused) and through a snapshot restore (the restored failed status is not carried); the copy gets no .history (git hooks never travel) and no revisions.json',
+    cr?.status === 'draft' && /approve again/.test(cr.log.at(-1)?.why || '') && cdry.items?.[0]?.ok === false && after?.status === 'draft' && /approval not carried/.test(after.log.at(-1)?.why || '')
+    && odry.items?.[0]?.ok === false && !fs.existsSync(path.join(CD, '.history')) && !fs.existsSync(path.join(CD, 'revisions.json')),
+    { copy: cr?.status, cdry: cdry.items?.[0]?.why, restored: after?.status, kept: rs.kept_since_snapshot });
+  // S4: a private ref (private/refs/...) on a fal request
+  fs.mkdirSync(path.join(RD, 'private', 'refs', 'runa'), { recursive: true });
+  fs.copyFileSync(path.join(RD, 'media', 'still', 'bo_face.jpg'), path.join(RD, 'private', 'refs', 'runa', 'face.jpg'));
+  const r2 = await call(mcp, 'request_create', { project: RVP, kind: 'shot-still', target: 'shot:s5-outro', prompt: 'review S4', refs: ['private/refs/runa/face.jpg'], est_cost: 0.12, tool: 'fal-ai/nano-banana-2/edit' });
+  const agentTick = (await post(`/api/op/request_create?project=${RVP}`, { kind: 'shot-still', target: 'shot:s5-outro', prompt: 'review S4 agent', refs: ['private/refs/runa/face.jpg'], est_cost: 0.12, tool: 'fal-ai/nano-banana-2/edit', extra: { private_upload_ok: true } })).body;
+  await pageSave((d) => { d.items.find(x => x.id === r2.id).status = 'approved'; });
+  const d0 = await call(mcp, 'request_run', { project: RVP, ids: [r2.id], dry_run: true });
+  const noOrigin = await pageSave((d) => { d.items.find(x => x.id === r2.id).private_upload_ok = true; }, {});
+  const d1 = await call(mcp, 'request_run', { project: RVP, ids: [r2.id], dry_run: true }), tick0 = RJ('requests.json').items.find(x => x.id === r2.id).private_upload_ok;
+  const tick = await pageSave((d) => { d.items.find(x => x.id === r2.id).private_upload_ok = true; });
+  const d2 = await call(mcp, 'request_run', { project: RVP, ids: [r2.id], dry_run: true });
+  const ed = await call(mcp, 'request_update', { project: RVP, id: r2.id, prompt: 'review S4, edited' }), r2e = RJ('requests.json').items.find(x => x.id === r2.id);
+  check('S4: a fal run with a private ref is refused until the director ticks "allow uploading private refs" in the page (a save without the page\'s Origin cannot tick it, an agent\'s extra is dropped); the tick is logged; an edit unticks it',
+    d0.items?.[0]?.ok === false && /private ref/.test(d0.items[0].why) && noOrigin.status === 200 && tick0 !== true && d1.items?.[0]?.ok === false
+    && tick.status === 200 && d2.items?.[0]?.ok === true && r2e.private_upload_ok !== true && r2e.log.some(e => e.private_upload === true && e.via === 'page') && r2e.log.some(e => e.private_upload === false) && r2e.status === 'draft'
+    && RJ('requests.json').items.find(x => x.id === agentTick?.id)?.private_upload_ok !== true && !!agentTick?.id && !ed.error,
+    { agentTick: agentTick?.id, ed: ed.error, d0: d0.items?.[0]?.why, d1: d1.items?.[0]?.ok, d2: d2.items?.[0]?.ok ?? d2.items?.[0]?.why, after: r2e.private_upload_ok });
+}
+// (S2) one price source: no literal price table outside js/prices.js (the "New look…" form had its own)
+{
+  const PRICE_LIT = /(usd|cost|price|COST|PRICE)[A-Za-z_]*\s*[:=]\s*\{?\s*[a-z_]*:?\s*0\.[0-9]+/;
+  const files = ['core', 'tabs', 'js', 'lib', 'generators'].flatMap(d => fs.readdirSync(path.join(WB, d), { recursive: true }).map(f => path.join(d, String(f)))).concat(['app.js'])
+    .filter(f => /\.m?js$/.test(f) && !/prices\.js$/.test(f));
+  const hits = files.flatMap(f => fs.readFileSync(path.join(WB, f), 'utf8').split('\n').map((l, i) => PRICE_LIT.test(l) ? `${f}:${i + 1}` : null).filter(Boolean));
+  check('S2: no literal price outside js/prices.js (core, tabs, js, lib, generators, app.js)', !hits.length && /estimateWith/.test(fs.readFileSync(path.join(WB, 'core', 'partb.js'), 'utf8')), hits);
+}
+// (S6) a look's colours go into a style attribute: hex only (look_create, entity_upsert); the page renders hex only
+{
+  const RVP = 'mcp-review';
+  const bad = await call(mcp, 'look_create', { project: RVP, id: 'ada', name: 'S6 beacon', colors: ['red;background-image:url(https://evil.example/b)'] });
+  const bad2 = await call(mcp, 'entity_upsert', { project: RVP, kind: 'character', id: 'ada', look: { id: 's6-up', name: 'S6 up', colors: ['#fff', 'url(https://evil.example)'] } });
+  const good = await call(mcp, 'look_create', { project: RVP, id: 'ada', name: 'S6 ok', colors: ['#1c2541', '#abc'] });
+  const ada = JSON.parse(fs.readFileSync(path.join(DATA, RVP, 'entities', 'characters', 'ada.json'), 'utf8'));
+  const lib = fs.readFileSync(path.join(WB, 'tabs', 'library.js'), 'utf8'), pb = fs.readFileSync(path.join(WB, 'core', 'partb.js'), 'utf8');
+  check('S6: look colours are hex only (look_create and entity_upsert: 400 on anything else); the swatches render through hexColor()',
+    /error 400/.test(bad.error || '') && /hex/.test(bad.error) && /error 400/.test(bad2.error || '') && !good.error && ada.looks.some(l => l.colors?.join() === '#1c2541,#abc') && !ada.looks.some(l => /beacon|s6-up/i.test(`${l.name} ${l.id}`))
+    && /background:\$\{hexColor\(c\)\}/.test(lib) && /background:\$\{hexColor\(c\)\}/.test(pb) && !/background:\$\{esc\(c\)\}/.test(lib + pb),
+    { bad: bad.error?.slice(0, 120), bad2: bad2.error?.slice(0, 120), good: good.error });
+}
+// (S5) four processes write costs.json and requests.json at once (offline, the data layer directly): nothing is lost
+{
+  const RVP = 'mcp-review', RD = path.join(DATA, RVP), N = 4, K = 12;
+  const kid = (k) => `const S = await import(${JSON.stringify(pathToFileURL(path.join(WB, 'lib', 'store.mjs')).href)});
+for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: 'race', job: 'race${k}-' + i }); S.ops.request_create('${RVP}', { kind: 'shot-still', prompt: 'race ${k} ' + i, est_cost: 0.01 }); }`;
+  const runs = Array.from({ length: N }, (_, k) => new Promise((ok) => { const c = spawn(process.execPath, ['--input-type=module', '-e', kid(k)], { env: process.env, stdio: ['ignore', 'ignore', 'pipe'] }); let err = ''; c.stderr.on('data', d => { err += d; }); c.on('exit', (code) => ok({ code, err: err.slice(0, 300) })); }));
+  const outs = await Promise.all(runs);
+  const RJ = (f) => JSON.parse(fs.readFileSync(path.join(RD, f), 'utf8'));
+  const costs = RJ('costs.json').items.filter(x => x.via === 'race').length, reqs = RJ('requests.json').items.filter(x => /^race /.test(x.prompt || '')).length;
+  check('S5: four processes recording costs and creating requests at once (cross-process file lock): every cost row and every request is kept (the cap cannot undercount); no lock file is left',
+    outs.every(o => o.code === 0) && costs === N * K && reqs === N * K && !fs.readdirSync(RD).some(f => f.endsWith('.lock')), { outs, costs, reqs, want: N * K });
 }
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {

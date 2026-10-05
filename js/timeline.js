@@ -97,11 +97,21 @@ export class Timeline {
     const avail = this.root.clientWidth - (this.scroller.offsetWidth - this.scroller.clientWidth);
     let x = 0;
     const eff = (c) => c.collapsed ? STRIP_W - 4 : Math.max(3, Math.round(c.w));
-    const sum = vis.reduce((s, c) => s + eff(c), 0);
+    let sum = vis.reduce((s, c) => s + eff(c), 0);
     const flex = vis.find(c => c.id === 'notes' && !c.collapsed) || vis[vis.length - 1];
+    // too wide for the window (1280 px with the default columns): the wide text columns give up width, down to 65% of
+    // their own (never below 60 px), in proportion to what they can give, so the notes column (the last one) stays whole
+    // on screen; only what is still left over scrolls sideways
+    const give = new Map();
+    if (sum > avail && avail > 0) {
+      const can = vis.filter(c => c !== flex && c.def.kind === 'text' && !c.collapsed && eff(c) > 90).map(c => [c, eff(c) - Math.max(60, Math.round(eff(c) * 0.65))]);
+      const room = can.reduce((s, [, g]) => s + g, 0), need = Math.min(room, sum - avail);
+      if (need > 0) for (const [c, g] of can) give.set(c, Math.floor(need * g / room));
+      sum -= [...give.values()].reduce((s, g) => s + g, 0);
+    }
     for (const c of this.cols) {
       if (c.hidden) { c.el.style.display = 'none'; c.head.style.display = 'none'; c.vw = 0; continue; }
-      let w = eff(c);
+      let w = eff(c) - (give.get(c) || 0);
       if (c === flex && sum < avail) w += avail - sum;
       const strip = c.def.kind === 'text' && (c.collapsed || w < STRIP_W);
       if (w !== c.vw || strip !== c.strip) c.dirty = true;

@@ -50,17 +50,17 @@ const nn = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
 // what the page says per type (the data words are js/assets.js TYPE)
 export const UI = {
-  character: { tabs: [['identity', 'Identity'], ['looks', 'Looks'], ['scenes', 'Scenes'], ['notes', 'Notes']], rootTab: 'identity', vTab: 'looks',
+  character: { tabs: [['identity', 'Identity'], ['looks', 'Looks'], ['scenes', 'Scenes'], ['history', 'History']], rootTab: 'identity', vTab: 'looks',
     describe: 'describe the character: age, build, face, hair, skin, how they move, what they wear by default, era… (with or without references)',
     ovHint: 'search Openverse (e.g. mannequin pose walking, costume plate 1920s)', sketchHint: 'draw the character (over the first catalogue body you picked, if any): the sketch becomes a reference',
     photoWarn: '🔒 Photos of you or your friends are stored under <code>private/</code> in this project, flagged private: shown only on this machine, never exported or shared. Use them only with the person\'s consent.',
     editHint: 'e.g. add a thin silver necklace (pin 1); messier hair; a pin on the lapel', baseWhat: 'what the identity sheet starts from: combine any of these' },
-  location: { tabs: [['base', 'Base'], ['variants', 'Variants'], ['scenes', 'Scenes'], ['notes', 'Notes']], rootTab: 'base', vTab: 'variants',
+  location: { tabs: [['base', 'Base'], ['variants', 'Variants'], ['scenes', 'Scenes'], ['history', 'History']], rootTab: 'base', vTab: 'variants',
     describe: 'describe the place: interior / exterior, era, size, materials, colours, light sources, what is in it, the mood… (with or without references)',
     ovHint: 'search Openverse (e.g. bus interior night, harbour pier fog, 1970s kitchen)', sketchHint: 'draw the place: a floor plan or the view, where the light comes from, P = pin a note',
     photoWarn: '🔒 Photos of a real place (scouting, a friend\'s flat) are stored under <code>private/</code> in this project, flagged private: shown only on this machine, never exported or shared.',
     editHint: 'e.g. wet asphalt (pin 1); add a bus stop sign here; warmer window light', baseWhat: 'what the base plate starts from: combine any of these' },
-  prop: { tabs: [['base', 'Base'], ['variants', 'Variants'], ['scenes', 'Scenes'], ['notes', 'Notes']], rootTab: 'base', vTab: 'variants',
+  prop: { tabs: [['base', 'Base'], ['variants', 'Variants'], ['scenes', 'Scenes'], ['history', 'History']], rootTab: 'base', vTab: 'variants',
     describe: 'describe the object: what it is, size, materials, colours, wear, markings, era… (with or without references)',
     ovHint: 'search Openverse (e.g. old letter envelope, brass oil lamp, cassette recorder)', sketchHint: 'draw the object: shape, details, P = pin a note',
     photoWarn: '🔒 Photos of a real object are stored under <code>private/</code> in this project, flagged private: shown only on this machine, never exported or shared.',
@@ -71,7 +71,7 @@ export class AssetWorkspace {
   // opts: {types: ['character'] | ['location', 'prop'], stage, pref: prefs prefix, title: list title (one type)}
   constructor(el, opts) {
     this.el = el; this.types = opts.types; this.stage = opts.stage; this.pf = opts.pref;
-    this.cur = prefs.get(this.pf + 'Cur', null); this.tab = prefs.get(this.pf + 'Tab', null); this.vid = null; this.sel = null;
+    this.cur = prefs.get(this.pf + 'Cur', null); this.tab = prefs.get(this.pf + 'Tab', null); if (this.tab === 'notes') this.tab = 'history';   // one Notes place per stage: the column this.vid = null; this.sel = null;
     this.mode = 'view'; this.ab = prefs.get(this.pf + 'AB', 'slider'); this.abPos = 50; this.abShow = 'B';
     this.src = prefs.get(this.pf + 'Src', 'catalog'); this.drafts = {}; this.cat = null; this.catKind = {}; this.catQ = ''; this.ov = { q: '', lic: 'cc0,pdm', res: null, busy: false, msg: '' };
     this.sk = null; this.pending = false; this.vf = null;
@@ -350,7 +350,7 @@ export class AssetWorkspace {
     const e = this.ent(), bar = this.$('.chbar');
     if (!e) { bar.innerHTML = `<span class="dim">no ${this.types.map(t => t).join(' / ')} selected</span>`; return; }
     const T = this.T, U = this.U, it = this.iter(e), st = A.assetStatus(e, store.requests, e.kind), rA = A.treeState(it, T.root).approved, notes = this.myNotes('open').length;
-    const label = (k, l) => k === U.rootTab ? `${l}${rA ? ' ✓' : ''}` : k === U.vTab ? `${l} ${this.vlist(e).length}` : k === 'notes' ? `${l} ${notes || ''}` : k === 'scenes' ? `${l} ${A.sceneUses(e, this.scenesOf(e), [], e.kind).length || ''}` : l;
+    const label = (k, l) => k === U.rootTab ? `${l}${rA ? ' ✓' : ''}` : k === U.vTab ? `${l} ${this.vlist(e).length}` : k === 'history' ? `${l} ${it.log?.length || ''}` : k === 'scenes' ? `${l} ${A.sceneUses(e, this.scenesOf(e), [], e.kind).length || ''}` : l;
     const tab = (k, l) => `<a data-tab="${k}" class="${this.tab === k ? 'on' : ''}">${label(k, l)}</a>`;
     const tree = this.tree, tA = A.treeState(it, tree).approved, word = A.isRoot(tree) ? T.rootWord : T.vWord;
     const desc = e.kind === 'character' ? e.role : e.description;
@@ -365,7 +365,7 @@ export class AssetWorkspace {
     const keep = body.scrollTop;
     if (!e) { body.innerHTML = `<div class="scempty"><b>No ${this.types.join(' or ')} yet.</b> They come from the breakdown (stage 3): open it and use “Create entity” on an item${this.allRows().length ? ', or click “make…” on the left' : ''}.</div>`; return; }
     const U = this.U;
-    body.innerHTML = this.tab === 'notes' ? this.notesHtml(e) : this.tab === 'scenes' ? this.scenesHtml(e) : this.tab === U.vTab ? this.variantsHtml(e) : this.rootHtml(e);
+    body.innerHTML = this.tab === 'history' ? this.historyHtml(e) : this.tab === 'scenes' ? this.scenesHtml(e) : this.tab === U.vTab ? this.variantsHtml(e) : this.rootHtml(e);
     const slot = body.querySelector('.chskslot'); if (slot && this.sk) slot.appendChild(this.skHost);
     body.scrollTop = keep;
     const ab = body.querySelector('.chab'); if (ab) ab.style.setProperty('--ab', this.abPos + '%');
@@ -545,14 +545,14 @@ export class AssetWorkspace {
       + (others.length ? `<div class="asuse add"><span class="dim">add a scene</span><select class="asuseadd"><option value="">…</option>${others.map(s => `<option value="${esc(s.id)}">${esc(s.id)} · ${esc(SC.span(s.t0, s.t1))} · ${esc(s.title)}</option>`).join('')}</select></div>` : '');
   }
   // the Notes tab: one row per thing this asset's notes are on (the Notes column holds the notes), then the history
-  notesHtml(e) {
-    const it = this.iter(e), seen = new Map();
-    for (const n of this.myNotes()) { if (n.target.kind === 'asset') continue; const k = `${n.target.kind}|${n.target.id}`; if (!seen.has(k)) seen.set(k, n.target); }
-    const label = (t) => { const s = N.splitId(t.id)[1]; return t.kind === 'node' ? `node ${s}${A.nodeById(it, s) ? ' · ' + (A.nodeById(it, s).tree) : ' · gone'}` : t.kind === 'tree' ? `tree ${s}` : t.kind === 'use' ? `in scene ${s}` : t.kind; };
-    const rows = [...seen.values()].map(t => `<div class="chnrow" data-tk="${esc(t.kind)}|${esc(t.id)}"><span>${esc(label(t))}</span>${t.kind === 'node' && A.nodeById(it, N.splitId(t.id)[1]) ? `<a data-node="${esc(N.splitId(t.id)[1])}">open</a>` : ''}</div>`).join('');
-    return `<div class="chnotes"><div class="chsh">notes <span class="dim">on ${esc(e.name)} (top row of the Notes column), its trees, nodes and scenes · click a cell to write · Alt+N on the open node</span></div>${rows || '<div class="dim lyno">No notes on its trees, nodes or scenes yet.</div>'}`
-      + `<div class="chsh">history <span class="dim">(every act, newest first)</span></div>` + it.log.slice(-30).reverse().map(x => `<div class="chlog"><span class="dim">${when(x.at)}</span> ${x.via === 'agent' ? 'agent' : 'director'} <b>${esc(x.act)}</b> ${esc(x.tree || '')} ${esc(x.node || '')} <span class="dim">${esc(x.detail || '')}</span></div>`).join('') + '</div>';
+  // History: every act on the asset, newest first. Its notes have ONE place, the stage's Notes column (row-aligned on the
+  // asset, its trees, nodes and scenes; a note whose row is not on screen sits in the column's top row)
+  historyHtml(e) {
+    const it = this.iter(e), open = this.myNotes('open').length;
+    return `<div class="chnotes"><div class="chsh">history <span class="dim">(every act on ${esc(e.name || e.id)}, newest first) · its notes${open ? ` (${open} open)` : ''} are in the Notes column on the right</span></div>`
+      + (it.log.length ? it.log.slice(-30).reverse().map(x => `<div class="chlog"><span class="dim">${when(x.at)}</span> ${x.via === 'agent' ? 'agent' : 'director'} <b>${esc(x.act)}</b> ${esc(x.tree || '')} ${esc(x.node || '')} <span class="dim">${esc(x.detail || '')}</span></div>`).join('') : '<div class="dim lyno">Nothing done on it yet.</div>') + '</div>';
   }
+
   // ---------------------------------------------------------------- events
   async select(id) { if (id === this.cur) return; if (this.sk && !(await this.closeSketch())) return; this.cur = id; prefs.set(this.pf + 'Cur', id); this.sel = null; this.mode = 'view'; this.vid = null; this.vf = null; this.render(); }
   selectChar(id) { return this.select(id); }

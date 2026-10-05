@@ -7,6 +7,8 @@ import { ui } from './palette.js';
 import { dock, sourceFromKey } from './dock.js';
 import { projects } from './projects.js';
 import { store, mediaUrl, toast, isPrivatePath } from '../js/store.js';
+import { hexColor } from './esc.js';
+import { estimateWith } from '../js/prices.js';
 
 const WB = () => window.WB;
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
@@ -67,7 +69,10 @@ document.addEventListener('contextmenu', (e) => {
 }, true);
 
 // ------------------------------------------------------------------ the look / angle / variant form
-const COST = { image: 0.24, sheet: 0.31, clip: 0.78 };
+// the estimate comes from the one price table (js/prices.js): a look image and a turnaround sheet are NB2 2K sheets, a
+// re-shot still an NB2 2K frame, a re-shot clip H3 Max image-to-video (5 s)
+const COST = { get image() { return estimateWith('sheet').usd; }, get sheet() { return estimateWith('sheet').usd; }, get still() { return estimateWith('still').usd; }, get clip() { return estimateWith('video', { seconds: 5 }).usd; } };
+const LOOK_MODEL = () => estimateWith('sheet');
 export function openLookForm(entity, { mode = 'new', look = null, refs = [] } = {}) {
   document.querySelector('.lookform')?.remove();
   const e = typeof entity === 'string' ? store.entityById[entity] : entity; if (!e) return;
@@ -90,16 +95,16 @@ export function openLookForm(entity, { mode = 'new', look = null, refs = [] } = 
   document.body.appendChild(f);
   const $ = (n) => f.querySelector(`[name=${n}]`);
   const est = () => {
-    let usd = COST.image * ($('takes')?.checked ? 1 : 0.5);
+    let usd = COST.image * ($('takes')?.checked ? 2 : 1);
     if ($('sheet')?.checked) usd += COST.sheet;
-    if ($('reshoot')?.checked) usd += (base.stills?.length || 1) * COST.image + (base.clips?.length || 0) * COST.clip;
+    if ($('reshoot')?.checked) usd += (base.stills?.length || 1) * COST.still + (base.clips?.length || 0) * COST.clip;
     return +usd.toFixed(2);
   };
   const paint = () => {
     f.querySelector('.refs').innerHTML = st.refs.map((p, i) => { const m = store.mediaByPath[p]; return `<span class="rf" title="${esc(p)}">${isPrivatePath(p) ? '<i class="lock">🔒</i>' : ''}${m || !/^upload:/.test(p) ? `<img src="${esc(mediaUrl(m?.thumb || p))}" alt="">` : `<em>${esc(p.slice(7))}</em>`}<b data-rm="${i}">×</b></span>`; }).join('') || '<span class="dim">drop images here</span>';
-    const cols = f.querySelector('.cols'); if (cols) cols.innerHTML = st.colors.map((c, i) => `<i style="background:${esc(c)}" title="${esc(c)} (click to remove)" data-rc="${i}"></i>`).join('');
+    const cols = f.querySelector('.cols'); if (cols) cols.innerHTML = st.colors.map((c, i) => `<i style="background:${hexColor(c)}" title="${esc(c)} (click to remove)" data-rc="${i}"></i>`).join('');
     const total = (store.costs?.items || []).reduce((s, x) => s + x.usd, 0) + (store.requests?.items || []).filter(r => ['approved', 'queued'].includes(r.status)).reduce((s, r) => s + (r.est_cost || 0), 0);
-    f.querySelector('.est').textContent = `est. $${est().toFixed(2)} · spent+queued $${total.toFixed(2)} / cap $${store.costs?.cap_usd ?? '?'}`;
+    f.querySelector('.est').textContent = `est. $${est().toFixed(2)} (${LOOK_MODEL().tool.split('/').slice(-2).join('/')}, js/prices.js) · spent+queued $${total.toFixed(2)} / cap $${store.costs?.cap_usd ?? '?'}`;
   };
   paint();
   f.addEventListener('input', paint);
@@ -122,7 +127,7 @@ export function openLookForm(entity, { mode = 'new', look = null, refs = [] } = 
       const prompt = isChar ? `${e.name}: ${mode === 'variant' ? 'variant of "' + base.name + '": ' : mode === 'dup' ? 'copy of "' + base.name + '": ' : 'new look '}"${name}"${garments.length ? ' — ' + garments.join(', ') : ''}${st.colors.length ? ' · colours ' + st.colors.join(' ') : ''}. Full body on chroma green, same identity.${look_.notes ? ' ' + look_.notes : ''}`
         : isLoc ? `${e.name}: new ${look_.angle || 'angle'} at ${look_.tod}: ${name}. Match the existing location exactly.${look_.notes ? ' ' + look_.notes : ''}`
         : `${e.name}: new variant "${name}".${look_.notes ? ' ' + look_.notes : ''}`;
-      const r = await WB().requests.create({ kind: isChar ? 'new-costume' : 'new-variant', target: `${e.kind}:${e.id}`, prompt, refs: st.refs, est_cost: est(), extra: { look: look_ } });
+      const r = await WB().requests.create({ kind: isChar ? 'new-costume' : 'new-variant', target: `${e.kind}:${e.id}`, prompt, refs: st.refs, est_cost: est(), extra: { look: look_, tool: LOOK_MODEL().tool, est_why: `${LOOK_MODEL().why}${look_.takes > 1 ? ' x 2 takes' : ''}${look_.sheet ? ' + a turnaround sheet' : ''}${look_.reshoot.length ? ' + re-shoots' : ''}` } });
       toast(`draft request ${r.id}: ${name} · est $${est().toFixed(2)} · Queue tab`);
       f.remove();
       document.dispatchEvent(new CustomEvent('wb:request', { detail: r }));

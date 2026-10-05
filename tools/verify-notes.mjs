@@ -123,8 +123,8 @@ export async function verifyNotes({ browser, OUT }) {
     // the counts: per stage on the rail, all of them in the top bar
     const counts = await pg.evaluate(() => ({ rail: Object.fromEntries([...document.querySelectorAll('#rail a[data-stage]')].map(a => [a.dataset.stage, Number(a.querySelector('.rnc')?.textContent || 0)])), top: document.querySelector('#top .opennotes')?.textContent || '' }));
     const open = V2.notes.filter(n => n.status === 'open'), per = (s) => open.filter(n => n.target.stage === s).length;
-    check('counters: each stage on the rail shows its open notes; the top bar "N open notes" counts every stage and the timeline',
-      ['lyrics', 'script', 'breakdown', 'characters', 'storyboard', 'final'].every(s => counts.rail[s] === per(s)) && counts.top === `${open.length} open notes`, { counts, open: open.length });
+    check('counters: each stage on the rail shows its open notes; the top bar "all open notes: N" counts every stage and the timeline',
+      ['lyrics', 'script', 'breakdown', 'characters', 'storyboard', 'final'].every(s => counts.rail[s] === per(s)) && counts.top === `all open notes: ${open.length}`, { counts, open: open.length });
 
     // 2. lyrics: notes on their line (row-aligned), a word range marked; a click in an empty cell types a note there;
     // Alt+N on a focused line; right-click "+ Add" (line above / below, verse, section, note) and Ctrl+Z

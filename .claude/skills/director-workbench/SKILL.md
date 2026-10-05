@@ -211,6 +211,9 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
   absorbed or replied. A round is not an approval: closing the revision is the director's.
 - Never touch PRIVATE files (crops of real photos, anything under a `private/` folder or flagged private) beyond
   reading them locally for the director; never copy them into exports, the demo, the template or a shared repo.
+  A fal run uploads its refs to fal storage (a public URL): a request with a private ref runs only after the director
+  ticks "allow uploading private refs" on it in Review › Queue (`request_run` says so); you cannot tick it. Look
+  colours are hex only (`#1c2541`).
 - Never edit timing by moving pixels: times are integer ms in the JSON; layout follows.
 - Never mark a stage done or edit `stages.json` / `lyrics.json` / `scenes.json` by hand to look like the director's
   (`via: "page"`): use the tools, which stamp your writes `via: "agent"`. Never mark a scene `ok`.

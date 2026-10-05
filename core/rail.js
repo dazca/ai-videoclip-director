@@ -5,7 +5,7 @@
 // the top bar (`), or on its own (View > Stage rail). A click opens the stage workspace (tabs/stage.js); every action is
 // a command (palette "Go to stage: Lyrics", Alt+Shift+1..7, right-click on a stage). Each stage shows its open notes
 // (notes.json v2, the stage's Notes column) as a small count. At its right end: the review round (js/revisions.js;
-// SPEC v4 §2): "Round N · K open notes" + "Send round to Claude" (one click, page only: every open note of the director's
+// SPEC v4 §2): "Round N · your open notes: K" + "Send round to Claude" (one click, page only: every open note of the director's
 // goes to the agent as one ask), then the agent's progress (absorbed / replied / left) while it works, then
 // "Close revision R<n>" (page only), and a chip with the latest revision that opens Review › Compare.
 //   WB.stages: { open(id), current(), view(), setStatus(id, status) }
@@ -62,7 +62,7 @@ function roundHtml() {
   if (!store.notes) return '';
   const s = rounds.state(), chip = s.last ? `<a class="rvc" data-rv="compare" title="${esc(`${s.last.id}: ${s.last.summary}\n${s.count} revision${s.count > 1 ? 's' : ''} · click: compare revisions`)}">${esc(s.last.id)}</a>` : '';
   if (s.phase === 'collecting') {
-    return `<span class="rnd" data-phase="collecting" title="${esc(`Round ${s.n}: the notes you write in any stage collect here.\nSend round to Claude: every open note goes to the agent as one ask.`)}"><b>Round ${s.n}</b> · ${s.open} open note${s.open === 1 ? '' : 's'}`
+    return `<span class="rnd" data-phase="collecting" title="${esc(`Round ${s.n}: your open notes (the ones you wrote, in any stage) collect here; the agent's notes are not sent.\nThe top bar counts all open notes, the agent's too.\nSend round to Claude: every open note of yours goes to the agent as one ask.`)}"><b>Round ${s.n}</b> · your open notes: ${s.open}`
       + `<button class="rbtn" data-rv="send"${s.open ? '' : ' disabled'}>Send round to Claude</button>${chip}</span>`;
   }
   const p = s.progress, done = p.absorbed + p.replied + p.dismissed, pct = p.total ? Math.round(100 * done / p.total) : 100;
@@ -101,8 +101,12 @@ export function mountRail() {
 const C = STAGES.map(s => ({ id: `stage.${s.id}`, group: 'Stages', title: `Go to stage: ${s.title}`, keys: [`Alt+Shift+${s.n}`],
   checked: (c) => c.tab === 'stage' && current() === s.id, run: () => stages.open(s.id) }));
 const target = (c) => c.stageId || (onStage(c) ? current() : null);
+const afterOf = (c) => { const id = (c && target(c)) || current(), i = STAGES.findIndex(s => s.id === id); return i >= 0 && i < STAGES.length - 1 ? STAGES[i + 1] : null; };
 C.push(
-  { id: 'stage.next', group: 'Stages', title: () => `Go to the next stage${view().next ? ': ' + view().next.title : ''}`, when: () => !!view().next, run: () => stages.open(view().next.id) },
+  // the next stage is the one AFTER the open (or right-clicked) stage; "what needs you" is the flow's first stage that does
+  // (js/flow.js stagesView().next), offered only when it is not the stage already open
+  { id: 'stage.next', group: 'Stages', title: (c) => `Go to the next stage${afterOf(c) ? ': ' + afterOf(c).title : ''}`, when: (c) => !!afterOf(c), run: (c) => stages.open(afterOf(c).id) },
+  { id: 'stage.needs', group: 'Stages', title: () => `Go to what needs you: ${view().next?.title || ''}`, when: (c) => !!view().next && !(onStage(c) && view().next.id === current()), run: () => stages.open(view().next.id) },
   { id: 'stage.open', group: 'Stages', title: (c) => `Open ${stageById(target(c))?.title || 'stage'}`, hidden: true, when: (c) => !!target(c), run: (c) => stages.open(target(c)) },
   { id: 'stage.done', group: 'Stages', title: (c) => `Mark ${stageById(target(c))?.title || 'stage'} done`, when: (c) => !!target(c) && view().stages.find(s => s.id === target(c))?.status !== 'done', run: (c) => stages.setStatus(target(c), 'done') },
   { id: 'stage.reopen', group: 'Stages', title: (c) => `Reopen ${stageById(target(c))?.title || 'stage'}`, when: (c) => !!target(c) && view().stages.find(s => s.id === target(c))?.status === 'done', run: (c) => stages.setStatus(target(c), 'in_progress') },
@@ -115,17 +119,20 @@ C.push(
 );
 // the review round: one command per act (palette, File menu, the rail's buttons)
 C.push(
-  { id: 'round.send', group: 'Review', title: () => { const s = rounds.state(); return `Send round ${s.n} to Claude (${s.open} open note${s.open === 1 ? '' : 's'})`; }, when: () => { const s = rounds.state(); return s.phase === 'collecting' && s.open > 0; }, run: () => rounds.send().catch(() => {}) },
+  { id: 'round.send', group: 'Review', title: () => { const s = rounds.state(); return `Send round ${s.n} to Claude (your open notes: ${s.open})`; }, when: () => { const s = rounds.state(); return s.phase === 'collecting' && s.open > 0; }, run: () => rounds.send().catch(() => {}) },
   { id: 'revision.close', group: 'Review', title: () => { const s = rounds.state(); return s.live ? `Close revision ${s.next} (round ${s.n})` : `Close revision ${s.next} (a checkpoint, no round)`; }, run: () => rounds.close().catch(() => {}) },
   { id: 'revision.compare', group: 'Review', title: 'Compare revisions', run: () => WB().app.show('compare') },
   { id: 'revision.git', group: 'Review', title: 'Mirror revisions to git (data/<project>/.history)', checked: () => store.settings?.revisions_git === true,
     run: () => store.setSettings((d) => { d.revisions_git = d.revisions_git !== true; }).then(() => toast(`git mirror of revisions: ${store.settings?.revisions_git ? 'on (needs git on PATH)' : 'off'}`)) },
 );
 commands.register(C);
+// "Go to what needs you" only where it leads somewhere else (never a disabled line pointing at the open stage)
+const needsItem = (c) => (view().next && !(onStage(c) && view().next.id === current()) ? ['stage.needs'] : []);
 const goItems = () => STAGES.map(s => ({ cmd: `stage.${s.id}`, label: `${s.n} ${s.title}` }));
-menus.contribute('stage', ['stage.open', 'stage.done', 'stage.reopen', 'stage.progress', 'stage.needsYou', '-', { label: 'Go to stage', submenu: goItems }, 'stage.next', 'view.rail']);
-menus.contribute('menubar:View', ['-', 'view.rail', { label: 'Stages', submenu: () => [...goItems(), '-', 'stage.next'] }]);
-menus.contribute('menubar:Window', ['-', { label: 'Stages', submenu: () => [...goItems(), '-', 'stage.next', 'stage.done', 'stage.reopen'] }]);
-menus.contribute('global', ['-', { label: 'Go to stage', submenu: goItems }]);
+menus.contribute('stage', ['stage.open', 'stage.done', 'stage.reopen', 'stage.progress', 'stage.needsYou', '-', { label: 'Go to stage', submenu: goItems }, 'stage.next', needsItem, 'view.rail']);
+menus.contribute('menubar:View', ['-', 'view.rail', { label: 'Stages', submenu: (c) => [...goItems(), '-', 'stage.next', ...needsItem(c)] }]);
+menus.contribute('menubar:Window', ['-', { label: 'Stages', submenu: (c) => [...goItems(), '-', 'stage.next', ...needsItem(c), 'stage.done', 'stage.reopen'] }]);
+// (not in a stage's own menu: its 'stage' part already has "Go to stage")
+menus.contribute('global', [(c) => (c?.stageId || c?.names?.includes?.('stage')) ? [] : ['-', { label: 'Go to stage', submenu: goItems }]]);
 menus.contribute('menubar:File', ['-', 'round.send', 'revision.close', 'revision.compare', 'revision.git']);
 window.WB = Object.assign(window.WB || {}, { stages, rounds });

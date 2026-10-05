@@ -6,7 +6,7 @@
 import { store, isPrivatePath, prefs } from '../js/store.js';
 import { fmt } from '../js/timeline.js';
 import { openLookForm } from '../core/partb.js';
-import { esc, mediaAttr } from '../core/esc.js';
+import { esc, mediaAttr, hexColor } from '../core/esc.js';
 import { assetApproval } from '../js/flow.js';
 
 const M = (p) => store.mediaByPath[p];
@@ -38,7 +38,7 @@ function used(list, max = 10) {
   if (!Array.isArray(list) || !list.length) return '<span class="dim">not on the timeline</span>';
   return list.slice(0, max).map(u => `<a data-t="${Number(u.t) || 0}"data-dock="shot:${esc(u.shot)}" title="${esc(u.shot)} at ${fmt(u.t, true)}">${esc(u.shot)}</a>`).join(' ') + (list.length > max ? ` <span class="dim">+${list.length - max}</span>` : '');
 }
-const sw = (cols) => (cols || []).map(c => `<i class="sw" style="background:${esc(c)}" title="${esc(c)}"></i>`).join('');
+const sw = (cols) => (cols || []).map(c => `<i class="sw" style="background:${hexColor(c)}" title="${esc(c)}"></i>`).join('');
 const usd = (n) => Number(n) ? `$${Number(n).toFixed(2)}` : '';
 const clipMedia = (g) => { const take = store.uses.find(u => u.clip === g)?.take ?? 0; return store.media.find(m => m.kind === 'clip' && m.job === g && m.take === take); };
 

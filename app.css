@@ -260,6 +260,8 @@ body.notop .tl .picker { right: 24px; }
 .queue .qthumb img { width: 52px; height: 40px; object-fit: cover; border: 1px solid var(--line); background: #000; }
 .queue .qthumb span { max-width: 54px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .queue .qthumb.out img { border-color: #4f8a4f; }
+.queue .qthumb.priv img { border-color: #c9a227; }
+.queue .qpriv { display: block; margin-top: 3px; font-size: 11px; color: #e0b84a; white-space: normal; cursor: pointer; } .queue .qpriv.on { color: var(--dim); }
 .queue .qarrow { color: var(--dim); margin: 0 3px; vertical-align: top; line-height: 40px; }
 .queue tr.q-running td, .queue tr.q-queued td { background: #121a24; }
 .settings .gentbl select { height: 19px; }
@@ -1008,7 +1010,7 @@ button.on { color: var(--acc); }
 .costs h4 { margin: 8px 4px 2px; font-size: 11px; color: var(--dim); }
 .costs details { margin: 6px 4px; font-size: 11px; }
 /* ---------------- the Notes column (core/notescol.js): row-aligned notes on the right of every stage's rows */
-.nchost { position: relative; --ncw: 236px; padding-right: var(--ncw) !important; }
+.nchost { position: relative; --ncw: 260px; padding-right: var(--ncw) !important; }
 .nchost.ncoff { padding-right: 0 !important; }
 .ncstage { min-height: 15px; line-height: 15px; font-size: 10.5px; padding: 0 6px; border-bottom: 1px solid var(--line2); }
 .nclayer { position: absolute; top: 0; right: 0; width: var(--ncw); min-height: 100%; background: #121316; box-shadow: inset 1px 0 0 var(--line); z-index: 3; font-size: 11px; line-height: 13px; }

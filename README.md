@@ -438,7 +438,8 @@ the shot for a `shot:` target) and, for an asset request, added to its tree as n
 
 **Generators** (Settings › Generator, per kind: image / video / motion; `settings.json` `generators`; tool
 `generators_get`): `fal` (default: Nano Banana 2 edit / text-to-image and Seedream 5 edit through fal's queue API, refs
-uploaded to fal storage, 25 min timeout; video is D3b), `openwith` ("Open in another app": exports
+uploaded to fal storage (a public URL: a private ref only with the request's "allow uploading private refs" tick in the
+Queue), 25 min timeout; video is D3b), `openwith` ("Open in another app": exports
 `gen/<request>/pack/` with `prompt.txt`, `refs/`, `README.md`; the request waits, handed off, until you put the images
 in `gen/<request>/results/` and press **Collect results**: they become its outputs at $0; **Copy prompt** puts the
 prompt on the clipboard), `comfyui` (a stub: "not configured").
@@ -505,7 +506,22 @@ small files are served in one read so no handle stays open.
   rolls back spend: costs recorded since the snapshot stay, a request that ran since keeps its state, and a restored
   approval that is not the current one goes back to draft (listed in `kept_since_snapshot`); the current `cap_usd`
   is kept, and an agent's `snapshot_restore` brings an approved / locked item back as `review`, not approved.
-  Duplicating a project sends the copy's approved / queued / running requests back to draft.
+  Duplicating a project sends the copy's runnable requests (approved / failed / queued / running: a failed one is retried
+  on its approval) back to draft, the same set a restore checks; the copy gets no `.history` (the git mirror) and no
+  `revisions.json` (its snapshots are not copied).
+- Shared files are written one process at a time: a read-modify-write (`mutate`, a cost row, a page save) holds a lock
+  file next to the file (`.<name>.lock`, exclusive create, taken over after 15 s), so the server, `tools/run.mjs` and an
+  offline MCP server never lose each other's rows (the cap cannot undercount; busy: 503).
+- Private references and fal: fal takes refs as URLs, so a run uploads each ref to fal storage (a public URL). A request
+  with a private ref (the PRIVATE rule or media flagged private) runs on fal only once the director ticks **allow
+  uploading private refs** on it in Review › Queue (off by default; lock badges on the refs). The tick is recorded by the
+  server in the request's log from a page save with this server's Origin; an edit of the request unticks it; an agent
+  cannot set it (`request_create` drops it, the runner refuses without it).
+- Look colours are hex only (`look_create`, `entity_upsert`: 400 otherwise) and the page renders swatches through
+  `hexColor()`, so a colour cannot carry CSS (a `url()` beacon).
+- The agent rules hold on the tool surface (MCP, `/api/op` without the page's Origin). An agent with a shell can forge the
+  page's Origin with the token from `index.html`: it is on its honour there, like any local process. `/api/restore`
+  without the page's Origin is always an agent's restore.
 - Guided flow: `stage_update` refuses `done` and refuses moving a done stage; a page save of `stages.json` is stamped
   (`done_by: "director", via: "page"`). A page save of `lyrics.json` cannot rewrite a saved version nor a note's author;
   the tools stamp `via: "agent"`.
@@ -532,7 +548,9 @@ small files are served in one read so no handle stays open.
   the note is in the round in flight and its `change` (a known stage, a project-relative file without `..`, a version
   word, a summary). `/data/<p>/` never serves a dot-folder or dot-file (`.snapshots`, `.history`); the compare op reads
   snapshots for the page and names revisions only as `R<n>`, `R0` or `now`. The git mirror runs `git` with
-  `--git-dir=data/<p>/.history/.git` (never the workbench repository) and only when the director turned it on.
+  `--git-dir=data/<p>/.history/.git` (never the workbench repository) and only when the director turned it on, with hooks
+  off, `core.fsmonitor=false`, and only on a `.history/.git` whose config holds just what `git init` writes (else skipped
+  with the reason: a handed-over project folder never runs its own hooks or filters); safe.directory is never overridden.
 - Final approvals (stage 7): `final_get` is read only; approving from the Final list goes through the page's own paths
   (the agent surface still gets 403 on approvals). "Lock for render" / "Unlock" (`final_lock` / `final_unlock`) are the
   page's only (via "page" from this server's Origin; no MCP tool; 403 to the agent surface, a claimed via "page", a

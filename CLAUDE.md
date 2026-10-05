@@ -376,7 +376,10 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <same export witho
   `notes.json` keeps the server's `round`, a note's `round`, `absorbed_in` and `change`; `round_absorb` checks the note is
   in the round in flight and its change (known stage, a project file without `..`, a version word, a summary); `/data/`
   never serves a dot-folder or dot-file (`.snapshots`, `.history`); the git mirror is opt-in (`settings.json`
-  `revisions_git`) and always names its own repository (`--git-dir=data/<p>/.history/.git`).
+  `revisions_git`) and always names its own repository (`--git-dir=data/<p>/.history/.git`), with hooks off (an empty
+  `core.hooksPath` of the server's), `core.fsmonitor=false`, and only if `.history/.git/config` holds nothing but the keys
+  `git init` writes (a filter, alias, pager, fsmonitor...: skipped with the reason) and no `info/attributes`; a repository
+  git refuses as another user's (safe.directory) is skipped, never forced.
 - Proposals: `proposal_act` (pick / mix / dismiss / reopen / restore) is page only (via "page" from this server's Origin;
   no MCP tool; 403 to the agent surface, a foreign Origin and offline); `proposals.json` is not a page save (403).
   `proposals_add` checks the target (a known stage / kind for proposals, the row exists now: 404), 1-6 items, a title, a
@@ -417,7 +420,22 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <same export witho
   rolls back spend: costs recorded since the snapshot stay, a request that ran since keeps its state, and a restored
   approval that is not the current one goes back to draft (listed in `kept_since_snapshot`); the current `cap_usd`
   is kept, and an agent's `snapshot_restore` brings an approved / locked item back as `review`, not approved.
-  Duplicating a project sends the copy's approved / queued / running requests back to draft.
+  Duplicating a project sends the copy's runnable requests (approved / failed / queued / running: a failed one is retried
+  on its approval) back to draft, the same set a restore checks; the copy gets no `.history` (the git mirror) and no
+  `revisions.json` (its snapshots are not copied).
+- Shared files are written one process at a time: a read-modify-write (`mutate`, a cost row, a page save) holds a lock
+  file next to the file (`.<name>.lock`, exclusive create, taken over after 15 s), so the server, `tools/run.mjs` and an
+  offline MCP server never lose each other's rows (the cap cannot undercount; busy: 503).
+- Private references and fal: fal takes refs as URLs, so a run uploads each ref to fal storage (a public URL). A request
+  with a private ref (the PRIVATE rule or media flagged private) runs on fal only once the director ticks **allow
+  uploading private refs** on it in Review › Queue (off by default; lock badges on the refs). The tick is recorded by the
+  server in the request's log from a page save with this server's Origin; an edit of the request unticks it; an agent
+  cannot set it (`request_create` drops it, the runner refuses without it).
+- Look colours are hex only (`look_create`, `entity_upsert`: 400 otherwise) and the page renders swatches through
+  `hexColor()`, so a colour cannot carry CSS (a `url()` beacon).
+- The agent rules hold on the tool surface (MCP, `/api/op` without the page's Origin). An agent with a shell can forge the
+  page's Origin with the token from `index.html`: it is on its honour there, like any local process. `/api/restore`
+  without the page's Origin is always an agent's restore.
 - Guided flow: `stage_update` refuses `done` and refuses moving a done stage; a page save of `stages.json` is stamped
   (`done_by: "director", via: "page"`); an agent's snapshot restore brings a done stage that is not done now back as
   `needs_you`. A page save of `lyrics.json` cannot rewrite a saved version (the server keeps its copy) nor the author of
