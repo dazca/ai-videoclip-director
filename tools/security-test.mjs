@@ -596,6 +596,90 @@ try {
       { cl: cl.status, snapGet, histGet, dotGet, rsBad: rsBad.status, rsNo: rsNo.status, cmpBad: cmpBad.status, cmpOk: cmpOk.status });
   }
 
+  // ---------------------------------------------------------------- proposals (SPEC v4 §3): the SVG sanitiser and the director's picks
+  {
+    const OKS = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 90"><rect width="160" height="90" fill="#123"/></svg>';
+    // known SVG XSS payloads: every one is refused (with a reason), none reaches the disk
+    const XSS = {
+      script: '<svg viewBox="0 0 10 10"><script>alert(1)</script></svg>',
+      script_ns: '<svg viewBox="0 0 10 10"><svg:script xmlns:svg="http://www.w3.org/2000/svg">alert(1)</svg:script></svg>',
+      onload: '<svg viewBox="0 0 10 10" onload="alert(1)"/>',
+      onload_case: '<svg viewBox="0 0 10 10" OnLoAd="alert(1)"/>',
+      onerror_rect: '<svg viewBox="0 0 10 10"><rect onerror="alert(1)" width="1" height="1"/></svg>',
+      unquoted_handler: '<svg viewBox="0 0 10 10"><rect onclick=alert(1) /></svg>',
+      foreignObject: '<svg viewBox="0 0 10 10"><foreignObject><iframe src="javascript:alert(1)"></iframe></foreignObject></svg>',
+      image_js: '<svg viewBox="0 0 10 10"><image href="javascript:alert(1)"/></svg>',
+      a_js: '<svg viewBox="0 0 10 10"><a href="javascript:alert(1)"><rect width="5" height="5"/></a></svg>',
+      use_external: '<svg viewBox="0 0 10 10"><use href="https://evil.example/x.svg#a"/></svg>',
+      use_xlink_js: '<svg viewBox="0 0 10 10"><use xlink:href="javascript:alert(1)"/></svg>',
+      use_data: '<svg viewBox="0 0 10 10"><use href="data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=#x"/></svg>',
+      entity_js: '<svg viewBox="0 0 10 10"><use href="java&#x73;cript:alert(1)"/></svg>',
+      href_on_rect: '<svg viewBox="0 0 10 10"><rect href="#a"/></svg>',
+      animate_href: '<svg viewBox="0 0 10 10"><a><animate attributeName="href" values="javascript:alert(1)"/></a></svg>',
+      set_href: '<svg viewBox="0 0 10 10"><set attributeName="onmouseover" to="alert(1)"/></svg>',
+      style_el: '<svg viewBox="0 0 10 10"><style>@import url(https://evil.example/x.css)</style></svg>',
+      style_url: '<svg viewBox="0 0 10 10"><rect style="fill:url(https://evil.example/x)" width="1" height="1"/></svg>',
+      style_escape: '<svg viewBox="0 0 10 10"><rect style="background:u\\72l(https://evil.example)"/></svg>',
+      style_expr: '<svg viewBox="0 0 10 10"><rect style="width:expression(alert(1))"/></svg>',
+      fill_url_ext: '<svg viewBox="0 0 10 10"><rect fill="url(https://evil.example/#g)"/></svg>',
+      filter_url: '<svg viewBox="0 0 10 10"><rect filter="url(https://evil.example/#f)"/></svg>',
+      feimage: '<svg viewBox="0 0 10 10"><filter id="f"><feImage href="https://evil.example/x.png"/></filter></svg>',
+      doctype_xxe: '<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><svg viewBox="0 0 10 10"><text>&xxe;</text></svg>',
+      cdata: '<svg viewBox="0 0 10 10"><script><![CDATA[alert(1)]]></script></svg>',
+      cdata_text: '<svg viewBox="0 0 10 10"><text><![CDATA[<script>alert(1)</script>]]></text></svg>',
+      html_root: '<html><body><script>alert(1)</script></body></html>',
+      two_roots: '<svg viewBox="0 0 10 10"/><svg viewBox="0 0 10 10" onload="alert(1)"/>',
+      iframe: '<svg viewBox="0 0 10 10"><iframe srcdoc="<script>alert(1)</script>"/></svg>',
+      unclosed: '<svg viewBox="0 0 10 10"><g><rect/></svg>',
+      lt_in_attr: '<svg viewBox="0 0 10 10"><rect id="a<script>"/></svg>',
+      no_viewbox: '<svg><rect/></svg>',
+      huge_viewbox: '<svg viewBox="0 0 99999 99999"/>',
+      thin_viewbox: '<svg viewBox="0 0 1000 10"/>',
+      too_big: `<svg viewBox="0 0 10 10">${'<rect width="1" height="1"/>'.repeat(3000)}</svg>`,
+      xml_stylesheet: '<?xml-stylesheet href="https://evil.example/x.css"?><svg viewBox="0 0 10 10"/>',
+    };
+    const refused = {}, leaked = [];
+    for (const [k, v] of Object.entries(XSS)) { try { S.sanitizeSvg(v); leaked.push(k); } catch (e) { refused[k] = e.code; } }
+    // what is kept is written out again from the parsed tree: text and values escaped, internal refs only
+    const neut = S.sanitizeSvg('<svg viewBox="0 0 160 90"><defs><marker id="m"><path d="M0 0 L6 3 L0 6 Z"/></marker></defs><line x1="1" y1="1" x2="9" y2="9" marker-end="url(#m)"/><text>&lt;script&gt;alert(1)&lt;/script&gt; &amp; "q"</text><use href="#m"/></svg>').svg;
+    check('proposals: the SVG sanitiser refuses every known XSS payload (script, on* handlers in any case, foreignObject, image / a / iframe, external or javascript: / data: hrefs even entity-encoded, animate / set, <style>, url() outside #id, CSS escapes and expressions, DOCTYPE / XXE, CDATA, a non-SVG or second root, broken markup, a bad viewBox, > 64 KB) and re-escapes what it keeps',
+      !leaked.length && Object.values(refused).every(c => c === 400) && /&lt;script&gt;alert\(1\)&lt;\/script&gt; &amp; "q"/.test(neut) && !/<script/i.test(neut) && /marker-end="url\(#m\)"/.test(neut),
+      { leaked, n: Object.keys(refused).length, neut: neut.slice(0, 200) });
+    const before = fs.existsSync(path.join(D, 'proposals')) ? fs.readdirSync(path.join(D, 'proposals')).length : 0;
+    const http = {};
+    for (const k of ['script', 'onload', 'foreignObject', 'use_external', 'style_url', 'doctype_xxe']) http[k] = (await op('proposals_add', { target: { stage: 'script', kind: 'scene', id: 'sc02' }, items: [{ title: 'x', svg: XSS[k] }] })).status;
+    const badT = (await op('proposals_add', { target: { stage: 'script', kind: 'scene', id: '../../x' }, items: [{ title: 'x', text: 'y' }] })).status;
+    const noRow = (await op('proposals_add', { target: { stage: 'script', kind: 'scene', id: 'sc99' }, items: [{ title: 'x', text: 'y' }] })).status;
+    const badKind = (await op('proposals_add', { target: { stage: 'timeline', kind: 'time', id: null }, items: [{ title: 'x', text: 'y' }] })).status;
+    const both = (await op('proposals_add', { target: { stage: 'script', kind: 'scene', id: 'sc02' }, items: [{ title: 'x', text: 'y', svg: OKS }] })).status;
+    const many = (await op('proposals_add', { target: { stage: 'script', kind: 'scene', id: 'sc02' }, items: Array.from({ length: 7 }, () => ({ title: 'x', text: 'y' })) })).status;
+    const after = fs.existsSync(path.join(D, 'proposals')) ? fs.readdirSync(path.join(D, 'proposals')).length : 0;
+    const good = await op('proposals_add', { target: { stage: 'script', kind: 'scene', id: 'sc02' }, items: [{ title: '<img src=x onerror="window.__pp=1">', why: '<b onmouseover=alert(1)>why</b>', svg: OKS }, { title: 'a text', text: '<img src=x onerror="window.__pp=2">' }] });
+    const setId = good.body?.set?.id, svgRel = good.body?.set?.items?.[0]?.svg;
+    const served = await fetch(`${A.base}/data/${P}/${svgRel}`);
+    check('proposals: proposals_add over HTTP refuses the payloads (400) and writes nothing; a target outside the project / missing / of a kind proposals do not take, both svg and text, more than 6 items: 400 / 404; a good SVG is written under proposals/ and served as image/svg+xml with the sandboxing CSP and nosniff',
+      Object.values(http).every(s => s === 400) && after === before && badT === 400 && noRow === 404 && badKind === 400 && both === 400 && many === 400 && good.status === 200
+      && served.status === 200 && /image\/svg\+xml/.test(served.headers.get('content-type') || '') && /sandbox/.test(served.headers.get('content-security-policy') || '') && served.headers.get('x-content-type-options') === 'nosniff',
+      { http, badT, noRow, badKind, both, many, files: [before, after], good: good.status, ct: served.headers.get('content-type'), csp: served.headers.get('content-security-policy') });
+    // picks are the director's: the agent surface (also claiming via "page"), a foreign Origin and offline get 403; the page may
+    const asPage = (body) => post(`/api/op/proposal_act?project=${P}`, body, { origin: A.base });
+    const tries = [(await op('proposal_act', { set: setId, item: 'a', act: 'pick' })).status, (await op('proposal_act', { set: setId, item: 'a', act: 'pick', via: 'page' })).status,
+      (await post(`/api/op/proposal_act?project=${P}`, { set: setId, item: 'a', act: 'pick' }, { origin: 'http://evil.example' })).status];
+    let offline = null; try { S.ops.proposal_act(P, { set: setId, item: 'a', act: 'pick' }); offline = 200; } catch (e) { offline = e.code; }
+    const ppSave = await post(`/api/save/proposals.json?project=${P}`, { base_rev: 0, data: { v: 1, sets: [] } }, { origin: A.base });
+    const pagePick = await asPage({ set: setId, item: 'a', act: 'pick' });
+    const badAct = await asPage({ set: setId, item: 'a', act: 'approve' }), badSet = await asPage({ set: '../x', item: 'a', act: 'pick' });
+    const picked = readP('proposals.json').sets.find(x => x.id === setId)?.items[0];
+    check('proposals: a pick is the page\'s only: the agent surface (also with a claimed via "page"), a foreign Origin and offline get 403, the MCP server has no such tool; proposals.json is not a page save (403); the page picks (via page, by director); an unknown act / set is refused',
+      tries.every(x => x === 403) && offline === 403 && ppSave.status === 403 && pagePick.status === 200 && picked?.status === 'picked' && picked.via === 'page' && picked.by === 'director' && badAct.status === 400 && badSet.status === 404
+      && !fs.readFileSync(path.join(WB, 'mcp', 'tools', 'proposals.mjs'), 'utf8').includes("registerTool('proposal_act'"),
+      { tries, offline, ppSave: ppSave.status, pagePick: pagePick.status, badAct: badAct.status, badSet: badSet.status });
+    // a hand-written (unsanitised) SVG with script in proposals/: the page only ever shows it as <img> (checked in the browser below)
+    fs.writeFileSync(path.join(D, 'proposals', 'evil.svg'), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" onload="top.__ppsvg=1"><script>top.__ppsvg=2</script><rect width="10" height="10" fill="red"/></svg>');
+    const pj = readP('proposals.json'); pj.sets.push({ id: 'ps90', target: { stage: 'script', kind: 'scene', id: 'sc02' }, round: 1, by: '<img src=x onerror="window.__pp=3">', via: 'agent', source: 'agent', created: '2026-10-05T00:00:00', items: [{ id: 'a', title: 'hand-edited <svg onload=alert(1)>', why: 'x', svg: 'proposals/evil.svg', status: 'open' }] }); pj.rev++;
+    fs.writeFileSync(path.join(D, 'proposals.json'), JSON.stringify(pj));
+  }
+
   // ---------------------------------------------------------------- F09: the EDL extractor's server (source check: it needs the owner's render page)
   const edl = fs.readFileSync(path.join(WB, 'importers/azemar_extract_edl.mjs'), 'utf8');
   check('F09 EDL extractor server: 127.0.0.1, decode in try/catch, confined to ROOT', /listen\(\d+, '127\.0\.0\.1'/.test(edl) && /try \{ p = inside\(ROOT,/.test(edl) && /if \(!p\) \{ r\.writeHead\(403\)/.test(edl));
@@ -689,7 +773,7 @@ try {
     await pg.evaluate(() => { window.WB.script.focus('sc02'); }); await wait(300);
     for (const side of ['notes', 'versions', 'intake']) { await pg.evaluate((s) => document.querySelector(`.scws .lytabs [data-side=${s}]`)?.click(), side); await wait(200); }
     await pg.evaluate(() => window.WB.app.show('timeline')); await wait(800);
-    check('F02 stored payloads in the script (scene titles, text, beats, notes, intake, version messages, the timeline scenes column) render as text', await pg.evaluate(() => window.__s === undefined && !document.querySelector('.scws img:not([src*="sketches/"]), .col-scenes img')));
+    check('F02 stored payloads in the script (scene titles, text, beats, notes, intake, version messages, the timeline scenes column) render as text', await pg.evaluate(() => window.__s === undefined && !document.querySelector('.scws img:not([src*="sketches/"]):not([src*="/proposals/"]), .col-scenes img')));
     const Y = (n) => `<img src=x onerror="window.__b=${n}">`;
     await op('breakdown_update', { upsert: [{ kind: 'character', name: Y(1), description: Y(2), aliases: [Y(3)], links: [{ scene: 'sc02', beats: ['b1'], note: Y(4) }] }, { kind: 'wardrobe', name: Y(5), for: 'bi01', links: ['sc02'] }], message: Y(6) });
     await op('breakdown_note_add', { item: 'bi01', text: Y(7), by: Y(8) });
@@ -805,6 +889,20 @@ try {
     check('F02 stored payloads in a round (a note, the agent\'s change summary and round summary, a revision summary) render as text on the rail and in Review › Compare',
       rInert && !rvv.length && railOk && shown.notes >= 1 && shown.rows >= 1 && shown.list >= 2, { rInert, railOk, shown, rvv: rvv.slice(0, 2) });
     await rpg.close();
+    // proposals: hostile titles / whys / texts render as text, and an SVG with script (written by hand, past the
+    // sanitiser) is only ever shown as <img>: it never runs in the page (also in the large view)
+    const ppg = await browser.newPage(); const ppv = [];
+    ppg.on('console', m => { if (/Content Security Policy|Refused to/i.test(m.text())) ppv.push(m.text()); });
+    await ppg.goto(`${A.base}/?project=${P}`, { waitUntil: 'domcontentloaded' });
+    await ppg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 });
+    await ppg.evaluate(() => window.WB.stages.open('script')); await wait(600);
+    await ppg.evaluate(() => window.WB.script.focus('sc02')); await wait(600);
+    const ppCards = await ppg.evaluate(() => document.querySelectorAll('.scrow[data-scene="sc02"] .pps .ppc').length);
+    await ppg.evaluate(() => { const i = document.querySelector('.ppc[data-set="ps90"] img'); i?.click(); }); await wait(600);
+    const ppInert = await ppg.evaluate(() => window.__pp === undefined && window.__ppsvg === undefined && !document.querySelector('.pps img[src="x"], .pps svg, .ppbig svg, .pps iframe, .pps object, .pps embed') && [...document.querySelectorAll('.pps .ppc img, .ppbig img')].every(i => /\/proposals\//.test(i.getAttribute('src'))));
+    check('F02 proposals: hostile titles, whys and texts render as text in the strips; an SVG with script written by hand into proposals/ is only an <img> (strip and large view) and never runs',
+      ppInert && ppCards >= 3 && !ppv.length, { ppInert, ppCards, ppv: ppv.slice(0, 2) });
+    await ppg.close();
   }
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {

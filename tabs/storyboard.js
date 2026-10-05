@@ -22,6 +22,8 @@ import * as SB from '../js/storyboard.js';
 import * as A from '../js/assets.js';
 import { NotesColumn } from '../core/notescol.js';
 import { history } from '../core/history.js';
+import { stripHtml, register as registerProposals, offerPrepare } from '../core/proposals.js';
+import * as PR from '../js/proposals.js';
 
 const WB = () => window.WB;
 const visible = () => WB()?.app?.active() === 'stage' && WB().stages?.current() === 'storyboard';
@@ -71,7 +73,7 @@ class Board {
           sub: (n) => n.target.kind === 'shot' ? n.target.id : '',
           targetAt: (x) => { const c = x.closest?.('[data-shot]'); return c ? shotT(c.dataset.shot) : sc ? sceneT(sc) : null; } }; }).filter(Boolean),
       current: () => this.sel && this.shot(this.sel) ? shotT(this.sel) : null });
-    store.on((w) => { if (['board', 'scenes', 'all', 'approvals', 'requests', 'breakdown', 'costs'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
+    store.on((w) => { if (['board', 'scenes', 'all', 'approvals', 'requests', 'breakdown', 'costs', 'proposals'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
     this.render();
   }
   // a draft edit from "+ Add" (a shot) and the other structural edits: one undo step (Ctrl+Z puts the draft back)
@@ -125,6 +127,7 @@ class Board {
     this.base = this.doc.current; this.draft = structuredClone(this.cur?.shots || []); this.saveDraft();
     toast(`storyboard saved as ${id}`);
     this.render();
+    offerPrepare('storyboard');   // offer starting frame proposals (never run by itself)
   }
   discard() { this.draft = structuredClone(this.cur?.shots || []); this.saveDraft(); this.render(); }
   restore(id) {
@@ -283,17 +286,18 @@ class Board {
     } else { this.render(); toast(`frame ${sk.id} saved${j.private ? ' (private: drawn over a private image)' : ''}`); }
     return j;
   }
-  async openSketchFor(shotId, sketchId, { window: win = false } = {}) {
+  async openSketchFor(shotId, sketchId, { window: win = false, underlay = null } = {}) {
     const M = await sketchMod(), s = this.shot(shotId); if (!s) return;
     let sketch = null;
     if (sketchId) { try { sketch = await this.skLoad(sketchId); } catch (e) { return toast(e.message); } }
-    const id = sketchId || this.newSketchId(shotId), ul = sketch ? null : this.underlayFor(s);
+    const id = sketchId || this.newSketchId(shotId), ul = sketch ? null : underlay || this.underlayFor(s);
     const opts = { sketch: sketch || undefined, id, w: 1280, h: 720, ...(ul ? { underlay: ul } : {}), resolve: imgUrl, title: `Frame ${id} · ${shotId}`, save: (sk, png, mask) => this.saveSketch(shotId, sk, png, mask) };
     if (win) { if (this.sk?.id === id) await this.closeSketch(true); return M.openSketch(opts); }
     if (this.sk && !(await this.closeSketch())) return;
     this.sel = shotId; prefs.set('boardSel:' + PROJECT, shotId);
-    this.skHost.innerHTML = `<div class="scskbar"><b>${esc(id)}</b><span class="dim">frame of ${esc(shotId)} · ${sketch ? '' : 'new · '}draw the composition (16:9), P = pin a note${ul ? ' · faint underlay: the location' : ''}; Ctrl+S saves</span><span class="sp"></span><a data-a="skwin">open in window</a><a data-a="skclose">close</a></div><div class="scskbody"></div>`;
+    this.skHost.innerHTML = `<div class="scskbar"><b>${esc(id)}</b><span class="dim">frame of ${esc(shotId)} · ${sketch ? '' : 'new · '}draw the composition (16:9), P = pin a note${ul ? (underlay ? ' · base layer: the picked proposal' : ' · faint underlay: the location') : ''}; Ctrl+S saves</span><span class="sp"></span><a data-a="skwin">open in window</a><a data-a="skclose">close</a></div><div class="scskbody"></div>`;
     const api = M.mountSketch(this.skHost.querySelector('.scskbody'), opts);
+    if (underlay && sketch) api.setUnderlay(underlay);   // a picked proposal under the existing frame: its base layer
     this.sk = { api, id, shot: shotId };
     this.render();
     api.el.focus({ preventScroll: true }); this.skHost.scrollIntoView({ block: 'nearest' });
@@ -424,7 +428,7 @@ class Board {
       : `<span class="sbrq none" title="no generation request or clip yet">no request · ${est.gen} ~${usd(est.usd)}</span>`;
     return `<div class="sbcard${s.id === this.sel ? ' on' : ''}${chg ? ' chg' : ''}" data-shot="${esc(s.id)}">`
       + `<div class="sbc1"><b>${esc(s.id)}</b><span class="sbt">${clk(s.t0)}</span><span class="dim">${secs(s.t1 - s.t0)}</span><span class="sbk">${esc(s.kind)}</span><span class="chip s-${esc(st)}" title="shot:${esc(s.id)}: ${esc(st)} (the director's: Shot panel)">${esc({ draft: '', approved: '✓', locked: 'lock', review: 'review', changes: 'changes' }[st] ?? st)}</span></div>`
-      + `<div class="sbfr${s.sketch ? ' skf' : ''}">${frame}<span class="sbg" title="${est.gen === 'video' ? 'a video shot' : 'a still'}">${est.gen === 'video' ? '▶' : '▣'}</span></div>`
+      + `<div class="sbfr${s.sketch ? ' skf' : ''}">${frame}<span class="sbg" title="${est.gen === 'video' ? 'a video shot' : 'a still'}">${est.gen === 'video' ? '▶' : '▣'}</span>${(() => { const ps = PR.setsFor(store.proposals, { stage: 'storyboard', kind: 'shot', id: s.id }), it = ps.flatMap(x => x.items).filter(i => i.status !== 'dismissed'), pk = it.find(PR.isPicked); return it.length ? `<span class="ppbadge${pk ? ' pk' : ''}" title="${esc(`${it.length} frame proposal(s)${pk ? ` · picked “${pk.title}”` : ''}: select the shot to choose`)}">◇${pk ? '✓' : it.filter(i => i.status === 'open').length}</span>` : ''; })()}</div>`
       + `<div class="sbtx">${esc(s.title && s.text && !s.text.startsWith(s.title) ? `${s.title}: ${s.text}` : s.text || s.title) || '<i class="dim">no action yet</i>'}</div>`
       + (s.camera ? `<div class="sbcam" title="${esc(s.camera)}">⌖ ${esc(s.camera)}</div>` : '')
       + `<div class="sbchips">${chips || '<span class="dim">no cast / location</span>'}</div><div class="sbft">${rq}</div></div>`;
@@ -470,7 +474,8 @@ class Board {
     h += `<div class="sbopts gen"><a data-gen="still" class="${gen === 'still' ? 'on' : ''}" title="one generated frame">▣ still</a><a data-gen="video" class="${gen === 'video' ? 'on' : ''}" title="a start frame, then image-to-video">▶ video</a><span class="dim" title="${esc(est.items.map(x => `${x.kind}: ${usd(x.usd)} ${x.tool} (${x.why})`).join('\n'))}">est ${usd(est.usd)} · ${esc(est.items.map(x => x.kind.replace('shot-', '') + ' ' + usd(x.usd)).join(' + '))}</span></div>`;
     h += `<input class="sbin-title" value="${esc(s.title)}" placeholder="title (short)" spellcheck="false"><textarea class="sbin-text" rows="3" placeholder="the action: what we see in this shot" spellcheck="false">${esc(s.text)}</textarea><textarea class="sbin-cam" rows="2" placeholder="camera / motion: slow push in, handheld, locked-off, whip pan, rack focus…" spellcheck="false">${esc(s.camera)}</textarea>`;
     h += `<div class="scbh">frame <a data-a="draw">${s.sketch ? 'edit' : '+ draw'}</a>${s.sketch ? '<a data-a="drawwin">window</a><a data-a="skcopy" title="copy: paste it into another shot">copy</a>' : ''}<a data-a="skpaste" title="paste the copied frame">paste</a>${s.sketch ? '<a data-a="skrm" title="the shot loses its frame (the file stays)">remove</a>' : ''}</div>`
-      + (s.sketch ? `<img class="sbiframe" src="${esc(this.skUrl(s.sketch))}" alt="" data-a="draw" title="${esc(s.sketch)} (click: edit)">` : s.thumb ? `<img class="sbiframe" src="${esc(mediaUrl(s.thumb))}" alt="" title="the render frame (shots.json)">` : '');
+      + (s.sketch ? `<img class="sbiframe" src="${esc(this.skUrl(s.sketch))}" alt="" data-a="draw" title="${esc(s.sketch)} (click: edit)">` : s.thumb ? `<img class="sbiframe" src="${esc(mediaUrl(s.thumb))}" alt="" title="the render frame (shots.json)">` : '')
+      + stripHtml({ stage: 'storyboard', kind: 'shot', id: s.id }, { label: 'frame layouts' });
     // assets: the shot's chips, the variant each needs (the scene's unless set here), approved or what is missing
     const ents = store.entities.filter(e => A.TYPES.includes(e.kind));
     const row = (a) => {
@@ -611,6 +616,24 @@ class Board {
     const sc = this.scene(s.scene), tmp = document.createElement('div'); tmp.innerHTML = this.cardHtml(s, sc); c.replaceWith(tmp.firstElementChild);
   }
 }
+
+// ------------------------------------------------------------------ proposals: what a pick does on a shot (core/proposals.js)
+// an SVG -> the frame sketch's base layer (its underlay: the open frame, else the shot's frame / a new one); a text -> the
+// shot's action in the draft
+registerProposals('storyboard', async ({ target, item }) => {
+  if (!S) await WB().stages.open('storyboard');
+  const id = target.id, s = S.shot(id); if (!s) throw new Error(`shot ${id} is not in the draft`);
+  if (S.sel !== id) S.select(id, { scroll: false });
+  if (item.svg) {
+    const ul = { src: item.svg, opacity: 0.6, fit: 'contain' };
+    if (S.sk?.shot === id) { const api = S.sk.api, prev = api.get().underlay || null; api.setUnderlay(ul); return { what: `the base layer of ${S.sk.id}`, undo: () => { if (S.sk?.api === api) api.setUnderlay(prev); }, redo: () => { if (S.sk?.api === api) api.setUnderlay(ul); } }; }
+    const api = await S.openSketchFor(id, s.sketch || null, { underlay: ul }); if (!api) return null;
+    return { what: `the base layer of ${id}'s frame (draw over it, then Ctrl+S)`, undo: async () => { if (S.sk?.api === api) await S.closeSketch(true); S.render(); }, redo: () => S.openSketchFor(id, s.sketch || null, { underlay: ul }) };
+  }
+  if (target.kind !== 'shot') return null;
+  const before = structuredClone(S.draft); S.edit(() => { s.text = item.text; }); const after = structuredClone(S.draft);
+  return { what: `the action of ${id} (unsaved: Save version keeps it)`, undo: () => S.setDraft(before), redo: () => S.setDraft(after) };
+});
 
 // ------------------------------------------------------------------ commands (registered at load: core/rail.js imports this module)
 const V = () => visible() && !!S;

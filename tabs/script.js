@@ -17,6 +17,7 @@ import * as F from '../js/flow.js';
 import * as SC from '../js/scenes.js';
 import { NotesColumn } from '../core/notescol.js';
 import { history } from '../core/history.js';
+import { stripHtml, register as registerProposals, offerPrepare } from '../core/proposals.js';
 
 const WB = () => window.WB;
 const visible = () => WB()?.app?.active() === 'stage' && WB().stages?.current() === 'script';
@@ -59,7 +60,7 @@ class Workspace {
         sub: (n) => n.target.kind === 'beat' ? n.target.id.split('/')[1] : '',
         targetAt: (x) => { const b = x.closest?.('[data-beat]'); return b ? beatT(e.dataset.scene, b.dataset.beat) : sceneT(e.dataset.scene); } }; }),
       current: () => this.open && this.scene(this.open) ? sceneT(this.open) : null });
-    store.on((w) => { if (['scenes', 'all', 'song', 'media'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
+    store.on((w) => { if (['scenes', 'all', 'song', 'media', 'proposals'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
     this.render();
   }
   get doc() { return store.scenes; }
@@ -108,6 +109,7 @@ class Workspace {
     this.base = this.doc.current; this.draft = structuredClone(this.cur?.scenes || []); this.saveDraft();
     toast(`script saved as ${id}`);
     this.render();
+    offerPrepare('script');   // a first script: offer starting proposals (never run by itself)
   }
   discard() { this.draft = structuredClone(this.cur?.scenes || []); this.saveDraft(); this.render(); }
   restore(id) {
@@ -222,12 +224,12 @@ class Workspace {
     } else { this.render(); toast(`sketch ${sk.id} saved${j.private ? ' (private: drawn over a private image)' : ''}`); }
     return j;
   }
-  async openSketchFor(sceneId, sketchId, { window: win = false } = {}) {
+  async openSketchFor(sceneId, sketchId, { window: win = false, underlay = null } = {}) {
     const M = await sketchMod(), s = this.scene(sceneId); if (!s) return;
     let sketch = null;
     if (sketchId) { try { sketch = await this.skLoad(sketchId); } catch (e) { return toast(e.message); } }
     const id = sketchId || this.newSketchId(sceneId);
-    const opts = { sketch: sketch || undefined, id, w: 1280, h: 720, resolve: mediaUrl, title: `Sketch ${id} · ${sceneId}${s.title ? ' ' + s.title : ''}`,
+    const opts = { sketch: sketch || undefined, id, w: 1280, h: 720, ...(underlay && !sketch ? { underlay } : {}), resolve: mediaUrl, title: `Sketch ${id} · ${sceneId}${s.title ? ' ' + s.title : ''}`,
       save: (sk, png, mask) => this.saveSketch(sceneId, sk, png, mask),
       onDuplicate: (copy) => { copy.id = this.newSketchId(sceneId); M.openSketch({ sketch: copy, resolve: mediaUrl, title: `Sketch ${copy.id} (copy) · ${sceneId}`, save: (sk, png, mask) => this.saveSketch(sceneId, sk, png, mask) }); } };
     if (win) { if (this.sk?.id === id) this.closeSketch(true); return M.openSketch(opts); }
@@ -235,6 +237,7 @@ class Workspace {
     this.setOpen(sceneId);
     this.skHost.innerHTML = `<div class="scskbar"><b>${esc(id)}</b><span class="dim">${sketch ? '' : 'new sketch · '}draw, P = pin a note, M = mask; Ctrl+S saves</span><span class="sp"></span><a data-a="skwin">open in window</a><a data-a="skclose">close</a></div><div class="scskbody"></div>`;
     const api = M.mountSketch(this.skHost.querySelector('.scskbody'), opts);
+    if (underlay && sketch) api.setUnderlay(underlay);   // a picked proposal under an existing sketch
     this.sk = { api, id, scene: sceneId };
     this.render();
     api.el.focus({ preventScroll: true });
@@ -305,7 +308,7 @@ class Workspace {
       card = `<div class="sccard s-${st}${chg ? ' chg' : ''}" data-a="open" title="click: edit this scene"><div class="sch">${head}<b class="sct">${esc(s.title) || '<i class="dim">untitled</i>'}</b><span class="sctime">${SC.span(s.t0, s.t1)} · ${secs(s.t1 - s.t0)}</span><span class="scst s-${st}" title="${SC.SCENE_STATUS_LABEL[st]}"><i></i>${SC.SCENE_STATUS_LABEL[st]}</span></div>`
         + (s.text ? `<div class="sctx">${esc(s.text)}</div>` : '')
         + (s.beats.length ? `<div class="scbeats">${s.beats.map(b => `<div data-beat="${esc(b.id)}"><span class="lyt" data-t="${b.t}">${fmt(b.t)}</span>${esc(b.text)}</div>`).join('')}</div>` : '')
-        + (sk ? `<div class="scsks">${sk}</div>` : '') + `</div>`;
+        + (sk ? `<div class="scsks">${sk}</div>` : '') + stripHtml({ stage: 'script', kind: 'scene', id: s.id }, { compact: true }) + `</div>`;
     } else {
       const sb = (x, l) => `<button data-st="${x}" class="${st === x ? 'on s-' + x : ''}" title="${x === 'ok' ? 'the director signs this scene off' : ''}">${l}</button>`;
       card = `<div class="sccard open s-${st}${chg ? ' chg' : ''}"><div class="sch">${head}<input class="scin-title" value="${esc(s.title)}" placeholder="title" spellcheck="false"><span class="scst s-${st}"><i></i></span>${sb('draft', 'draft')}${sb('needs_you', 'needs you')}${sb('ok', 'ok')}<b class="sctool" data-a="note" title="note on this scene, in the Notes column (Alt+N)">✉</b><b class="sctool" data-a="del" title="remove the scene from the draft">×</b><b class="sctool" data-a="close" title="close (Esc)">▴</b></div>
@@ -313,6 +316,7 @@ class Workspace {
         <textarea class="scin-text" rows="3" placeholder="what happens: the visual description (who, where, action, camera, mood)" spellcheck="false">${esc(s.text)}</textarea>
         <div class="scbh">beats <a data-a="addbeat">+ beat</a></div>
         ${s.beats.map(b => `<div class="scbr" data-beat="${esc(b.id)}"><input class="scin-bt" value="${fmt(b.t, true)}" spellcheck="false" title="time inside the scene"><input class="scin-btx" value="${esc(b.text)}" placeholder="action at this moment" spellcheck="false"><b data-a="delbeat" title="remove">×</b></div>`).join('')}
+        ${stripHtml({ stage: 'script', kind: 'scene', id: s.id }, { label: 'sketch layouts and ideas' })}
         <div class="scbh">sketches <a data-a="sknew">+ new sketch</a><a data-a="skpaste" title="paste the copied sketch (a new sketch of this scene; into the open sketch when one is open)">paste</a></div>
         ${sk ? `<div class="scsks">${sk}</div>` : ''}<div class="scskslot"></div></div>`;
     }
@@ -436,6 +440,22 @@ class Workspace {
     });
   }
 }
+
+// ------------------------------------------------------------------ proposals: what a pick does on a scene (core/proposals.js)
+// an SVG -> the underlay of the scene's sketch (the open one, else a new sketch); a text -> the scene text in the draft
+registerProposals('script', async ({ target, item }) => {
+  if (!S) await WB().stages.open('script');
+  const sid = target.id, s = S.scene(sid); if (!s) throw new Error(`scene ${sid} is not in the draft`);
+  if (S.open !== sid) { S.setOpen(sid); S.render(); }
+  if (item.svg) {
+    const ul = { src: item.svg, opacity: 0.55, fit: 'contain' };
+    if (S.sk?.scene === sid) { const api = S.sk.api, prev = api.get().underlay || null; api.setUnderlay(ul); return { what: `the underlay of ${S.sk.id}`, undo: () => { if (S.sk?.api === api) api.setUnderlay(prev); }, redo: () => { if (S.sk?.api === api) api.setUnderlay(ul); } }; }
+    const api = await S.openSketchFor(sid, null, { underlay: ul }); if (!api) return null;
+    return { what: `a new sketch of ${sid} over it (draw, then Ctrl+S)`, undo: async () => { if (S.sk?.api === api) await S.closeSketch(true); S.render(); }, redo: () => S.openSketchFor(sid, null, { underlay: ul }) };
+  }
+  const before = structuredClone(S.draft); S.edit(() => { s.text = item.text; }); const after = structuredClone(S.draft);
+  return { what: `the text of ${sid} (unsaved: Save version keeps it)`, undo: () => S.setDraft(before), redo: () => S.setDraft(after) };
+});
 
 // ------------------------------------------------------------------ commands (registered at load: core/rail.js imports this module)
 const V = () => visible() && !!S;

@@ -14,13 +14,14 @@ export const wizard = {
   close() { box?.remove(); box = null; },
   open({ fill = false } = {}) {
     this.close();
-    const st = { step: fill ? 1 : 0, fill, title: '', id: '', idTouched: false, lyrics: '', song: '', bpm: '' };
+    const st = { step: fill ? 1 : 0, fill, title: '', id: '', idTouched: false, lyrics: '', song: '', bpm: '', prep: false };
     box = document.createElement('div'); box.className = 'wizbg';
     box.innerHTML = `<div class="wiz" role="dialog" aria-label="new project"><div class="wizh"></div><div class="wizb"></div><div class="wizf"></div></div>`;
     document.body.appendChild(box);
     const $ = (s) => box.querySelector(s);
     const read = () => {
-      const t = $('[name=title]'), i = $('[name=id]'), l = $('[name=lyrics]'), s = $('[name=song]'), b = $('[name=bpm]');
+      const t = $('[name=title]'), i = $('[name=id]'), l = $('[name=lyrics]'), s = $('[name=song]'), b = $('[name=bpm]'), pr = $('[name=prep]');
+      if (pr) st.prep = pr.checked;
       if (t) st.title = t.value; if (i) st.id = i.value; if (l) st.lyrics = l.value; if (s) st.song = s.value.trim().replace(/^"|"$/g, ''); if (b) st.bpm = b.value;
     };
     const render = () => {
@@ -36,6 +37,7 @@ export const wizard = {
            <p class="dim wizcount">${lines ? `${lines} lines in ${n.length} section${n.length > 1 ? 's' : ''}: ${esc(n.map(s => s.label).join(', '))}` : 'You can also leave it empty and write the lyrics in the Lyrics stage.'}</p>`
         : `<label>Song file <span class="dim">(optional: path of an audio file on this machine; wav, mp3, m4a, flac, ogg)</span><input name="song" value="${esc(st.song)}" placeholder="C:\\music\\my-song.wav" spellcheck="false" autocomplete="off"></label>
            <label>BPM <span class="dim">(optional, default 120)</span><input name="bpm" value="${esc(st.bpm)}" placeholder="120" inputmode="decimal" style="width:80px"></label>
+           <label class="wizprep"><input type="checkbox" name="prep"${st.prep ? ' checked' : ''}> Prepare starting proposals <span class="dim">(asks the agent for 3 choices per scene sketch and idea once it drafts the script, so you start by choosing; free. Generate &gt; Make free layouts works without an agent)</span></label>
            <p class="dim">Without a song the project gets a placeholder length (${fmtMs(F.placeholderMs(lines))}) and estimated line timings; add the song later from the Lyrics stage (Add song…) and the lines are timed over the real song.</p>`;
       const last = st.step === 2;
       $('.wizf').innerHTML = `<span class="dim wizerr"></span><span class="sp"></span>${st.step > (fill ? 1 : 0) ? '<button data-w="back">Back</button>' : ''}${last ? '' : '<button data-w="next" class="pri">Next</button>'}${st.step >= 1 ? `<button data-w="create" class="${last ? 'pri' : ''}">${fill ? 'Start' : 'Create project'}</button>` : ''}`;
@@ -80,6 +82,7 @@ async function create(st) {
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
   prefs.set('activeTab', 'stage'); prefs.set('stage', 'lyrics');
+  if (st.prep) prefs.set('ppPrepare', j.id);   // core/proposals.js writes the ask once the new project opens
   toast(`created ${j.id}: ${j.lines} lines${j.song ? ', song attached' : ', no song yet'}`);
   projects.open(j.id);
 }
@@ -94,5 +97,6 @@ async function fillThis(st) {
   }
   wizard.close();
   await window.WB.stages.open('lyrics');
+  if (st.prep) await window.WB.proposals?.prepare('script');
 }
 window.WB = Object.assign(window.WB || {}, { wizard });

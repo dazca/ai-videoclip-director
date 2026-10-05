@@ -353,6 +353,8 @@ http.createServer(async (req, res) => {
         if (name === 'character_act' || name === 'asset_act' || name === 'ref_upload') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
         // review rounds and revisions: sending a round, closing and restoring a revision are the director's (page only)
         if (name === 'round_send' || name === 'revision_close' || name === 'revision_restore') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
+        // proposals: a pick / mix / dismiss is the director's (page only); the local generator's provenance (not a permission)
+        if (name === 'proposal_act' || name === 'proposals_local' || name === 'proposals_add') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
         delete body.import_ok;   // only a local script calling lib/store.mjs directly may import approved looks
         return json(res, 200, await S.ops[name](project, body));
       }
@@ -399,8 +401,8 @@ http.createServer(async (req, res) => {
       if (priv(rel, [m[1]]) || priv(`data/${m[1]}/${rel}`, [])) { res.writeHead(403); return res.end('private: local only'); }
       // notes.json: the old note stores are migrated into it (v2) on its first read
       if (m[2] === 'notes.json' && fs.existsSync(path.join(pd, 'song.json'))) { try { S.notesDoc(m[1]); } catch (e) { /* a broken file is served as it is */ } }
-      // a writable state file (or revisions.json) that does not exist yet reads as null (the page uses its default)
-      if ((S.WRITABLE.has(m[2]) || m[2] === 'revisions.json') && !fs.existsSync(f)) return json(res, 200, null);
+      // a writable state file (or revisions.json / proposals.json, the server's) that does not exist yet reads as null (the page uses its default)
+      if ((S.WRITABLE.has(m[2]) || m[2] === 'revisions.json' || m[2] === 'proposals.json') && !fs.existsSync(f)) return json(res, 200, null);
       // a remote (LAN) client reads the project's JSON without private paths or items flagged private (media.json,
       // entities with private refs and iteration nodes, requests built on private photos)
       if (!isLocal(req) && /\.json$/i.test(f) && fs.existsSync(f)) {
