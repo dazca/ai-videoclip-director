@@ -7,7 +7,8 @@
 // ✓ done (absorbed), × dismiss, ↺ reopen. Everything writes notes.json v2 through the store (undoable: Ctrl+Z).
 //
 //   const nc = new NotesColumn({ stage, scroller, rows: () => [Row], top?: {label, targets}, current?: () => target,
-//                                width?: (stageWidth) => px, maxWidth? })
+//                                width?: (stageWidth) => px, maxWidth?, allStages? })
+//   allStages: the rows carry targets of other stages (the Final list): every stage's notes are matched (scope narrows them)
 //   The column's width follows the stage: by default ~22% of it (236..400 px); a stage whose rows have a natural width
 //   (the lyrics) passes width = what its rows leave, so nothing is left empty to the right (236..maxWidth, default 640;
 //   the lyrics: 800).
@@ -74,7 +75,7 @@ export class NotesColumn {
     const rows = [{ el: this.topEl, targets: top.targets, top: true, match: top.match, sub: top.sub }, ...(this.o.rows() || []).filter(r => first(r) && last(r))];
     for (const r of rows) { r.key = keyOf(r.targets[0]) + (r.top ? '|top' : ''); r.notes = []; }
     const shown = (n) => this.filter === 'all' ? true : n.status === 'open';
-    const mine = N.notesOn(store.notes, { stage: this.stage }).filter(n => !this.o.scope || this.o.scope(n));
+    const mine = N.notesOn(store.notes, this.o.allStages ? {} : { stage: this.stage }).filter(n => !this.o.scope || this.o.scope(n));
     for (const n of mine) {
       const r = rows.find(x => !x.top && (x.match ? x.match(n) : x.targets.some(t => N.sameTarget(t, n.target)))) || rows.find(x => x.top && (x.match ? x.match(n) : x.targets.some(t => N.sameTarget(t, n.target))));
       if (r) { r.notes.push(n); continue; }

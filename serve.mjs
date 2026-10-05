@@ -22,6 +22,8 @@
 //                                        for the request runner's progress (POST /api/op/request_run starts it)
 // POST /api/op/<name>                    body = the op's arguments -> lib/store.mjs ops[name](project, args)   (local only;
 //                                        bodies up to 5 MB, sketch_save up to 25 MB: two base64 PNGs + the strokes)
+//                                        A project locked for render (revisions.json lock) answers 409 to every write
+//                                        without this server's Origin (op, save, restore); reads stay open
 // POST /api/ui                           {t?, view?, preview?, select?, message?, open_project?, wait_ms?} -> pushed to
 //                                        the open pages of ?project; returns {delivered, pages} once they ack (local only)
 // POST /api/ui/ack                       {id}  (the page, after it applied a UI command)
@@ -338,6 +340,10 @@ http.createServer(async (req, res) => {
       let raw; try { raw = await readBody(req, bodyLimit(p)); } catch (e) { if (e.code === 413) res.setHeader('connection', 'close'); throw e; }
       const body = raw ? JSON.parse(raw) : {};
       if (!body || typeof body !== 'object' || Array.isArray(body)) return json(res, 400, { error: 'body must be a JSON object' });
+      // a project locked for render (Final stage, page only) refuses every write that is not the page's own: 409 + why
+      const fromPage = !!(req.headers.origin && originOk(req.headers.origin));
+      if (!fromPage && (p.startsWith('/api/save/') || p === '/api/restore')) S.lockGate(project, p.startsWith('/api/save/') ? 'save' : 'snapshot_restore');
+      if (!fromPage && p === '/api/projects/delete' && S.validId(body.id)) S.lockGate(body.id, 'project_delete');
       if (p.startsWith('/api/save/')) {
         const name = p.slice('/api/save/'.length);
         if (!S.WRITABLE.has(name)) { res.writeHead(403); return res.end('not writable'); }
@@ -365,6 +371,9 @@ http.createServer(async (req, res) => {
         if (name === 'character_act' || name === 'asset_act' || name === 'ref_upload') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
         // review rounds and revisions: sending a round, closing and restoring a revision are the director's (page only)
         if (name === 'round_send' || name === 'revision_close' || name === 'revision_restore') body.via = req.headers.origin && originOk(req.headers.origin) ? 'page' : 'agent';
+        // stage 7: locking / unlocking the project for render are the director's (page only)
+        if (name === 'final_lock' || name === 'final_unlock') body.via = fromPage ? 'page' : 'agent';
+        if (!fromPage) S.lockGate(project, name, body);
         delete body.import_ok;   // only a local script calling lib/store.mjs directly may import approved looks
         return json(res, 200, await S.ops[name](project, body));
       }

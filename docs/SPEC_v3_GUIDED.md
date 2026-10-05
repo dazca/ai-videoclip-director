@@ -52,7 +52,13 @@ page updates live. A stage is "done" when the director marks it so (page only); 
 6. **Storyboard & gaps**: shots per scene (from beats), each with a frame sketch and text; the agent proposes the
    remaining shots, generation requests, clips; the existing timeline/columns show it all.
 7. **Final approvals**: one review page listing everything still draft/changes/review across stages, with costs,
-   approve/request changes, and a "ready to render" checklist.
+   approve/request changes, and a "ready to render" checklist. Built in phase 7 (`tabs/final.js`, `js/final.js`,
+   `lib/ops/final.mjs`, the read-only `final_get` tool): one grouped table of every row not approved yet (lyrics stage,
+   scenes, breakdown items, identity / base trees, looks / variants, shots, clip takes, draft requests) with status, why,
+   cost (est / spent), open notes (the Notes column), Approve / Request changes (+ note) / approve-selected (a confirm with
+   the count and the cost impact), filters; the checklist (derived, never stored; each failing line links to its gaps);
+   costs against the cap (the merged ledger); "Lock for render" (closes a revision marked final; agent writes get 409
+   until the director unlocks). Review › Approvals shows the same rows (ROADMAP_v4 C3).
 
 ## Shared components
 - **Sketch tool** (`core/sketch/`): an in-browser paint surface, vanilla JS, no framework, compact. Layers: an

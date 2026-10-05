@@ -62,10 +62,11 @@ export async function op(name, args = {}) {
     catch (e) {
       // the server runs older code that does not know this op: do it on the files directly (its file watcher still
       // reloads the open pages) and say so
-      if (e.code === 404 && /^no such op/.test(e.message) && Object.hasOwn(S.ops, name)) { warn(`${STALE(up?.code?.changed)}. It does not know "${name}": done on the files directly (offline) instead`); return await S.ops[name](p, a); }
+      if (e.code === 404 && /^no such op/.test(e.message) && Object.hasOwn(S.ops, name)) { warn(`${STALE(up?.code?.changed)}. It does not know "${name}": done on the files directly (offline) instead`); S.lockGate(p, name, a); return await S.ops[name](p, a); }
       throw e;
     }
   }
+  S.lockGate(p, name, a);   // offline: a project locked for render refuses agent writes here too (409)
   return await S.ops[name](p, a);
 }
 const warnBlock = (w) => (w.length ? [{ type: 'text', text: 'warning: ' + w.join('\nwarning: ') }] : []);

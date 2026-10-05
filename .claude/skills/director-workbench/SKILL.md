@@ -25,6 +25,8 @@ formats and how to add features.
    notes (refused) and never absorb one you did not act on. Confirm the plan before large changes.
 5. `round_get`: has the director **sent a review round**? If `status` is "sent", that round is your job first (see
    "Review rounds" below); "collecting" means they are still writing notes.
+6. Late in a project, `final_get`: what is left before the render (see "Final approvals" below). If `locked` is not
+   null the project is **locked for render**: every write of yours is refused (409); only read, and tell the director.
 
 ## Review rounds (the director's notes, absorbed in one go)
 
@@ -45,6 +47,19 @@ next round. Work it like this:
    `revisions.json`. They compare revisions (Review › Compare) and restore one if they want. Sending a round, closing
    and restoring a revision are theirs only (no tool; 403). `revisions_get` lists the revisions; `compare: ["R2", "R3"]`
    (or "R0" = before the first round, "now") gives the per-stage diff with the notes behind each change.
+
+## Final approvals (stage 7)
+
+`final_get` (read only) answers "what is left?": `ready`, `failing`, the **ready-to-render checklist** (every second
+scripted, every scene has shots, every shot an approved frame / take / clip, every asset approved, no open notes, no
+open round, costs within the cap, an export is possible; derived from the files, each failing line with its gaps),
+`pending` (every row not approved yet, grouped: lyrics, script, breakdown, characters, scenery, storyboard, requests;
+with status, why, est / spent cost, open notes) and `costs` (spent from the merged ledger, committed, drafts, the shots
+not requested yet, projected, against the cap). Summarise it for the director in a few lines (the failing checks
+first, then the biggest groups and the money), then work the gaps you can: draft requests (`gaps_get`,
+`request_create`), answer open notes, propose shots or assets, set `review` + a note where you need their look.
+Approving rows, approve-selected and **Lock for render** / **Unlock** happen in the page only (Final stage; show it
+with `ui_focus` view `stage`). A locked project refuses your writes with 409 until they unlock: do not retry.
 
 ## The workflow (one stage at a time, the director signs off each)
 
@@ -165,6 +180,8 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
   `costs_get` before proposing; the tools refuse queueing above the cap. Record the real cost when done. Prefer
   `request_run` (it enforces all of this) to calling a provider yourself.
 - Never approve on the director's behalf, never mark their notes resolved without doing what they asked.
+- Never try to work around a project locked for render (409): no hand edits of the files, no snapshot restores; ask the
+  director to unlock it in the Final stage.
 - Never `round_absorb` a note you did not apply, and never call `round_finish` before every note of the round is
   absorbed or replied. A round is not an approval: closing the revision is the director's.
 - Never touch PRIVATE files (crops of real photos, anything under a `private/` folder or flagged private) beyond

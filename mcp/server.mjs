@@ -29,6 +29,7 @@ import './tools/lyrics.mjs';       // stages; stage 1 lyrics
 import './tools/scenes.mjs';       // stage 2 script, intake, sketches
 import './tools/breakdown.mjs';    // stage 3 breakdown
 import './tools/requests.mjs';     // approvals, the generation queue, costs
+import './tools/final.mjs';        // stage 7: final_get (read only; approvals and the lock are the page's)
 
 // ------------------------------------------------------------------ resources: docs + raw project files
 const doc = (f) => { try { return fs.readFileSync(path.join(S.WB_DIR, f), 'utf8'); } catch (e) { return `(${f} not found)`; } };

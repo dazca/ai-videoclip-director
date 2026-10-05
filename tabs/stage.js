@@ -2,7 +2,7 @@
 // status buttons (only here and on the rail can a stage be marked done), then the stage's own workspace. Stage 1
 // (lyrics) is tabs/lyrics.js, stage 2 (script) tabs/script.js, stage 3 (breakdown) tabs/breakdown.js, stage 4 (characters)
 // tabs/charstage.js, stage 5 (scenery) tabs/scenery.js (both on the generic tabs/assetws.js), stage 6 (storyboard)
-// tabs/storyboard.js, stage 7 (final) tabs/final.js (a placeholder: the shots and their states, with the Notes column).
+// tabs/storyboard.js, stage 7 (final) tabs/final.js (final approvals: the pending list, the checklist, the costs, Lock for render).
 import { store, esc } from '../js/store.js';
 import { STAGES, STATUS_LABEL, stageById, stageTip } from '../js/flow.js';
 
