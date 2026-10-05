@@ -71,7 +71,8 @@ notes are dismissed only by the director), and the old `notes_list` / `note_add`
 `round_get` (the round the director sent: its notes by stage with the content they point at) / `round_absorb` (a note done,
 linked to the change) / `round_reply` / `round_finish`, and `revisions_get` (the revisions R1, R2, …, and a per-stage compare
 of two); proposals: `proposals_add` (3 free choices on a scene, a shot, a lyric line, a look: SVG made with code, sanitised
-on the server, or a short text) / `proposals_get` (the sets, the director's picks and mix notes, the "3 more" asks); `approvals_get` / `approve` / `request_changes`, `requests_list` /
+on the server, or a short text) / `proposals_get` (the sets, the director's picks and mix notes, the "3 more" asks); `final_get` (stage 7, read only: the ready-to-render checklist, everything not approved yet by stage with its cost,
+the costs against the cap, the lock); `approvals_get` / `approve` / `request_changes`, `requests_list` /
 `request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`), `costs_get` (one total over costs.json and
 `media_add`, `notes_list` / `note_add` / `note_resolve`, `approvals_get` / `approve` / `request_changes`, `requests_list` /
 `request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`; `takes`), `request_run` (run approved requests: the runner) / `generators_get`, `costs_get` (one total over costs.json and
@@ -264,8 +265,23 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   storyboard's shots (frame thumbnails), and the cast / status columns follow them. Commands: palette "Storyboard: …",
   right-click a shot (board or timeline): open in the storyboard, frame, split, merge, move, copy / paste frame,
   request, note, delete.
-- **Final stage** (stage 7, a placeholder until phase 7): every storyboard shot in time order with its approval state
-  and its request or clip, the counts per state, and the Notes column on the shots (the notes for the last pass).
+- **Final stage** (stage 7, final approvals; `tabs/final.js`, logic `js/final.js` shared with `final_get`): ONE compact
+  table of everything not approved yet, grouped by stage: the lyrics stage not done, scenes not ok, breakdown items not
+  ok, identity / base trees and looks / variants not approved, shots and clip takes (approvals.json) not approved, draft
+  requests. Each row: thumbnail (or the kind's letter), time, what, status, why it waits, cost (estimated / spent),
+  **✓ Approve**, **✎ Request changes** (type what to change, Enter: a note on the row, and the state goes to changes /
+  draft where it has one), **↗** jump to where it lives; the Notes column on the right shows every stage's notes on the
+  row. Filters: stage, status, "has open notes". Tick rows (or a whole group) and **Approve selected**: a confirm shows
+  the count and what it commits (requests: committed and left before → after, against the cap). Above the list:
+  **Ready to render**, eight lines derived from the files, never stored (every second scripted, every scene has
+  shots, every shot an approved frame / take / clip, every asset approved, no open notes, no open round, costs within
+  the cap, an export is possible: the song + media for every shot, none private only), each failing line with its
+  gaps as links; **Costs**: spent (the merged ledger), committed and estimated remaining (drafts + shots not requested
+  yet) against the cap, by source. **Lock for render** (a confirm; "Lock anyway" names the failing checks) closes a
+  revision (the final snapshot), marks it `final` and locks the project: a blue banner, and every agent write gets 409
+  until **Unlock**. Every act uses the page's own paths (page saves stamped `via: "page"`, `asset_act`, the stage
+  rail's Mark done, `final_lock` / `final_unlock`). Review › Approvals shows the same rows (without the panels and the
+  Notes column) above the raw approvals.json states.
 - **Top bar** (18 px; `` ` `` hides / shows it; **Esc never hides it**: Esc only closes menus, dialogs, the palette and
   the cheat sheet): menu bar (File Edit View Timeline Generate Window Help; F10 opens it from the keyboard), the
   **page tabs**, project name, transport, `⌘` = command palette, `⌃` = hide the bar, `⚙` = Settings (far right).
@@ -373,7 +389,7 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `storyboard.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, script?, shots[{id: "sh03", scene, t0, t1, kind: wide/medium/close/insert/performance/xp-desktop/…, title, text, camera, sketch, beats[], cast[], locations[], props[], variants{<entity>: <variant / look> \| null}, gen: still/video/null, clips[], thumb?, section?}]}], notes[{id: "sbn01", shot, scene?, text, by, via, to?: "agent", kind?: request/storyboard/fill_gaps, gaps?, status, at, version, replies[]}]}`: stage 6, the storyboard. A version is immutable (a save appends one); the shots of a scene tile it; the variant each asset needs is the scene's (entity `uses`) unless `variants` overrides it. The shot's approval is `approvals.json` `shot:<id>`. Missing = v1 derived from `shots.json` (never rewritten; its readers keep working). Logic: `js/storyboard.js` |
 | `sketches/<id>.json` / `.png` / `.mask.png` | a sketch: `{id, w, h, paper, underlay{src, opacity, fit}, strokes[], mask[], pins[{n, x, y, text}], title?, created, updated, by, via}` (format: `core/sketch/sketch.js`), the flattened image and the edit mask; written by `sketch_save`, registered in `media.json` (`kind: "sketch"`, `sketch`, `mask`, `scenes[]`, `pins`); under `private/sketches/` when drawn over a private image; not snapshotted |
 | `.snapshots/<yyyymmdd-hhmmss>-<slug>/` | copies of the small JSON files (no peaks, thumbs, `_src`, settings, revisions.json) + `.meta.json {id, at, message, auto, files, revision?, immutable?}` |
-| `revisions.json` | the review rounds and revisions (written by the server only; the page reads it): `{v: 1, rev, rounds[{n, status: sent/finished/closed, sent_at, sent_by, notes[ids], ask (the note to the agent), base (the snapshot when sent), finished_at?, summary?, closed_at?, revision?}], revisions[{id: "R3", n, round, created, summary, notes_absorbed[], notes_replied[], files_changed[], cost_usd, cost_delta, snapshot, base, by, via, git?: {commit} \| {skipped}}], restores[{at, revision, previous}]}`. A revision's snapshot is never changed; restoring one snapshots the current state first and keeps notes.json. Logic: `js/revisions.js`, `lib/ops/rounds.mjs` |
+| `revisions.json` | the review rounds and revisions (written by the server only; the page reads it): `{v: 1, rev, rounds[{n, status: sent/finished/closed, sent_at, sent_by, notes[ids], ask (the note to the agent), base (the snapshot when sent), finished_at?, summary?, closed_at?, revision?}], revisions[{id: "R3", n, round, created, summary, notes_absorbed[], notes_replied[], files_changed[], cost_usd, cost_delta, snapshot, base, by, via, git?: {commit} \| {skipped}}], restores[{at, revision, previous}], lock?: {at, revision, snapshot, summary, by, via, ready, failing?, pending} \| null, locks[]}`. A revision's snapshot is never changed; restoring one snapshots the current state first and keeps notes.json. "Lock for render" (stage 7) closes a revision with `final: true` and sets `lock` (the history in `locks[]`, `unlocked_at` when the director unlocks); while `lock` is set every agent write is refused (409). Logic: `js/revisions.js`, `lib/ops/rounds.mjs`, `lib/ops/final.mjs` |
 | `proposals.json` + `proposals/<set>-<item>.svg` | proposals (written by the server only; the page reads it): `{v: 1, rev, sets[{id: "ps03", target{stage, kind, id}, round, by, via, source: agent/local, created, answers?[note ids], items[{id: "a", title, why, svg?: "proposals/ps03-a.svg" \| text?, status: open/picked/mixed/dismissed, note?, at?, by?, via?}]}]}`. Every SVG was sanitised (`lib/svg-sanitize.mjs`) and is shown only as an image. One pick per set; picks are the director's. Logic: `js/proposals.js`, `lib/ops/proposals.mjs`, the local generator `js/proposals-local.js` |
 | `.history/` | only with `settings.json` `revisions_git: true` and git on PATH: a git repository of its own with one commit per revision (the snapshot's files); never served, never the workbench's repository |
 
@@ -517,6 +533,13 @@ small files are served in one read so no handle stays open.
   word, a summary). `/data/<p>/` never serves a dot-folder or dot-file (`.snapshots`, `.history`); the compare op reads
   snapshots for the page and names revisions only as `R<n>`, `R0` or `now`. The git mirror runs `git` with
   `--git-dir=data/<p>/.history/.git` (never the workbench repository) and only when the director turned it on.
+- Final approvals (stage 7): `final_get` is read only; approving from the Final list goes through the page's own paths
+  (the agent surface still gets 403 on approvals). "Lock for render" / "Unlock" (`final_lock` / `final_unlock`) are the
+  page's only (via "page" from this server's Origin; no MCP tool; 403 to the agent surface, a claimed via "page", a
+  foreign Origin and offline). While a project is locked (`revisions.json` `lock`, which only the server writes) every
+  write without this server's Origin is refused with 409 and a reason: `/api/op/*` except reads (`*_get`, `*_list`,
+  `*_versions`, `*_query`, `*_compare`, a `request_run` dry run), `/api/save/*`, `/api/restore` and deleting the project; the MCP server's
+  offline ops and `snapshot_restore` check the same lock. The page itself still saves.
 - Stage 2 (script): a page save of `scenes.json` cannot rewrite a saved version nor the author of an existing note,
   status or intake answer; new versions, notes, replies, changed scene statuses and answers are stamped
   `by: "director", via: "page"`; a malformed file is refused (400). Only the page marks a scene `ok` (`scenes_update`

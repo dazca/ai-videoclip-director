@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Security regressions for the workbench server, the data layer and the page (audit F01-F15, NV1, NV2, the guided flow
 // stages 1-6, notes.json v2 (target validation, the director's notes, stored payloads in every Notes column), review rounds
-// and revisions (the page-only send / close / restore, the change link, the index, snapshots never served); the exporter's
+// and revisions (the page-only send / close / restore, the change link, the index, snapshots never served), final approvals
+// (no agent approvals from Final, the page-only lock / unlock, a locked project refuses agent writes: 409); the exporter's
 // F07/F08/F12 are in tools/security-exporter.mjs). Runs on a SCRATCH copy of data/demo with scratch media and config,
 // on free ports; never touches data/. Uses headless Chromium when one is found (tools/chrome.mjs), else skips the
 // browser checks.   node tools/security-test.mjs   (npm run test:security runs both files)
@@ -680,6 +681,46 @@ try {
     fs.writeFileSync(path.join(D, 'proposals.json'), JSON.stringify(pj));
   }
 
+  // ---------------------------------------------------------------- final approvals (stage 7): the director approves and locks; a locked
+  // project refuses every agent write (409) over HTTP (op, save, restore) and offline, while the page and the reads still work
+  {
+    const asPage = (name, body = {}) => post(`/api/op/${name}?project=${P}`, body, { origin: A.base });
+    const tries = {};
+    for (const name of ['final_lock', 'final_unlock']) {
+      tries[name] = [(await op(name, { force: true })).status, (await op(name, { force: true, via: 'page' })).status, (await post(`/api/op/${name}?project=${P}`, { force: true }, { origin: 'http://evil.example' })).status];
+      try { S.ops[name](P, { force: true }); tries[name].push(200); } catch (e) { tries[name].push(e.code); }
+    }
+    const apF = await op('set_states', { keys: ['shot:s5-outro'], state: 'approved', director_approved: true });
+    const reqF = (await op('request_create', { kind: 'shot-still', target: 'shot:s5-outro', prompt: 'sec final', est_cost: 0.12, tool: 'fal-ai/nano-banana-2/edit' })).body;
+    const apR = await op('request_update', { id: reqF?.id, status: 'approved', director_approved: true });
+    const fg = await op('final_get', {});
+    check('final: the agent cannot approve from Final (a shot: 403, a request: 403, also with director_approved) nor lock / unlock (agent surface, a claimed via "page", a foreign Origin, offline: 403); final_get reads (200)',
+      apF.status === 403 && apR.status === 403 && Object.values(tries).every(a => a.every(s => s === 403)) && fg.status === 200 && Array.isArray(fg.body?.checklist) && fg.body.locked === null,
+      { apF: apF.status, apR: apR.status, tries, fg: fg.status });
+    const lk = await asPage('final_lock', { force: true });
+    const ap0 = readP('approvals.json');
+    const w = {
+      notes_add: (await op('notes_add', { target: { stage: 'final', kind: 'stage', id: null }, text: 'sec: locked' })).status,
+      set_states: (await op('set_states', { keys: ['shot:s5-outro'], state: 'review' })).status,
+      request_create: (await op('request_create', { kind: 'shot-still', target: 'shot:s5-outro', prompt: 'x', est_cost: 0.1, tool: 'fal-ai/nano-banana-2/edit' })).status,
+      entity_upsert: (await op('entity_upsert', { kind: 'character', id: 'ada', fields: { name: 'Locked Ada' } })).status,
+      proposals_add: (await op('proposals_add', { target: { stage: 'script', kind: 'scene', id: 'sc02' }, items: [{ title: 'locked', text: 'while locked' }] })).status,
+      save: (await post(`/api/save/approvals.json?project=${P}`, { base_rev: ap0.rev, data: { ...ap0, items: { ...ap0.items, 'shot:s5-outro': { state: 'review' } } } })).status,
+      restore: (await post(`/api/restore?project=${P}`, { snapshot: lk.body?.snapshot, by: 'agent' })).status,
+      delete: (await post(`/api/projects/delete?project=${P}`, { id: P })).status,
+    };
+    let off = null; try { S.lockGate(P, 'notes_add', {}); off = 200; } catch (e) { off = e.code; }
+    const reads = [(await op('final_get', {})).status, (await op('notes_get', {})).status, (await op('costs_get', {})).status];
+    const pg1 = await post(`/api/save/approvals.json?project=${P}`, { base_rev: readP('approvals.json').rev, data: { ...readP('approvals.json'), items: { ...readP('approvals.json').items, 'shot:s5-outro': { state: 'changes' } } } }, { origin: A.base });
+    const RVJ = readP('revisions.json');
+    check('final: "Lock for render" from the page closes a revision marked final (revisions.json lock); then the agent surface gets 409 on every write (op, page-style save without the Origin, restore; offline lockGate 409) and nothing changes; reads still work; the page itself still saves',
+      lk.status === 200 && RVJ.lock?.revision === lk.body.revision && RVJ.revisions.find(r => r.id === lk.body.revision)?.final === true && Object.values(w).every(s => s === 409) && off === 409
+      && reads.every(s => s === 200) && pg1.status === 200 && readP('entities/characters/ada.json').name !== 'Locked Ada',
+      { lk: lk.status, w, off, reads, pg1: pg1.status });
+    const ul = await asPage('final_unlock'), after = await op('notes_add', { target: { stage: 'final', kind: 'stage', id: null }, text: 'sec: unlocked' });
+    check('final: the page unlocks (the agent writes again)', ul.status === 200 && after.status === 200 && readP('revisions.json').lock === null, { ul: ul.status, after: after.status });
+  }
+
   // ---------------------------------------------------------------- F09: the EDL extractor's server (source check: it needs the owner's render page)
   const edl = fs.readFileSync(path.join(WB, 'importers/azemar_extract_edl.mjs'), 'utf8');
   check('F09 EDL extractor server: 127.0.0.1, decode in try/catch, confined to ROOT', /listen\(\d+, '127\.0\.0\.1'/.test(edl) && /try \{ p = inside\(ROOT,/.test(edl) && /if \(!p\) \{ r\.writeHead\(403\)/.test(edl));
@@ -883,7 +924,7 @@ try {
     await post(`/api/op/revision_close?project=${P}`, { summary: V(13) }, { origin: A.base });
     await wait(800);
     await rpg.evaluate(() => window.WB.app.show('compare')); await wait(900);
-    const shown = await rpg.evaluate(async () => { await window.WB.compare.select('R1', 'R2'); return { notes: window.WB.compare.data()?.notes?.length, rows: document.querySelectorAll('.cmpb .cmprow').length, list: document.querySelectorAll('.cmpl [data-rid]').length }; });
+    const shown = await rpg.evaluate(async () => { const rv = window.WB.store.revisions.revisions.map(r => r.id); await window.WB.compare.select(rv.at(-2), rv.at(-1)); return { notes: window.WB.compare.data()?.notes?.length, rows: document.querySelectorAll('.cmpb .cmprow').length, list: document.querySelectorAll('.cmpl [data-rid]').length }; });
     await wait(300);
     const rInert = await rpg.evaluate(() => window.__rv === undefined && !document.querySelector('#rail img, .cmp img[src="x"], img[src="x"]'));
     check('F02 stored payloads in a round (a note, the agent\'s change summary and round summary, a revision summary) render as text on the rail and in Review › Compare',

@@ -1032,14 +1032,49 @@ button.on { color: var(--acc); }
 .chnpin { position: absolute; transform: translate(-50%, -50%); font-style: normal; font-size: 10px; line-height: 14px; min-width: 14px; text-align: center; border-radius: 7px; background: #b8913a; color: #111; box-shadow: 0 0 0 1px #000a; cursor: pointer; }
 .chnpin.done { opacity: .5; }
 .ncn.flash { animation: lyflash 1.2s; }
-/* stage 7 (final, a placeholder): the shots and their states */
-.fnws { display: flex; flex-direction: column; height: 100%; }
+/* stage 7 (final approvals, tabs/final.js; Review › Approvals uses the same list): the bar, the checklist and costs panels, the grouped rows */
+.fnws { display: flex; flex-direction: column; height: 100%; position: relative; }
+.fnbar select { height: 16px; font-size: 11px; padding: 0 1px; }
+.fnbar .fnchk { display: flex; align-items: center; gap: 3px; color: var(--dim); cursor: pointer; }
+.fnbar input[type=checkbox], .fnrow input[type=checkbox], .fngh input { margin: 0; width: 12px; height: 12px; flex: none; }
+.fnlocked { color: #b8d8f8; background: #1d3048; padding: 0 5px; line-height: 16px; }
+.fntop { flex: none; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); border-bottom: 1px solid var(--line); font-size: 11px; }
+.fnck { border-right: 1px solid var(--line); padding: 1px 6px 3px; min-width: 0; }
+.fncost { padding: 1px 6px 3px; min-width: 0; }
+.fnph { display: flex; gap: 6px; align-items: baseline; height: 16px; line-height: 16px; white-space: nowrap; }
+.fnph a { margin-left: auto; color: #9db7d6; cursor: pointer; }
+.fnci { display: flex; gap: 5px; align-items: baseline; height: 15px; line-height: 15px; white-space: nowrap; overflow: hidden; }
+.fnci i { font-style: normal; width: 9px; flex: none; } .fnci.ok i { color: #3fae6a; } .fnci.bad i { color: #e0503a; }
+.fnci.ok .fncl { color: var(--dim); } .fncl { flex: none; }
+.fncd { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+.fngaps { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; } .fngaps a { color: #9db7d6; cursor: pointer; margin-right: 7px; } .fngaps a:hover { text-decoration: underline; }
+.fnok { color: #7fd69c; font-weight: bold; } .fnbad { color: #f0907a !important; font-weight: bold; } .fnw { color: #e8c88a; font-weight: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fnbarw { position: relative; height: 10px; margin: 3px 0 4px; background: var(--bg3); }
+.fnbarv { display: flex; height: 100%; overflow: hidden; } .fnbarv i { display: block; height: 100%; flex: none; }
+.fncg { display: flex; gap: 12px; height: 15px; line-height: 15px; white-space: nowrap; overflow: hidden; }
+.fncg i { display: inline-block; width: 8px; height: 8px; margin-right: 3px; vertical-align: -1px; }
+.fntop i.sp { background: #3fae6a; } .fntop i.cm { background: #5a87b8; } .fntop i.er { background: repeating-linear-gradient(45deg, #8a6a1c 0 3px, #4a3a14 3px 6px); }
+.fnbarw .cap { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: var(--acc); }
+.fnconf { position: absolute; z-index: 30; right: 6px; top: 21px; width: 470px; background: var(--bg2); border: 1px solid var(--acc); padding: 6px 8px; font-size: 12px; box-shadow: 0 6px 20px #000c; }
+.fncfb { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; } .fncfb button { height: 20px; padding: 0 10px; cursor: pointer; }
+.fnimp { color: var(--dim); margin-top: 3px; }
 .fnlist { flex: 1; overflow: auto; min-height: 0; padding-bottom: 40px; outline: none; }
-.fnrow { display: flex; align-items: center; gap: 6px; min-height: 19px; padding: 0 6px; font-size: 12px; border-bottom: 1px solid var(--line2); white-space: nowrap; cursor: default; }
-.fnrow.on { background: #1c2230; }
-.fnrow .fnt { color: #9db7d6; cursor: pointer; font-variant-numeric: tabular-nums; }
-.fnrow .fnk { width: 70px; overflow: hidden; text-overflow: ellipsis; }
+.fngh { display: flex; align-items: center; gap: 6px; height: 18px; padding: 0 6px; background: var(--bg2); border-bottom: 1px solid var(--line); font-size: 11px; white-space: nowrap; }
+.fngh a { color: #9db7d6; cursor: pointer; }
+.fnrow { display: flex; align-items: center; gap: 5px; min-height: 20px; padding: 0 6px; font-size: 12px; border-bottom: 1px solid var(--line2); white-space: nowrap; cursor: default; }
+.fnrow.on { background: #1c2230; } .fnrow.picked { background: #1b2a1f; } .fnrow.on.picked { background: #1f2c34; }
+.fnrow .fnt { width: 40px; flex: none; color: #9db7d6; cursor: pointer; font-variant-numeric: tabular-nums; font-size: 11px; }
+.fnth { width: 32px; height: 18px; object-fit: cover; flex: none; background: var(--bg3); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; color: var(--dim); text-transform: uppercase; }
 .fnrow .fntx { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.fnrow .chip { flex: none; max-width: 76px; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+.fnwhy { width: 210px; flex: none; overflow: hidden; text-overflow: ellipsis; color: var(--dim); font-size: 11px; }
+.fnc { width: 40px; flex: none; text-align: right; font-variant-numeric: tabular-nums; font-size: 11px; color: #e8c88a; } .fnc.sp2 { color: #7fd69c; }
+.fnrow button { height: 16px; line-height: 12px; font-size: 11px; padding: 0 4px; flex: none; cursor: pointer; } .fnrow button[data-x=approve]:not(:disabled) { color: #9fd8b0; } .fnrow button:disabled { opacity: .35; cursor: default; }
+.fnj { color: #9db7d6; cursor: pointer; flex: none; }
+.fnlockbar { flex: none; height: 18px; line-height: 18px; padding: 0 6px; background: #1d3048; color: #b8d8f8; font-size: 11px; border-bottom: 1px solid #2e5078; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.apws { display: flex; flex-direction: column; height: 100%; } .apws .aplist { flex: 1; min-height: 0; }
+.apraw { flex: none; max-height: 30%; overflow: auto; border-top: 1px solid var(--line); padding: 2px 6px; font-size: 11px; } .apraw summary { cursor: pointer; color: var(--dim); }
+.fnchg { display: flex; gap: 6px; align-items: center; padding: 1px 6px 2px 44px; border-bottom: 1px solid var(--line2); font-size: 11px; background: #22191a; } .fnchg input { flex: 1; height: 18px; font-size: 12px; }
 /* the poem is narrow (sections up to 780 px): its notes sit right next to it */
 .lypoem.nchost .lysec { max-width: none; }   /* the notes take what the poem leaves (core/notescol.js width), up to 800 px; beyond that the poem widens */
 .ncn { position: relative; padding: 1px 4px; border-left: 2px solid #b8913a; overflow-wrap: anywhere; white-space: pre-wrap; cursor: default; }

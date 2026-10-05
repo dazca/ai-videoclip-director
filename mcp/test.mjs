@@ -13,7 +13,8 @@
 // every old note store without loss, notes_get / notes_add / notes_status, the old note tools as aliases, wait_for on a note),
 // review rounds and revisions (round_get / round_absorb / round_reply / round_finish, the page-only send / close / restore, the
 // compare, the opt-in mirror), proposals (proposals_add with the SVG sanitiser, proposals_get, the page-only picks, the "3 more"
-// asks answered by the next set, the free local generator),
+// asks answered by the next set, the free local generator), final approvals (final_get, the page-only lock: a locked project
+// refuses agent writes, proposals included),
 // resources, the director-session prompt, the guard rules (edit voids approval, director-only approvals, media kind,
 // CSRF / Host / token checks, path traversal and the PRIVATE rule) and the offline (files only) mode. The temp folder
 // is removed at the end, whatever happens; data/demo must be byte-identical afterwards.
@@ -126,7 +127,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve', 'character_get', 'character_iteration_add', 'character_note_add', 'look_create',
     'asset_get', 'asset_iteration_add', 'asset_note_add', 'variant_create',
     'storyboard_get', 'shots_update', 'shot_note_add', 'shot_note_resolve', 'gaps_get', 'notes_get', 'notes_add', 'notes_status', 'request_run', 'generators_get',
-    'round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get', 'proposals_add', 'proposals_get'];
+    'round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get', 'proposals_add', 'proposals_get', 'final_get'];
   check('tools/list has every tool', EXPECT.every(t => tools.includes(t)), { count: tools.length, missing: EXPECT.filter(t => !tools.includes(t)) });
   const schemaOk = (await mcp.listTools()).tools.every(t => t.description?.length > 40 && t.inputSchema?.type === 'object');
   check('every tool has a description and a JSON schema', schemaOk);
@@ -1257,6 +1258,40 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   // the director-session briefing mentions them
   const pr = await mcp.getPrompt({ name: 'director-session', arguments: { project: PP } });
   check('the director-session briefing counts the proposals and tells the agent how to add them', /Proposals: \d+ set/.test(pr.messages[0].content.text) && /proposals_add/.test(pr.messages[0].content.text));
+}
+// 18. final approvals (stage 7, ROADMAP_v4 C1-C4): final_get is read only (the checklist + the pending list + the costs);
+// the agent has no tool to approve from Final nor to lock / unlock; a project the page locked for render refuses every agent
+// write (409, over HTTP and offline) while reads keep working; the page unlocks
+{
+  const FP = 'mcp-final';
+  S.duplicateProject(PROJECT, FP, true);
+  const FJ = (f) => JSON.parse(fs.readFileSync(path.join(DATA, FP, f), 'utf8'));
+  const pageOp = (name, body = {}) => post(`/api/op/${name}?project=${FP}`, body, { origin: URL_ });
+  const tools = (await mcp.listTools()).tools.map(t => t.name);
+  const g = await call(mcp, 'final_get', { project: FP }), gs = await call(mcp, 'final_get', { project: FP, group: 'storyboard' });
+  const ids = (g.checklist || []).map(c => c.id);
+  check('final_get (read only): the checklist (scripted, shots, frames, assets, notes, round, cap, export; each ok / detail / gaps), the pending rows by group with status, why, cost and approvable, the costs against the cap; the group filter; no tool to lock / unlock',
+    tools.includes('final_get') && !tools.some(t => /^final_(lock|unlock)$/.test(t)) && ['scripted', 'shots', 'frames', 'assets', 'notes', 'round', 'cap', 'export'].every(i => ids.includes(i))
+    && g.ready === false && g.locked === null && g.pending?.length > 3 && g.pending.every(r => r.key && r.group && r.st && r.why) && typeof g.costs?.cap === 'number' && g.costs.merged === true
+    && gs.pending.length && gs.pending.every(r => r.group === 'storyboard'), { ids, ready: g.ready, n: g.pending?.length, costs: g.costs, groups: g.counts?.by_group });
+  const agentLock = await post(`/api/op/final_lock?project=${FP}`, { force: true, via: 'page' });
+  const lk = await pageOp('final_lock', { force: true });
+  const w1 = await call(mcp, 'notes_add', { project: FP, target: { stage: 'final', kind: 'stage', id: null }, text: 'mcp: while locked' });
+  const wP = await call(mcp, 'proposals_add', { project: FP, target: { stage: 'script', kind: 'scene', id: 'sc01' }, items: [{ title: 'locked', text: 'while locked' }] });
+  const w2 = await call(mcp, 'request_create', { project: FP, kind: 'shot-still', target: 'shot:s5-outro', prompt: 'x', est_cost: 0.12, tool: 'fal-ai/nano-banana-2/edit' });
+  const off = await connect({ WORKBENCH_URL: 'http://localhost:9' });
+  const w3 = await call(off, 'notes_add', { project: FP, target: { stage: 'final', kind: 'stage', id: null }, text: 'mcp offline: while locked' });
+  const r3 = await call(off, 'final_get', { project: FP });
+  await off.close();
+  const r1 = await call(mcp, 'final_get', { project: FP }), r2 = await call(mcp, 'notes_get', { project: FP });
+  const RV = FJ('revisions.json');
+  check('lock for render (page only: the agent surface gets 403 even claiming via "page"): a revision closed and marked final, revisions.json lock; then every agent write is refused with 409 + why (HTTP and offline) while final_get / notes_get still read',
+    agentLock.status === 403 && lk.status === 200 && RV.lock?.revision === lk.body.revision && RV.revisions.find(r => r.id === lk.body.revision)?.final === true
+    && /error 409/.test(w1.error || '') && /locked for render/.test(w1.error || '') && /error 409/.test(w2.error || '') && /error 409/.test(wP.error || '') && /error 409/.test(w3.error || '')
+    && r1.locked?.revision === lk.body.revision && r3.locked?.revision === lk.body.revision && Array.isArray(r2.notes) && !FJ('notes.json').notes.some(n => /while locked/.test(n.text)),
+    { agentLock: agentLock.status, lk: lk.body, w1: w1.error?.slice(0, 90), w2: w2.error?.slice(0, 60), w3: w3.error?.slice(0, 60), locked: r1.locked?.revision });
+  const ul = await pageOp('final_unlock'), w4 = await call(mcp, 'notes_add', { project: FP, target: { stage: 'final', kind: 'stage', id: null }, text: 'mcp: after unlock' });
+  check('unlock (page): the agent writes again; the lock stays in revisions.json locks[] with unlocked_at', ul.status === 200 && !w4.error && FJ('revisions.json').lock === null && FJ('revisions.json').locks?.[0]?.unlocked_at, { ul: ul.status, w4: w4.error });
 }
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {

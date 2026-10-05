@@ -17,8 +17,9 @@
 // Queue's request form, the stale-code bar, and (v11, tools/verify-notes.mjs) notes everywhere (SPEC v4 §1): the migration of
 // the old note stores, the Notes column in every stage and on the timeline, the right-click "+ Add" menus, the counters,
 // (v12, tools/verify-runner.mjs) the request runner on a mock fal: the Queue's Approve / Reject / Run, live progress, outputs
-// as nodes, Settings > Generator, (v14, tools/verify-proposals.mjs) proposals (SPEC v4 §3), and (v13, tools/verify-rounds.mjs) rounds, revisions and compare (SPEC v4 §2) and the
-// Notes column's width.
+// as nodes, Settings > Generator, (v14, tools/verify-proposals.mjs) proposals (SPEC v4 §3), (v13, tools/verify-rounds.mjs) rounds,
+// revisions and compare (SPEC v4 §2) and the Notes column's width, and (v15, tools/verify-final.mjs) stage 7, final approvals
+// (the list, the checklist, costs, the lock).
 //   node tools/verify.mjs [--project <id>] [outDir]     (default project: the server's default; npm run verify = demo)
 // Copies data/<project> (and data/_template) into a scratch data folder under the OS temp dir and starts serve.mjs
 // on free ports with WORKBENCH_DATA = that folder, so nothing under data/ is written and several runs (or a running
@@ -880,10 +881,17 @@ try {
   await pg.evaluate(() => window.WB.script.focus('sc01')); await wait(150);
   await pg.evaluate(() => document.querySelector('.sccard.open [data-a=sknew]').click());
   await until(() => !!window.WB.script.ws.sk);
-  const box = await pg.evaluate(() => { const c = document.querySelector('.scskhost .sk-cv'); c.scrollIntoView({ block: 'center' }); const r = c.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
-  await pg.mouse.move(box.x + box.w * 0.25, box.y + box.h * 0.6); await pg.mouse.down();
-  for (let i = 1; i <= 12; i++) await pg.mouse.move(box.x + box.w * (0.25 + i * 0.04), box.y + box.h * (0.6 - Math.sin(i / 3) * 0.2), { steps: 2 });
-  await pg.mouse.up();
+  // the canvas may still be laying out (size 0, the pen tool not armed): wait for a sized canvas, then draw until the
+  // sketch holds the stroke (a fixed delay made this flaky under load)
+  await until(() => { const c = document.querySelector('.scskhost .sk-cv'); const r = c?.getBoundingClientRect(); return !!r && r.width > 50 && r.height > 50; });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await frames(2);
+    const box = await pg.evaluate(() => { const c = document.querySelector('.scskhost .sk-cv'); c.scrollIntoView({ block: 'center' }); const r = c.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
+    await pg.mouse.move(box.x + box.w * 0.25, box.y + box.h * 0.6); await pg.mouse.down();
+    for (let i = 1; i <= 12; i++) await pg.mouse.move(box.x + box.w * (0.25 + i * 0.04), box.y + box.h * (0.6 - Math.sin(i / 3) * 0.2), { steps: 2 });
+    await pg.mouse.up();
+    if (await until(() => window.WB.script.ws.sk.api.get().strokes.length >= 1, null, 1500)) break;
+  }
   await pg.evaluate(() => window.WB.script.ws.sk.api.addPin(640, 300, 'verify: the window, rain streaks'));
   await wait(150);
   await pg.screenshot({ path: path.join(OUT, 'v5_scene_sketch.png') });
@@ -1191,6 +1199,13 @@ catch (e) { v13.checks.aborted = blockFailed('v13', e); v13.pass = false; }
 const v14 = report.v14 = { checks: {} };
 try { const { verifyProposals } = await import('./verify-proposals.mjs'); Object.assign(v14, await verifyProposals({ browser, OUT })); }
 catch (e) { v14.checks.aborted = blockFailed('v14', e); v14.pass = false; }
+// ---------------------------------------------------------------- v15: stage 7, final approvals (ROADMAP_v4 C1-C4): the Final list (the same
+// rows as final_get, grouped, filters, notes row-aligned), the ready-to-render checklist and its gap links, the costs, Approve /
+// Request changes per kind, approve-selected with its cost confirm, Review › Approvals (C3), Lock for render (agent 409) and
+// Unlock: tools/verify-final.mjs (also runnable alone). Screenshots v15_*.png.
+const v15 = report.v15 = { checks: {} };
+try { const { verifyFinal } = await import('./verify-final.mjs'); Object.assign(v15, await verifyFinal({ browser, OUT })); }
+catch (e) { v15.checks.aborted = blockFailed('v15', e); v15.pass = false; }
 // write path: approve/needs-changes + a note, on another scratch copy (_verify, its own server), then a stale-rev POST must get 409
 try {
   const TMP = path.join(DATA, '_verify');
@@ -1220,8 +1235,8 @@ report.project = P;
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 1));
 const w = report.writes || {};
 const writesOk = w.noteSaved && w.noteShownInColumn && w.staleStatus === 409 && w.newState !== undefined && w.newState !== w.stateBefore && w.approvalsRev > w.approvalsRevBefore;
-console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· v7 (characters stage):', report.v7?.pass ? 'all PASS' : 'FAIL', '· v8 (scenery stage):', report.v8?.pass ? 'all PASS' : 'FAIL', '· v9 (storyboard stage):', report.v9?.pass ? 'all PASS' : 'FAIL', '· v10 (dogfood frictions):', report.v10?.pass ? 'all PASS' : 'FAIL', '· v11 (notes everywhere):', report.v11?.pass ? 'all PASS' : 'FAIL', '· v12 (request runner):', report.v12?.pass ? 'all PASS' : 'FAIL', '· v13 (rounds, revisions, compare):', report.v13?.pass ? 'all PASS' : 'FAIL', '· v14 (proposals):', report.v14?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
-process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && report.v7?.pass && report.v8?.pass && report.v9?.pass && report.v10?.pass && report.v11?.pass && report.v12?.pass && report.v13?.pass && report.v14?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
+console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· v7 (characters stage):', report.v7?.pass ? 'all PASS' : 'FAIL', '· v8 (scenery stage):', report.v8?.pass ? 'all PASS' : 'FAIL', '· v9 (storyboard stage):', report.v9?.pass ? 'all PASS' : 'FAIL', '· v10 (dogfood frictions):', report.v10?.pass ? 'all PASS' : 'FAIL', '· v11 (notes everywhere):', report.v11?.pass ? 'all PASS' : 'FAIL', '· v12 (request runner):', report.v12?.pass ? 'all PASS' : 'FAIL', '· v13 (rounds, revisions, compare):', report.v13?.pass ? 'all PASS' : 'FAIL', '· v14 (proposals):', report.v14?.pass ? 'all PASS' : 'FAIL', '· v15 (final approvals):', report.v15?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
+process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && report.v7?.pass && report.v8?.pass && report.v9?.pass && report.v10?.pass && report.v11?.pass && report.v12?.pass && report.v13?.pass && report.v14?.pass && report.v15?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
 await browser.close();
 for (const c of procs) c.kill();
 await new Promise(r => setTimeout(r, 300));   // let the servers release the scratch folder; cleanup() removes it on exit

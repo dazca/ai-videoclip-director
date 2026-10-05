@@ -132,7 +132,12 @@ export async function verifyNotes({ browser, OUT }) {
     const l1 = await cellOf('.lyl[data-line="verse/1"]');
     const marks = await pg.evaluate(() => [...document.querySelectorAll('.lyl[data-line="verse/1"] .w.nw')].length);
     const tl = await typeIn('.lyl[data-line="chorus/0"]', 'verify: slower here, let it breathe');
-    await pg.evaluate(() => document.querySelector('.lyl[data-line="verse/0"]').focus()); await combo(['Alt'], 'KeyN'); await wait(150);
+    // the typed note's save re-renders the lyrics (a live reload can take the focus away): wait for the editor to close, then
+    // (re)focus the line until it holds the focus, and wait for Alt+N's editor instead of a fixed delay
+    await until(() => !document.activeElement?.matches('.nclayer .nced'));
+    await until(() => { const l = document.querySelector('.lyl[data-line="verse/0"]'); l?.focus(); return document.activeElement === l; }); await wait(300);
+    await until(() => { const l = document.querySelector('.lyl[data-line="verse/0"]'); l?.focus(); return document.activeElement === l; });
+    await combo(['Alt'], 'KeyN'); await until(() => document.activeElement?.matches('.nclayer .nced'), undefined, 3000);
     const altN = await pg.evaluate(() => ({ focus: !!document.activeElement?.matches('.nclayer .nced'), on: document.querySelector('.nclayer .ncedh')?.textContent || '' }));
     await pg.keyboard.type('@agent verify: rhyme check'); await pg.keyboard.press('Enter');
     await until(() => window.WB.store.notes.notes.some(n => n.text === 'verify: rhyme check'));

@@ -56,7 +56,7 @@ mcp.registerTool('snapshot_restore', {
   title: 'Restore a snapshot',
   description: 'Make a snapshot the current state. The current state is snapshotted first (auto, so a restore can itself be undone); files the snapshot did not have are removed. The open page reloads. Returns {restored, previous, changed, removed}.',
   inputSchema: { project, snapshot: z.string().describe('Snapshot id from snapshot_list.') },
-}, wrap(async (a) => { const p = await projectOf(a); return (await server()) ? http('POST', '/api/restore', p, { snapshot: a.snapshot, by: 'agent' }) : S.restore(p, a.snapshot, { agent: true }); }));
+}, wrap(async (a) => { const p = await projectOf(a); return (await server()) ? http('POST', '/api/restore', p, { snapshot: a.snapshot, by: 'agent' }) : (S.lockGate(p, 'snapshot_restore'), S.restore(p, a.snapshot, { agent: true })); }));
 
 // ------------------------------------------------------------------ song and timeline
 mcp.registerTool('song_get', {
