@@ -51,7 +51,7 @@ export async function verifyNotes({ browser, OUT }) {
   const before = Object.fromEntries(OLD.map(f => [f, sha(f)])), v1text = fs.readFileSync(path.join(LD, 'notes.json'), 'utf8');
 
   const port = await freePort(), BASE = `http://localhost:${port}`;
-  const srv = spawn(process.execPath, [path.join(WB, 'serve.mjs'), String(port)], { stdio: 'pipe', env: { ...process.env, WORKBENCH_DATA: DATA, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: P, WB_AGENT_APPROVALS: '' } });
+  const srv = spawn(process.execPath, [path.join(WB, 'serve.mjs'), String(port)], { stdio: 'pipe', env: { ...process.env, WORKBENCH_DATA: DATA, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: P } });
   srv.stderr.on('data', d => process.stderr.write('v11 server: ' + d));
   let pg = null;
   try {

@@ -37,7 +37,7 @@ export async function verifyDogfood({ browser, OUT }) {
   const pj = path.join(DATA, 'demo', 'project.json'); fs.writeFileSync(pj, JSON.stringify({ ...JSON.parse(fs.readFileSync(pj, 'utf8')), falgen: 'proj/gen' }));
   fs.writeFileSync(path.join(TMP, 'config.json'), JSON.stringify({ media_roots: [] }));
   const port = await freePort(), BASE = `http://localhost:${port}`, ND = path.join(DATA, 'demo');
-  const srv = spawn(process.execPath, [path.join(CODE, 'serve.mjs'), String(port)], { stdio: 'pipe', env: { ...process.env, WORKBENCH_DATA: DATA, WORKBENCH_MEDIA_BASE: MB, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: 'demo', WB_AGENT_APPROVALS: '' } });
+  const srv = spawn(process.execPath, [path.join(CODE, 'serve.mjs'), String(port)], { stdio: 'pipe', env: { ...process.env, WORKBENCH_DATA: DATA, WORKBENCH_MEDIA_BASE: MB, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: 'demo' } });
   srv.stderr.on('data', d => process.stderr.write('v10 server: ' + d));
   let pg = null;
   try {

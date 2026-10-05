@@ -42,11 +42,12 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-mcptest-'));
 const DATA = path.join(TMP, 'data'), D = path.join(DATA, PROJECT), MB = path.join(TMP, 'mediabase');
 fs.cpSync(ORIG, D, { recursive: true, filter: (f) => !f.includes(`${path.sep}.snapshots`) });
 for (const [f, t] of [['roots/a.txt', 'public'], ['refs/face.jpg', 'private ref'], ['secret/s.txt', 'outside any root']]) { fs.mkdirSync(path.dirname(path.join(MB, f)), { recursive: true }); fs.writeFileSync(path.join(MB, f), t); }
-// agent_approvals: this suite drives the honor-system flow (director_approved:true from the agent); the default
-// (page-only approvals) is covered by tools/security-test.mjs
+// approvals are always the director's, in the page (review S8): the old switch is set here both ways (config
+// agent_approvals: true and WB_AGENT_APPROVALS=1) to prove it is ignored; every approval below is a page save with this
+// server's Origin (pageApprove), the way the Queue's Approve does it
 fs.writeFileSync(path.join(TMP, 'config.json'), JSON.stringify({ media_roots: ['roots/', 'refs/'], private_media: '^refs/', agent_approvals: true }));
-Object.assign(process.env, { WORKBENCH_DATA: DATA, WORKBENCH_MEDIA_BASE: MB, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: PROJECT });
-delete process.env.WB_TOKEN; delete process.env.WB_HOST; delete process.env.WB_AGENT_APPROVALS;
+Object.assign(process.env, { WORKBENCH_DATA: DATA, WORKBENCH_MEDIA_BASE: MB, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: PROJECT, WB_AGENT_APPROVALS: '1' });
+delete process.env.WB_TOKEN; delete process.env.WB_HOST;
 // the request runner (section 15) talks to a MOCK fal only (tools/mock-fal.mjs; WB_FAL_BASE counts only with WB_TEST=1):
 // never the real one. The key is a random sentinel the test then greps for in every file, response and log.
 const { startMockFal } = await import('../tools/mock-fal.mjs');
@@ -74,6 +75,8 @@ const TOKEN = /<meta name="wb-token" content="([^"]+)">/.exec(await (await fetch
 check('the page carries the per-run write token', /^[0-9a-f]{48}$/.test(TOKEN || ''), TOKEN?.length);
 const post = (p, body, headers = {}) => fetch(URL_ + p, { method: 'POST', headers: { 'content-type': 'application/json', 'x-wb-token': TOKEN, ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) })
   .then(async r => ({ status: r.status, body: await r.json().catch(() => null) }));
+// the director approves a request in the page (Review > Queue): a save of requests.json with this server's Origin
+const pageApprove = (rid, proj = PROJECT) => { const cur = JSON.parse(fs.readFileSync(path.join(DATA, proj, 'requests.json'), 'utf8')); cur.items.find(r => r.id === rid).status = 'approved'; return post(`/api/save/requests.json?project=${proj}`, { base_rev: cur.rev, data: cur }, { origin: URL_ }); };
 
 // ---------------------------------------------------------------- "the open page": a real browser if we can, else an SSE client
 try {
@@ -123,7 +126,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   // 1. tools
   const tools = (await mcp.listTools()).tools.map(t => t.name);
   const EXPECT = ['status', 'projects', 'snapshot_save', 'snapshot_list', 'snapshot_restore', 'song_get', 'timeline_query', 'shots_list', 'shot_get', 'shot_update', 'entities_list', 'entity_get', 'entity_upsert',
-    'media_list', 'media_add', 'notes_list', 'note_add', 'note_resolve', 'approvals_get', 'approve', 'request_changes', 'requests_list', 'request_create', 'request_update', 'costs_get', 'ui_focus',
+    'media_list', 'media_add', 'notes_list', 'note_add', 'note_resolve', 'approvals_get', 'request_changes', 'requests_list', 'request_create', 'request_update', 'costs_get', 'ui_focus',
     'stages_get', 'stage_update', 'lyrics_get', 'lyrics_update', 'lyrics_versions', 'lyrics_note_add', 'lyrics_note_resolve', 'song_attach',
     'script_get', 'scenes_update', 'scene_note_add', 'scene_note_resolve', 'intake_get', 'intake_answer', 'sketch_save', 'sketch_get', 'sketch_list',
     'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve', 'character_get', 'character_iteration_add', 'character_note_add', 'look_create',
@@ -167,7 +170,17 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const q0 = await call(mcp, 'request_update', { id: rq.id, status: 'queued' });
   const a0 = await call(mcp, 'request_update', { id: rq.id, status: 'approved' });
   check('rules: a draft cannot be queued, an agent cannot approve alone', /409/.test(q0.error || '') && /403/.test(a0.error || ''), { queue: q0.error, approve: a0.error });
-  const a1 = await call(mcp, 'request_update', { id: rq.id, status: 'approved', director_approved: true, by: 'director' });
+  // S8: the old switch is on in this suite's config and env, and still an agent cannot approve: no approve tool, and a
+  // claimed director_approved:true is refused over MCP, over HTTP and offline, with a 403 that points to the page
+  const aFlag = await call(mcp, 'request_update', { id: rq.id, status: 'approved', director_approved: true, by: 'director' });
+  const aHttp = await post(`/api/op/request_update?project=${PROJECT}`, { id: rq.id, status: 'approved', director_approved: true, by: 'director' });
+  let aOff = null; try { S.ops.request_update(PROJECT, { id: rq.id, status: 'approved', director_approved: true }); aOff = 200; } catch (e) { aOff = e.code; }
+  const toolNames = (await mcp.listTools()).tools.map(t => t.name);
+  check('S8: agent_approvals: true (config) and WB_AGENT_APPROVALS=1 are ignored (the server warns once); an agent cannot approve through any tool (no approve tool; request_update director_approved: MCP / HTTP / offline 403, pointing to the page)',
+    /403/.test(aFlag.error || '') && /in the open page/.test(aFlag.error || '') && aHttp.status === 403 && aOff === 403 && !toolNames.includes('approve')
+    && (srvLog.match(/agent_approvals" \/ WB_AGENT_APPROVALS is ignored/g) || []).length === 1
+    && JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')).items.find(r => r.id === rq.id).status === 'draft', { mcp: aFlag.error, http: aHttp.status, offline: aOff, warned: /is ignored/.test(srvLog) });
+  const a1p = await pageApprove(rq.id), a1 = { request: a1p.status === 200 ? JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')).items.find(r => r.id === rq.id) : null };
   const q1 = await call(mcp, 'request_update', { id: rq.id, status: 'queued' });
   const r1 = await call(mcp, 'request_update', { id: rq.id, status: 'running' });
   const d0 = await call(mcp, 'request_update', { id: rq.id, status: 'done' });
@@ -183,7 +196,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     && d1.request?.status === 'done' && d1.request.outputs?.[0]?.startsWith('media/clip/') && d1.request.log?.length === 5 && Math.abs(costAfter.spent_usd - costBefore.spent_usd - 0.15) < 1e-9 && media.total === 1 && !!media.items[0].thumb,
     { statuses: [a1.request?.status, q1.request?.status, r1.request?.status, d1.request?.status], doneWithoutOutputs: d0.error, output: d1.request?.outputs, spent: [costBefore.spent_usd, costAfter.spent_usd], media: media.items?.[0]?.path, thumb: media.items?.[0]?.thumb });
   const big = await call(mcp, 'request_create', { kind: 'generate', prompt: 'mcp test: over the cap', est_cost: 50 });
-  await call(mcp, 'request_update', { id: big.id, status: 'approved', director_approved: true });
+  await pageApprove(big.id);
   const over = await call(mcp, 'request_update', { id: big.id, status: 'queued' });
   check('the cost cap blocks queueing', /402/.test(over.error || ''), over.error);
   const queueLive = await pageHas((id, s) => s ? s.files.includes('requests.json') : (window.WB.store.requests.items || []).some(r => r.id === id && r.status === 'done'), rq.id);
@@ -229,7 +242,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
 
   // 10. guard rules (agent side)
   const g1 = await call(mcp, 'request_create', { kind: 'generate', prompt: 'guard: cheap', est_cost: 0.1 });
-  await call(mcp, 'request_update', { id: g1.id, status: 'approved', director_approved: true, by: 'director' });
+  await pageApprove(g1.id);
   const keepApproved = await call(mcp, 'request_update', { id: g1.id, status: 'approved', prompt: 'guard: EXPENSIVE', est_cost: 9 });
   const editQueue = await call(mcp, 'request_update', { id: g1.id, status: 'queued', prompt: 'guard: different', est_cost: 5 });
   const editOnly = await call(mcp, 'request_update', { id: g1.id, prompt: 'guard: edited' });
@@ -239,11 +252,15 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   check('request_create: extra cannot set status / id', sneaky.status === 200 && sneaky.body.status === 'draft' && sneaky.body.id !== 'x' && sneaky.body.note === 'kept', sneaky.body);
   const ap0 = await call(mcp, 'approve', { keys: ['shot:s2-wall'] });
   const lock0 = await call(mcp, 'shot_update', { id: 's2-wall', status: 'locked' });
-  const ap1 = await call(mcp, 'approve', { keys: ['shot:s2-wall'], director_approved: true });
-  const apState = (await call(mcp, 'approvals_get', { keys: ['shot:s2-wall'] })).items['shot:s2-wall'];
+  const ap1 = await post(`/api/op/set_states?project=${PROJECT}`, { keys: ['shot:s2-wall'], state: 'approved', director_approved: true, by: 'director' });
+  const lock1 = await call(mcp, 'shot_update', { id: 's2-wall', status: 'locked', director_approved: true });
+  const apC = JSON.parse(fs.readFileSync(path.join(D, 'approvals.json'), 'utf8')); apC.items['shot:s4-chorus'] = { ...(apC.items['shot:s4-chorus'] || {}), state: 'approved' };   // (s4-chorus: in review)
+  const apPage = await post(`/api/save/approvals.json?project=${PROJECT}`, { base_rev: apC.rev, data: apC }, { origin: URL_ });
+  const apState = (await call(mcp, 'approvals_get', { keys: ['shot:s4-chorus'] })).items['shot:s4-chorus'];
   const bogus = await post(`/api/op/set_states?project=${PROJECT}`, { keys: ['shot:s2-wall'], state: 'bogus' });
-  check('approve / lock need director_approved; unknown states refused', /403/.test(ap0.error || '') && /403/.test(lock0.error || '') && ap1.state === 'approved' && apState?.by === 'agent' && apState?.via === 'agent' && bogus.status === 400,
-    { ap0: ap0.error, lock0: lock0.error, by: apState?.by, via: apState?.via, bogus: bogus.status });
+  check('approve / lock are the page\'s: no approve tool, set_states approved and shot_update locked 403 even with director_approved; the page approves (via page); unknown states refused', /not found|unknown|no such/i.test(ap0.error || '') && /403/.test(lock0.error || '') && ap1.status === 403 && /in the open page/.test(ap1.body?.error || '') && /403/.test(lock1.error || '')
+    && apPage.status === 200 && apState?.state === 'approved' && apState?.via === 'page' && bogus.status === 400,
+    { ap0: ap0.error, ap1: ap1.status, lock1: lock1.error, page: apPage.status, state: apState, bogus: bogus.status });
   const src = path.join(TMP, 'kind-src.txt'); fs.writeFileSync(src, 'x');
   const kindBad = await post(`/api/op/media_add?project=${PROJECT}`, { path: src, kind: '../../../escaped' });
   const kindMcp = await call(mcp, 'media_add', { path: src, kind: '../x' });
@@ -468,7 +485,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
 {
   const pageAct = (body) => post(`/api/op/character_act?project=${PROJECT}`, body, { origin: URL_ });
   const agentAct = (body) => post(`/api/op/character_act?project=${PROJECT}`, body);
-  const approveInPage = async (rid) => { const cur = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')); cur.items.find(r => r.id === rid).status = 'approved'; return post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur }); };
+  const approveInPage = async (rid) => { const cur = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')); cur.items.find(r => r.id === rid).status = 'approved'; return post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur }, { origin: URL_ }); };
   const out = (f, rgb) => { fs.mkdirSync(path.join(D, 'media/gen'), { recursive: true }); fs.writeFileSync(path.join(D, 'media/gen', f), Buffer.from(tinyPngB64(32, 32, rgb), 'base64')); return `media/gen/${f}`; };
   const runReq = async (rid, file) => { for (const s of ['queued', 'running']) await call(mcp, 'request_update', { id: rid, status: s }); return call(mcp, 'request_update', { id: rid, status: 'done', outputs: [file], actual_cost_usd: 0 }); };
   const l0 = await call(mcp, 'character_get');
@@ -558,7 +575,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
 {
   const pageAct = (body) => post(`/api/op/asset_act?project=${PROJECT}`, body, { origin: URL_ });
   const agentAct = (body) => post(`/api/op/asset_act?project=${PROJECT}`, body);
-  const approveInPage = async (rid) => { const cur = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')); cur.items.find(r => r.id === rid).status = 'approved'; return post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur }); };
+  const approveInPage = async (rid) => { const cur = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')); cur.items.find(r => r.id === rid).status = 'approved'; return post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur }, { origin: URL_ }); };
   const out = (f, rgb) => { fs.mkdirSync(path.join(D, 'media/gen'), { recursive: true }); fs.writeFileSync(path.join(D, 'media/gen', f), Buffer.from(tinyPngB64(48, 27, rgb), 'base64')); return `media/gen/${f}`; };
   const runReq = async (rid, file) => { for (const s of ['queued', 'running']) await call(mcp, 'request_update', { id: rid, status: s }); return call(mcp, 'request_update', { id: rid, status: 'done', outputs: [file], actual_cost_usd: 0 }); };
   const scIds = (await call(mcp, 'script_get')).scenes.map(s => s.id);
@@ -845,7 +862,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   S.createProject('nt', 'no template');
   let ok = true, why = null; try { S.ops.entities_list('nt'); S.ops.song_get('nt'); } catch (e) { ok = false; why = e.message; }
   const r = S.ops.request_create('nt', { kind: 'generate', est_cost: 1 });
-  S.ops.request_update('nt', { id: r.id, status: 'approved', director_approved: true });
+  await pageApprove(r.id, 'nt');
   let capErr = null; try { S.ops.request_update('nt', { id: r.id, status: 'queued' }); } catch (e) { capErr = e.code; }
   check('createProject without a template; cap 0 refuses paid queueing', ok && Array.isArray(JSON.parse(fs.readFileSync(path.join(DATA, 'nt', 'events.json'), 'utf8'))) && capErr === 402, { why, capErr });
   const ent = S.ops.entity_upsert(PROJECT, { kind: 'prop', id: 'pp', fields: { id: 'other', kind: 'character' } }).entity;
@@ -857,7 +874,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
 {
   const callW = async (client, name, args = {}) => { const r = await client.callTool({ name, arguments: args }); const t = r.content?.[0]?.text || ''; let j; try { j = JSON.parse(t); } catch (e) { j = t; } return { r: r.isError ? { error: t } : j, warn: (r.content || []).slice(1).map(c => c.text).join('\n') }; };
   const pageAct = (body) => post(`/api/op/asset_act?project=${PROJECT}`, body, { origin: URL_ });
-  const approveInPageW = async (rid) => { const cur = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')); cur.items.find(r => r.id === rid).status = 'approved'; return post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur }); };
+  const approveInPageW = async (rid) => { const cur = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')); cur.items.find(r => r.id === rid).status = 'approved'; return post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur }, { origin: URL_ }); };
   // falgen: a scratch folder under the test media base, named in project.json (read only)
   fs.mkdirSync(path.join(MB, 'proj', 'gen'), { recursive: true });
   fs.writeFileSync(path.join(MB, 'proj', 'gen', 'spent.json'), JSON.stringify({ total: 1.5 }));
@@ -1045,7 +1062,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
 {
   const texts = [];
   const callT = async (name, args = {}) => { const r = await mcp.callTool({ name, arguments: args }); const t = (r.content || []).map(c => c.text).join('\n'); texts.push(t); let j; try { j = JSON.parse(r.content?.[0]?.text || ''); } catch (e) { j = r.content?.[0]?.text; } return r.isError ? { error: t } : j; };
-  const approveP = async (rid) => { const cur = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')); cur.items.find(r => r.id === rid).status = 'approved'; return post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur }); };
+  const approveP = async (rid) => { const cur = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')); cur.items.find(r => r.id === rid).status = 'approved'; return post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur }, { origin: URL_ }); };
   const reqOf = (id) => JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8')).items.find(r => r.id === id);
   const costsF = () => JSON.parse(fs.readFileSync(path.join(D, 'costs.json'), 'utf8'));
   const setCap = (usd) => { const c = costsF(); c.cap_usd = usd; fs.writeFileSync(path.join(D, 'costs.json'), JSON.stringify(c)); };
@@ -1548,12 +1565,13 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
   check('waves_propose: 3 draft batches gated wave after wave (b01 ready, b02 / b03 locked) and 10 draft requests written by the agent (log via agent); batches_get shows totals, verdicts and the rules',
     wp.batches?.join() === 'b01,b02,b03' && mine.length === 10 && mine.every(r => r.status === 'draft' && r.log[0].via === 'agent') && D0.batches.every(b => b.status === 'draft' && b.via === 'agent')
     && b1?.state === 'ready' && b2?.state === 'locked' && b2.gate.after === 'b01' && b1.totals.est_usd === 0.48 && b1.verdicts.length === 2 && /never approve/.test(bg.rules || ''), { wp: wp.batches, states: bg.batches?.map(b => b.state), err: wp.error });
-  // even with agent_approvals (this suite's config) the agent cannot approve or review a batch; a request approved alone does not run
+  // the agent cannot approve or review a batch; a request approved alone (in the page) does not run
   const a1 = await post(`/api/op/batch_act?project=${P4}`, { act: 'approve', id: 'b01' }), a2 = await post(`/api/op/batch_act?project=${P4}`, { act: 'approve', id: 'b01', via: 'page' });
-  const ru = await call(mcp, 'request_update', { project: P4, id: b1.request_ids[0], status: 'approved', director_approved: true });
+  const ruA = await call(mcp, 'request_update', { project: P4, id: b1.request_ids[0], status: 'approved', director_approved: true });
+  await pageApprove(b1.request_ids[0], P4); const ru = { request: RJ().items.find(r => r.id === b1.request_ids[0]) };
   const rd = await call(mcp, 'request_run', { project: P4, batch: 'b01', dry_run: true });
-  check('the agent cannot approve a batch (batch_act 403, also claiming via "page"); a request of the batch approved on its own (agent_approvals) is still refused by the runner: the batch is not approved',
-    a1.status === 403 && a2.status === 403 && ru.request?.status === 'approved' && rd.runnable === 0 && rd.refused.length === 2 && rd.refused.every(x => /not approved/.test(x.why)), { a: [a1.status, a2.status], refused: rd.refused });
+  check('the agent cannot approve a batch (batch_act 403, also claiming via "page"); a request of the batch approved on its own (the agent: 403; the page: approved) is still refused by the runner: the batch is not approved',
+    a1.status === 403 && a2.status === 403 && /403/.test(ruA.error || '') && ru.request?.status === 'approved' && rd.runnable === 0 && rd.refused.length === 2 && rd.refused.every(x => /not approved/.test(x.why)), { a: [a1.status, a2.status], refused: rd.refused });
   // the director approves b01 (page), the runner runs it as a batch within its cap
   const pa = await post(`/api/op/batch_act?project=${P4}`, { act: 'approve', id: 'b01' }, { origin: URL_ });
   const run = await call(mcp, 'request_run', { project: P4, batch: 'b01', wait: true });

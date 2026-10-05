@@ -29,7 +29,7 @@ export async function verifyFinal({ browser, OUT }) {
   fs.writeFileSync(path.join(TMP, 'config.json'), JSON.stringify({ media_roots: [] }));
   const J = (f) => JSON.parse(fs.readFileSync(path.join(PD, f), 'utf8'));
   const port = await freePort(), BASE = `http://localhost:${port}`;
-  const env = { ...process.env, WORKBENCH_DATA: DATA, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: P, WB_AGENT_APPROVALS: '' };
+  const env = { ...process.env, WORKBENCH_DATA: DATA, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: P };
   delete env.WB_TOKEN;
   const srv = spawn(process.execPath, [path.join(WB, 'serve.mjs'), String(port)], { stdio: 'pipe', env });
   srv.stderr.on('data', d => process.stderr.write('v15 server: ' + d));

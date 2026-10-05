@@ -188,8 +188,8 @@ your times (`t0` / `t1` ms on scenes, beats, shots) are what places them, so kee
    obsolete: `request_update {status: "withdrawn", why, superseded_by}` (rejected is the director's word). With no page open,
    `ui_focus` is queued for the next page that opens the project.
    If `status` says the server is stale, ask for a restart.
-   The director approves in Review > Queue (show it with `ui_focus` view "queue"). Only if the owner enabled
-   `agent_approvals` may you pass `director_approved: true`, and only when they said so in the conversation.
+   The director approves in Review > Queue (show it with `ui_focus` view "queue"). You cannot approve: no tool does
+   it (403), even when they say "approve it" in the conversation; ask them to click.
 7. **Run** only approved requests: `request_update` queued -> running -> (call the provider) -> done with `outputs` and
    `actual_cost_usd`; on failure rejected + `why`. Outputs become media automatically; attach them to uses with
    `shot_update` (take, in_ms) and to entities with `entity_upsert`.

@@ -6,6 +6,5 @@
  "media_roots": ["my-renders/", "generated/clips/"],
  "private_media": "^(refs/real-photos/|faces/)",
  "allow_remote_ops": false,
- "agent_approvals": false,
  "fal_key_file": "C:/Users/me/.secrets/fal.env"
 }

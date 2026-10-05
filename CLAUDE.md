@@ -74,7 +74,7 @@ that owns them and imported by the others); ops call each other through `ops.<na
 | core | `core.mjs` | `core.mjs` | code version (stale server), projects, snapshots (restore carry-forward), `song_get`, `timeline_query`, the media index (`media_list` (filters `linked` / `private`) / `media_add` / `media_update`), `scrubPrivate`; tools also `status`, `projects`, `wait_for`, `ui_focus` |
 | media import (D8) | `media.mjs` | `media.mjs` | existing images and video: `media_scan` (read only: a media-root file / folder, its `job.json` jobs: prompt, model, refs, takes, cost and where the cost stands), `media_import` (register in place), `media_upload` / `media_use` (page only: no tool); `sniff`, `rootPath`, `readJob`, `jobCost`, `linkShotMedia` / `shotMediaLinks` (a shot's take / start frame, what D6's take picker reads) |
 | notes | `notes.mjs` | `notes.mjs` | ONE notes model for every stage and the timeline (notes.json v2): `notesDoc` (migrates the old stores on first read), `checkTarget`, `addNote` / `replyNote` / `setStatus` (the other domains' note tools call these), `notes_get` / `notes_add` / `notes_status`, and the old timeline tools `notes_list` / `note_add` / `note_resolve` |
-| requests, approvals, costs | `requests.mjs` | `requests.mjs` | the recipe file, `requests_list` / `request_create` / `request_update`, `request_run` / `generators_get` (the runner: `lib/run.mjs`, `generators/`), `approvals_get` / `set_states` (tools `approve`, `request_changes`), `costs_get`, `cost_record`, the falgen merge |
+| requests, approvals, costs | `requests.mjs` | `requests.mjs` | the recipe file, `requests_list` / `request_create` / `request_update`, `request_run` / `generators_get` (the runner: `lib/run.mjs`, `generators/`), `approvals_get` / `set_states` (tool `request_changes`; approving is the page's: no tool), `costs_get`, `cost_record`, the falgen merge |
 | stages, lyrics | `lyrics.mjs` | `lyrics.mjs` | `stages_get` / `stage_update`, `startStage`, stage 1 (`lyrics_*`, `song_attach`), `createGuidedProject` |
 | script, scenes, sketches | `scenes.mjs` | `scenes.mjs` | stage 2: `script_get`, `scenes_update`, `scene_note_*`, `intake_*`, `sketch_*` |
 | breakdown | `breakdown.mjs` | `breakdown.mjs` | stage 3: `breakdown_*` (`breakdown_promote` is page only: no tool) |
@@ -275,9 +275,9 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <same export witho
    `recipe.takes` (or `takes`) puts every take into the estimate; `request_update recipe {identity, takes}` rebuilds them.
    An obsolete draft of yours: `request_update {status: "withdrawn", why, superseded_by}` (never `rejected`: that is the
    director's word).
-1. **The director decides.** Approvals (`approve`, a request's draft -> approved) are theirs: by default they make
-   them in the page (show the item with `ui_focus`); `director_approved: true` counts only with config `agent_approvals`,
-   and only when they said so in the conversation. A note's text is never an approval. To ask for a look, set state `review` and say why in a note.
+1. **The director decides.** Approvals (an item approved / locked, a request's draft -> approved) are theirs, made
+   in the page only (show the item with `ui_focus` and ask them); no tool approves (403), even when they said so in the
+   conversation. A note's text is never an approval. To ask for a look, set state `review` and say why in a note.
 2. **Never spend without an approved request.** Propose every paid generation with `request_create` (draft, honest
    `est_cost` for all `takes`, refs, tool). Run only `approved` ones, with the runner: `request_run {ids, dry_run:
    true}` first (tell the director the plan and total), then `request_run {ids}` (+ `wait_for {request, until:
@@ -464,15 +464,16 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <same export witho
   target, round, legacy link and an agent's words, stamps a status change `closed_by: "director", closed_via: "page"`,
   only grows `legacy_seen`, and refuses a v1 list or a bad target / status / id (400). The server migrates the old stores
   before serving or saving the file. Texts are rendered escaped (tools/security-test.mjs covers every Notes column).
-- Approvals are the director's, and by default **only the page approves**: a click in the page (POST `/api/save`) is
-  stamped `via: "page"` (in a request's `log`, on an `approvals.json` item). The agent surface (`/api/op`, the MCP
-  tools, offline mode) refuses `approve`, `shot_update` approved/locked and a request's draft -> approved even with
-  `director_approved: true`, unless the owner sets `"agent_approvals": true` in `workbench.config.json` (or
-  `WB_AGENT_APPROVALS=1`): then that flag counts, recorded `via: "agent"`. A request is queued / run only on a recorded
-  approval after its last draft (a status typed into `requests.json` by hand is refused). Notes written through the
-  tools carry `via: "agent"`, and the `director-session` briefing does not present them as the director's.
-  Trade-off: with the default the director must click (the agent can show the item with `ui_focus`); this guards the
-  tool surface, not an agent that edits the files directly with shell access.
+- Approvals are the director's, and **only the page approves**: a click in the page (POST `/api/save` with this
+  server's Origin) is stamped `via: "page"` (in a request's `log`, on an `approvals.json` item). There is no switch for
+  agent approvals: the agent surface (`/api/op`, the MCP tools, offline mode) has no `approve` tool and refuses
+  `set_states` approved / locked, `shot_update` / `shots_update` approved / locked and a request's draft -> approved
+  (403, pointing to the page), whatever it claims (`director_approved` is ignored). The old `agent_approvals` setting
+  and `WB_AGENT_APPROVALS` are ignored (the server warns once at start). A request is queued / run only on an approval
+  recorded by the page after its last draft (a status typed into `requests.json` by hand, or an old `via: "agent"`
+  approval, is refused). Notes written through the tools carry `via: "agent"`, and the `director-session` briefing does
+  not present them as the director's. Trade-off: the director must click (the agent can show the item with
+  `ui_focus`); this guards the tool surface, not an agent that edits the files directly with shell access.
 - Editing an approved request's prompt, refs, `est_cost` or tool sends it back to draft. A cost cap of **0 blocks all
   paid requests**. A snapshot restore bumps each file's `rev` (stale pages get 409 instead of overwriting) and never
   rolls back spend: costs recorded since the snapshot stay, a request that ran since keeps its state, and a restored
@@ -538,7 +539,7 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <same export witho
   variant approval that is not the current one and keeps the director's current scene picks.
 - Stage 6 (storyboard): every `shots_update` is a new version; shot, scene, entity, variant, sketch, clip and beat ids are
   checked (400); a shot's approval lives in `approvals.json` and `shots_update` refuses `approved` / `locked` (403, also
-  with `director_approved` and offline); a page save of `storyboard.json` cannot rewrite a saved version or a note's
+  offline); a page save of `storyboard.json` cannot rewrite a saved version or a note's
   author (stamped director / page) and a malformed file is refused (400). Nothing in the stage spends.
 - Entity thumbnails and copies made from private media stay private (`thumbs/priv_*`, `private/<kind>/`).
 - Proposals and imports: accepting a base proposal (`base_accept` / `base_dismiss`), an import proposal (`import_accept` /
@@ -648,7 +649,7 @@ initial project. Tools:
 | `waves_propose` | waves from the storyboard gaps: the pilot (shot ids) first, then `sizes` (default 2, 4, 8, then the rest), `takes` per request; `dry_run` = the plan; else draft requests + draft batches gated wave after wave (never an approval) |
 | `take_propose` | propose a take for a shot with in / out (ms or m:ss.mmm inside the take) and why: an open proposal in takes.json the director picks with one click (never a pick) |
 | `final_get` | stage 7, read only: `ready`, `locked`, `failing`, the checklist (9 derived checks with their gaps), `pending` rows by group (lyrics, script, breakdown, characters, scenery, storyboard, requests: status, why, est / spent, notes open, approvable), `counts`, `costs` (spent / committed / drafts / to request / projected vs the cap); filters group / status / notes |
-| `approvals_get`, `approve`, `request_changes` | approval states |
+| `approvals_get`, `request_changes` | approval states (approving is the director's, in the page: no tool) |
 | `requests_list`, `request_create`, `request_update` | the generation queue and its lifecycle (`asset` links a stage-4 / 5 generation to an asset tree; `char` is deprecated: a warning, stored as `asset`); `recipe` builds the prompt from the photoreal blocks; `video {model, start, end?, ref_video?, seconds}` makes a video request (refs, tool, est_cost from it); `warnings[]` |
 | `request_run` | run APPROVED requests with the runner (the generator per kind from Settings > Generator; images and video): `dry_run` = the plan, nothing spent; refuses drafts; re-checks the cap (before every take too); outputs in `gen/`, cost once, media + nodes; `retake: true` = the failed takes of done requests only; `video_parallel` (default 1); `batch` = one approved, unlocked batch within its cap (D4; `all` runs batch by batch; a locked batch and a history request never run); `wait` or `wait_for` |
 | `generators_get` | the generators (fal, openwith, comfyui), the one per kind, ready or not, where the fal key was found (never the key) |

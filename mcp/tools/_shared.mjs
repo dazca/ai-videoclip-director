@@ -79,7 +79,6 @@ export const wrap = (fn) => (args, extra) => callCtx.run({ warnings: [] }, async
 export const project = z.string().optional().describe('Project id (a folder in data/). Default: the session\'s current project (see the `projects` tool, action "open"), else the server\'s default.');
 export const time = z.union([z.number(), z.string()]).describe('Song time: integer milliseconds (61230) or "m:ss.mmm" ("1:01.23").');
 export const by = z.string().optional().describe('Who is writing (default "agent"). Use "director" only when you relay the director\'s own words.');
-export const directorApproved = z.boolean().optional().describe('true only when the director explicitly said so in this conversation (required to approve or lock). Counts only when the owner enabled agent_approvals; otherwise the director approves in the page.');
 export const stageId = z.enum(['lyrics', 'script', 'breakdown', 'characters', 'scenery', 'storyboard', 'final']);
 export const charId = z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/).describe('Character entity id (character_get without id lists them).');
 export const treeId = z.string().regex(/^(identity|look:[A-Za-z0-9_][A-Za-z0-9_-]{0,63})$/).describe('"identity" or "look:<look id>".');

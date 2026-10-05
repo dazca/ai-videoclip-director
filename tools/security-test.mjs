@@ -25,9 +25,9 @@ put(path.join(MB, 'roots/a.txt'), 'public'); put(path.join(MB, 'outside/secret.t
 const png = (f) => { fs.mkdirSync(path.dirname(f), { recursive: true }); spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=red:s=64x64', '-frames:v', '1', f]); if (!fs.existsSync(f)) fs.writeFileSync(f, 'not an image'); };
 png(path.join(MB, 'roots/private/face.png')); png(path.join(TMP, 'elsewhere/private/crop.png')); png(path.join(TMP, 'elsewhere/plain.png'));
 const HAS_FFMPEG = spawnSync('ffmpeg', ['-version']).status === 0;
-fs.writeFileSync(path.join(TMP, 'config.json'), JSON.stringify({ media_roots: ['roots/'], private_media: '^faces/' }));   // agent_approvals off (the default)
+fs.writeFileSync(path.join(TMP, 'config.json'), JSON.stringify({ media_roots: ['roots/'], private_media: '^faces/' }));   // approvals: always the page's (no agent switch)
 Object.assign(process.env, { WORKBENCH_DATA: DATA, WORKBENCH_MEDIA_BASE: MB, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: P });
-for (const k of ['WB_TOKEN', 'WB_HOST', 'WB_AGENT_APPROVALS', 'WB_ALLOW_REMOTE_OPS']) delete process.env[k];
+for (const k of ['WB_TOKEN', 'WB_HOST', 'WB_ALLOW_REMOTE_OPS']) delete process.env[k];
 // the request runner (D3a) talks to a MOCK fal only (WB_FAL_BASE counts only with WB_TEST=1); the key is a sentinel
 const { startMockFal } = await import('./mock-fal.mjs');
 const FAL_KEY = `fal-sec-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
@@ -213,7 +213,7 @@ try {
   const agentAp = await op('request_update', { id: r1.id, status: 'approved', director_approved: true, by: 'director' });
   const agentItem = await op('set_states', { keys: ['shot:s2-wall'], state: 'approved', director_approved: true, by: 'director' });
   const agentLock = await op('shot_update', { id: 's2-wall', status: 'locked', director_approved: true });
-  check('NV1 an agent cannot approve (requests, items, locks) when agent_approvals is off', agentAp.status === 403 && agentItem.status === 403 && agentLock.status === 403 && readP('requests.json').items.find(r => r.id === r1.id).status === 'draft',
+  check('NV1 an agent cannot approve (requests, items, locks), even with director_approved', agentAp.status === 403 && agentItem.status === 403 && agentLock.status === 403 && readP('requests.json').items.find(r => r.id === r1.id).status === 'draft',
     { agentAp: agentAp.body?.error?.slice(0, 60), agentItem: agentItem.status, agentLock: agentLock.status });
   const saved = await pageSave('requests.json', (d) => { d.items.find(r => r.id === r1.id).status = 'approved'; });
   const logged = readP('requests.json').items.find(r => r.id === r1.id).log.at(-1);

@@ -73,9 +73,9 @@ linked to the change) / `round_reply` / `round_finish`, and `revisions_get` (the
 of two); proposals: `proposals_add` (3 free choices on a scene, a shot, a lyric line, a look: SVG made with code, sanitised
 on the server, or a short text) / `proposals_get` (the sets, the director's picks and mix notes, the "3 more" asks); `final_get` (stage 7, read only: the ready-to-render checklist, everything not approved yet by stage with its cost,
 the costs against the cap, the lock); `takes_get` / `take_propose` (take selection: the takes of a shot or a request, and the agent's
-proposed take with in / out and why; the pick is the director's, in the page); `approvals_get` / `approve` / `request_changes`, `requests_list` /
+proposed take with in / out and why; the pick is the director's, in the page); `approvals_get` / `request_changes` (approving is the page's), `requests_list` /
 `request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`), `costs_get` (one total over costs.json and
-`media_add`, `notes_list` / `note_add` / `note_resolve`, `approvals_get` / `approve` / `request_changes`, `requests_list` /
+`media_add`, `notes_list` / `note_add` / `note_resolve`, `approvals_get` / `request_changes` (approving is the page's), `requests_list` /
 `request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`; `takes`), `request_run` (run approved requests: the runner; `batch` = one wave) / `generators_get`, `batches_get` / `waves_propose` (D4: waves of
 shots with review gates, the take ratio; approving and reviewing a batch are the director's, in the page), `costs_get` (one total over costs.json and
 a falgen ledger), `cost_record` (spend made outside the queue, never an approval), `media_update`, `media_scan` / `media_import`
@@ -561,15 +561,16 @@ small files are served in one read so no handle stays open.
   `private: true` in `media.json`) live under `private/<kind>/` and are never exported or packaged.
 - The request runner runs only requests with a recorded director approval, re-checks the cap, records each cost
   once, and keeps the fal key out of every response, file and log (README "Running approved requests").
-- Approvals are the director's, and by default **only the page approves**: a click in the page (POST `/api/save`) is
-  stamped `via: "page"` (in a request's `log`, on an `approvals.json` item). The agent surface (`/api/op`, the MCP
-  tools, offline mode) refuses `approve`, `shot_update` approved/locked and a request's draft -> approved even with
-  `director_approved: true`, unless the owner sets `"agent_approvals": true` in `workbench.config.json` (or
-  `WB_AGENT_APPROVALS=1`): then that flag counts, recorded `via: "agent"`. A request is queued / run only on a recorded
-  approval after its last draft (a status typed into `requests.json` by hand is refused). Notes written through the
-  tools carry `via: "agent"`, and the `director-session` briefing does not present them as the director's.
-  Trade-off: with the default the director must click (the agent can show the item with `ui_focus`); this guards the
-  tool surface, not an agent that edits the files directly with shell access.
+- Approvals are the director's, and **only the page approves**: a click in the page (POST `/api/save` with this
+  server's Origin) is stamped `via: "page"` (in a request's `log`, on an `approvals.json` item). There is no switch for
+  agent approvals: the agent surface (`/api/op`, the MCP tools, offline mode) has no `approve` tool and refuses
+  `set_states` approved / locked, `shot_update` / `shots_update` approved / locked and a request's draft -> approved
+  (403, pointing to the page), whatever it claims (`director_approved` is ignored). The old `agent_approvals` setting
+  and `WB_AGENT_APPROVALS` are ignored (the server warns once at start). A request is queued / run only on an approval
+  recorded by the page after its last draft (a status typed into `requests.json` by hand, or an old `via: "agent"`
+  approval, is refused). Notes written through the tools carry `via: "agent"`, and the `director-session` briefing does
+  not present them as the director's. Trade-off: the director must click (the agent can show the item with
+  `ui_focus`); this guards the tool surface, not an agent that edits the files directly with shell access.
 - Editing an approved request's prompt, refs, `est_cost` or tool sends it back to draft. A cost cap of **0 blocks all
   paid requests**. A snapshot restore bumps each file's `rev` (stale pages get 409 instead of overwriting) and never
   rolls back spend: costs recorded since the snapshot stay, a request that ran since keeps its state, and a restored

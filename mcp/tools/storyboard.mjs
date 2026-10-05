@@ -1,7 +1,7 @@
 // MCP tools: the shots.json shots / clip uses and stage 6: the storyboard and the gaps (lib/ops/storyboard.mjs).
 // Registered on the shared server object when mcp/server.mjs imports this file.
 import { z } from 'zod';
-import { mcp, op, wrap, project, time, by, directorApproved } from './_shared.mjs';
+import { mcp, op, wrap, project, time, by } from './_shared.mjs';
 
 // ------------------------------------------------------------------ shots
 mcp.registerTool('shots_list', {
@@ -14,9 +14,9 @@ mcp.registerTool('shot_get', {
 }, wrap((a) => op('shot_get', a)));
 mcp.registerTool('shot_update', {
   title: 'Update a shot or clip use',
-  description: 'Change a shot / clip use. status -> approvals ("review" to ask the director to look; "approved"/"locked" need director_approved:true, only when the director said so; "changes" only on their word or your review finding). note -> a note pinned at its start. title -> the shot title. take / in_ms / file -> which take of a clip use plays and from where (clip uses only; the take\'s file is found in the media index). Timing edits beyond that belong in a request. Returns what changed.',
+  description: 'Change a shot / clip use. status -> approvals ("review" to ask the director to look; "approved"/"locked" only the director sets, in the page (you: 403); "changes" only on their word or your review finding). note -> a note pinned at its start. title -> the shot title. take / in_ms / file -> which take of a clip use plays and from where (clip uses only; the take\'s file is found in the media index). Timing edits beyond that belong in a request. Returns what changed.',
   inputSchema: { project, id: z.string().describe('Shot id or clip use id.'), status: z.enum(['draft', 'review', 'changes', 'approved', 'locked']).optional(), comment: z.string().optional().describe('Stored with the status.'),
-    take: z.number().int().min(0).optional(), in_ms: time.optional().describe('In-point inside the clip file.'), file: z.string().optional(), title: z.string().optional(), note: z.string().optional(), by, director_approved: directorApproved },
+    take: z.number().int().min(0).optional(), in_ms: time.optional().describe('In-point inside the clip file.'), file: z.string().optional(), title: z.string().optional(), note: z.string().optional(), by },
 }, wrap((a) => op('shot_update', a)));
 
 // ------------------------------------------------------------------ stage 6: the storyboard (shots per scene) and the gaps

@@ -9,7 +9,7 @@
 // server writes into index.html / dock.html (<meta name="wb-token">, read by core/token.js; env WB_TOKEN fixes it).
 // Only the page's own files are served from the workbench folder (an allow-list), every response says nosniff, and the
 // page shell gets a Content-Security-Policy without inline scripts. Approvals made in the page (POST /api/save of
-// requests.json / approvals.json) are stamped via:"page"; agents approve only with config agent_approvals (lib/store.mjs).
+// requests.json / approvals.json) are stamped via:"page"; an agent never approves (lib/ops/_shared.mjs directorGate).
 // Every /api call takes ?project=<id> (default: $WB_PROJECT, workbench.config.json default_project, else "demo").
 // GET  /...                              files under the workbench folder; /data/<p>/... from the data folder
 // GET  /media/<path>                     read-only files under media_base, only below the configured media_roots (Range supported)

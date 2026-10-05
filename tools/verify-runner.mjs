@@ -28,7 +28,7 @@ export async function verifyRunner({ browser, OUT }) {
   const KEY = `fal-v12-${Math.random().toString(36).slice(2)}`;
   const FAL = await startMockFal({ key: KEY, polls: 2 });
   const port = await freePort(), BASE = `http://localhost:${port}`;
-  const srv = spawn(process.execPath, [path.join(WB, 'serve.mjs'), String(port)], { stdio: 'pipe', env: { ...process.env, WORKBENCH_DATA: DATA, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: 'demo', WB_AGENT_APPROVALS: '', WB_TEST: '1', WB_FAL_BASE: FAL.url, FAL_KEY: KEY, WB_RUN_POLL_MS: '200' } });
+  const srv = spawn(process.execPath, [path.join(WB, 'serve.mjs'), String(port)], { stdio: 'pipe', env: { ...process.env, WORKBENCH_DATA: DATA, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: 'demo', WB_TEST: '1', WB_FAL_BASE: FAL.url, FAL_KEY: KEY, WB_RUN_POLL_MS: '200' } });
   let log = ''; srv.stdout.on('data', d => { log += d; }); srv.stderr.on('data', d => { log += d; process.stderr.write('v12 server: ' + d); });
   let pg = null;
   try {

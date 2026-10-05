@@ -37,7 +37,7 @@ export async function verifyTakes({ browser, OUT }) {
     outputs: [0, 1, 2].map(i => `gen/${RQ}/${RQ}_${i}.webm`), actual_cost_usd: 0.48, log: [{ at: '2026-10-05T10:00:00', by: 'director', via: 'page', status: 'approved', director_approved: true }, { at: '2026-10-05T10:01:00', by: 'agent', status: 'done' }] });
   R.rev = (R.rev || 0) + 1; fs.writeFileSync(path.join(PD, 'requests.json'), JSON.stringify(R, null, 1));
   const port = await freePort(), BASE = `http://localhost:${port}`;
-  const env = { ...process.env, WORKBENCH_DATA: DATA, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: P, WB_AGENT_APPROVALS: '' };
+  const env = { ...process.env, WORKBENCH_DATA: DATA, WORKBENCH_CONFIG: path.join(TMP, 'config.json'), WB_PROJECT: P };
   delete env.WB_TOKEN;
   const srv = spawn(process.execPath, [path.join(WB, 'serve.mjs'), String(port)], { stdio: 'pipe', env });
   srv.stderr.on('data', d => process.stderr.write('v16 server: ' + d));
