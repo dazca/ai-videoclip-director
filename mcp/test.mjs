@@ -820,10 +820,10 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   check('wait_for: wakes when the page approves (changed, status approved, within a few s), returns at once when already there, times out with the current state, needs exactly one item',
     wf.changed === true && wf.status === 'approved' && wf.from === 'draft' && wfMs < 6000 && wfNow.already === true && wfTo.timed_out === true && /400/.test(wfBad.error || ''), { wf, wfMs, wfTo: wfTo.timed_out, wfBad: wfBad.error });
 
-  // a stale server: a copy of the code where lib/store.mjs differs (it does not know media_update) on its own port
+  // a stale server: a copy of the code where lib/ops/core.mjs differs (it does not know media_update) on its own port
   const OLD = path.join(TMP, 'oldcode'), P2 = PORT + 1;
   for (const p of ['serve.mjs', 'index.html', 'dock.html', 'app.js', 'app.css', 'lib', 'js', 'tabs', 'core', 'templates']) fs.cpSync(path.join(WB, p), path.join(OLD, p), { recursive: true });
-  const sf = path.join(OLD, 'lib', 'store.mjs'); fs.writeFileSync(sf, fs.readFileSync(sf, 'utf8').replace('  media_update(p, {', '  media_update_was(p, {'));
+  const sf = path.join(OLD, 'lib', 'ops', 'core.mjs'); fs.writeFileSync(sf, fs.readFileSync(sf, 'utf8').replace('  media_update(p, {', '  media_update_was(p, {'));
   const old = spawn(process.execPath, [path.join(OLD, 'serve.mjs'), String(P2)], { stdio: 'pipe', env: process.env });
   try {
     await new Promise((ok, bad) => { old.stdout.once('data', ok); old.once('exit', (c) => bad(new Error('old server exited ' + c))); });

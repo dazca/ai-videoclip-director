@@ -36,8 +36,10 @@ outside the project folder, extra PRIVATE path rule. Env vars win: `WB_PROJECT`,
 | path | what |
 |---|---|
 | `serve.mjs` | HTTP server: static files, `/media/*` (read-only, configured roots), `/api/*` (save, events SSE, projects, snapshots, ops, live UI channel) |
-| `lib/store.mjs` | Node data layer shared by the server and the MCP server: config, projects, snapshots, and every agent op (`ops.*`) |
-| `mcp/server.mjs`, `mcp/test.mjs`, `mcp/client.mjs` | MCP server (stdio), its end-to-end test, and the one-shot CLI client (`node mcp/client.mjs <tool> '<json>'`) |
+| `lib/store.mjs` | Node data layer shared by the server and the MCP server: a thin aggregator that re-exports the `ops` object (every agent op, `ops.*`) and the helpers from `lib/ops/`; everything outside imports this file |
+| `lib/ops/` | the data layer by domain (table below): `_shared.mjs` (files, config, media paths + the PRIVATE rule, `projDir` / `read` / `write` / `mutate`, time helpers, thumbnails, the director gates, the `ops` object); each domain file adds its ops with `Object.assign(ops, {...})` |
+| `mcp/server.mjs`, `mcp/test.mjs`, `mcp/client.mjs` | MCP server (stdio: imports the tool files, adds the resources and the `director-session` prompt, connects), its end-to-end test, and the one-shot CLI client (`node mcp/client.mjs <tool> '<json>'`) |
+| `mcp/tools/` | the MCP tools by domain, one file per `lib/ops/<domain>.mjs`; `_shared.mjs` holds the transport (`op`, `http`, `server`, `projectOf`), `wrap`, the shared zod schemas and the one `mcp` server object the files register on |
 | `js/prices.js` | the ONE price table (list prices with the day each was verified): every estimate in the page, the server and the tools |
 | `js/recipe.js`, `templates/photoreal_recipe.json`, `docs/PHOTOREAL.md` | the photoreal recipe: the default prompt template (blocks per model), its data, and the guide that explains it |
 | `index.html`, `app.js`, `app.css` | the page shell |
@@ -50,6 +52,24 @@ outside the project folder, extra PRIVATE path rule. Env vars win: `WB_PROJECT`,
 | `tools/` | `verify.mjs` (UI suite; its stage-4 / 5 blocks are `verify-characters.mjs` (v7), `verify-scenery.mjs` (v8), `verify-storyboard.mjs` (v9) and `verify-dogfood.mjs` (v10: proposals, image import, request warnings, merged costs, the recipe form, the stale bar), each runnable alone; `verify-stages.mjs` (F1: stage status from content, per stage empty / partial / done / regressed, the rail screenshots `f1_*.png`; run after it by `npm run verify`)), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `make_demo.mjs`, `chrome.mjs` |
 | `exporters/hyperframes-html/` | HTML package of a HyperFrames composition: `export.mjs`, `verify.mjs`, `serve.mjs` (see Export) |
 | `data/<project>/` | one folder per project; only `data/_template/` and `data/demo/` are in git |
+
+**Where to add an op or a tool.** Each domain has one ops file and one tools file, so agents working on different domains
+never edit the same file. Helpers used by several domains go in `lib/ops/_shared.mjs` (or are exported from the domain
+that owns them and imported by the others); ops call each other through `ops.<name>`, never by import.
+
+| domain | ops (`lib/ops/`) | tools (`mcp/tools/`) | what |
+|---|---|---|---|
+| core | `core.mjs` | `core.mjs` | code version (stale server), projects, snapshots (restore carry-forward), `song_get`, `timeline_query`, the media index (`media_list` / `media_add` / `media_update`), `scrubPrivate`; tools also `status`, `projects`, `wait_for`, `ui_focus` |
+| requests, approvals, costs | `requests.mjs` | `requests.mjs` | the recipe file, `requests_list` / `request_create` / `request_update`, `approvals_get` / `set_states` (tools `approve`, `request_changes`), `costs_get`, `cost_record`, the falgen merge |
+| notes | `notes.mjs` | `notes.mjs` | notes pinned to song time (`notes_list`, `note_add`, `note_resolve`) |
+| stages, lyrics | `lyrics.mjs` | `lyrics.mjs` | `stages_get` / `stage_update`, `startStage`, stage 1 (`lyrics_*`, `song_attach`), `createGuidedProject` |
+| script, scenes, sketches | `scenes.mjs` | `scenes.mjs` | stage 2: `script_get`, `scenes_update`, `scene_note_*`, `intake_*`, `sketch_*` |
+| breakdown | `breakdown.mjs` | `breakdown.mjs` | stage 3: `breakdown_*` (`breakdown_promote` is page only: no tool) |
+| assets, characters | `assets.mjs` | `assets.mjs` | entities (`entities_list`, `entity_get`, `entity_upsert`) and stages 4-5 (`asset_*`, `character_*`, `look_create`, `variant_create`, `base_propose`, `node_import_propose`; `asset_act` / `character_act` / `ref_upload` are page only: no tool) |
+| storyboard | `storyboard.mjs` | `storyboard.mjs` | the shots.json shots (`shots_list`, `shot_get`, `shot_update`) and stage 6 (`storyboard_get`, `shots_update`, `shot_note_*`, `gaps_get`) |
+
+A new domain: a `lib/ops/<domain>.mjs` imported (or re-exported) by `lib/store.mjs`, and a `mcp/tools/<domain>.mjs`
+imported by `mcp/server.mjs`.
 
 ## Project files (`data/<project>/`)
 
@@ -443,10 +463,11 @@ From Python: `subprocess.run(["node", WB + "/mcp/client.mjs", "cost_record", jso
   it over a node image for an edit: strokes, mask and pins go into the request). A new asset kind: a `TYPE` entry in
   `js/assets.js` (root tree, variant prefix and field, words, axes, request kinds, estimates) and a `UI` entry in
   `tabs/assetws.js`; a stage module mounts `new AssetWorkspace(el, {types, stage, pref})` and calls `assetCommands`.
-- **A page-only act** (the director's decision): an op in `lib/store.mjs` that fails unless `via === 'page'`, and one
+- **A page-only act** (the director's decision): an op in its `lib/ops/<domain>.mjs` that fails unless `via === 'page'`, and one
   line in `serve.mjs` setting `body.via` from the request's Origin (see `breakdown_promote`, `character_act`,
   `asset_act`, `ref_upload`); no MCP tool; a security check that the agent surface gets 403.
-- **An agent op / MCP tool**: a function in `ops` in `lib/store.mjs` (it is then also `POST /api/op/<name>`), and a
-  `registerTool` in `mcp/server.mjs` with a zod schema and a description an agent can follow; cover it in `mcp/test.mjs`.
+- **An agent op / MCP tool**: a function in the `Object.assign(ops, {...})` of its `lib/ops/<domain>.mjs` (it is then
+  also `POST /api/op/<name>`; see "Where to add an op or a tool"), and a `mcp.registerTool` in `mcp/tools/<domain>.mjs`
+  with a zod schema and a description an agent can follow; cover it in `mcp/test.mjs`.
 - **Tests**: `npm run test:mcp` and `npm run verify` must pass (the verify suite runs on the demo; the owner's extra
   Part B checks run only on his own project). Add a check next to the feature you touched.
