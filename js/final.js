@@ -23,6 +23,7 @@ import * as A from './assets.js';
 import * as N from './notes.js';
 import { inFlight } from './revisions.js';
 import { currentVersion, flatLines, assetApproval } from './flow.js';
+import { takesChecklist } from './takes.js';
 
 export const GROUPS = [
   { id: 'lyrics', title: 'Lyrics', n: 1 }, { id: 'script', title: 'Script', n: 2 }, { id: 'breakdown', title: 'Breakdown', n: 3 },
@@ -46,6 +47,7 @@ const spentFor = (costs, ids) => ids.length ? sum((costs?.items || []).filter(x 
 // the media a shot has for the render: its clip uses' files, a done request's outputs, its thumbnail, media linked to it
 export function shotMedia(shot, { uses = [], requests, media = [] } = {}) {
   const out = [];
+  if (shot.clip?.file) out.push({ path: shot.clip.file, from: 'picked take' });   // the director's pick (js/takes.js) first
   for (const u of shot.clips || []) { const x = uses.find(y => y.id === u); if (x?.file) out.push({ path: x.file, from: 'clip ' + x.id }); }
   for (const r of SB.shotRequests(requests, shot.id)) if (r.status === 'done') for (const o of r.outputs || []) out.push({ path: o, from: 'request ' + r.id });
   for (const m of media) if ((m.links?.shots || m.shots || []).includes?.(shot.id) && ['clip', 'still', 'render'].includes(m.kind) && m.path) out.push({ path: m.path, from: 'media ' + m.id });
@@ -161,6 +163,9 @@ export function finalView(I) {
     if (!DONE.includes(st) || !m.length) shotMissing.push({ label: `${s.id} ${!m.length ? 'no frame, take or clip' : st}`, jump: { stage: 'storyboard', focus: s.id } });
   }
   add('frames', 'every shot has an approved frame, take or clip', shots.length && !shotMissing.length, !shots.length ? 'no shots yet' : shotMissing.length ? `${pl(shotMissing.length, 'shot')} of ${shots.length} not ready` : `${pl(shots.length, 'shot')} approved with media`, shotMissing);
+  const tk = takesChecklist(shots);
+  add('takes', 'every shot has a picked take', tk.ok, !shots.length ? 'no shots yet' : `${tk.done} of ${pl(tk.total, 'shot')} picked${tk.missing.length ? ` · ${tk.missing.length} to pick` : ''}`,
+    tk.missing.map(id => ({ label: `${id} no take picked`, jump: { stage: 'storyboard', focus: id } })));
   add('assets', 'every asset the shots need is approved', !gaps.assets.length, gaps.assets.length ? `${pl(gaps.assets.length, 'asset')} not approved` : 'all approved',
     gaps.assets.map(a => ({ label: `${a.name}${a.variant ? ' · ' + a.variant_name : ''}: ${a.why || 'not approved'}`, jump: { stage: A.TYPE[a.type]?.stage || 'characters', focus: a.id } })));
   const oc = N.openCounts(notes), live = inFlight(I.revisions);

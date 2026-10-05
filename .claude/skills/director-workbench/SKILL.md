@@ -73,8 +73,17 @@ next round. Work it like this:
 
 ## Final approvals (stage 7)
 
+**Takes** (take selection, D6). When a shot has outputs (the runner's, or imports linked to it), review them and propose
+the best: `takes_get {shot}` (or `{request}`) lists every take with its absolute file (look at it), duration and fps, the
+director's pick and your proposals; then `take_propose {shot, media | file | take (+ request), in_ms, out_ms, why}` (in /
+out inside the take, ms or m:ss.mmm; why = what you saw: "take 0: the smile lands at 0.6 s; take 1 has a door wipe"; flag
+an alternative for a moment in the why: "alternative for 139.84 s: take 2"). The director picks with one click (or picks
+another, with in / out, a note and alternatives); the pick lands on the storyboard shot as `clip` through a new version.
+You never pick (no tool) and never write `clip` (`shots_update` ignores it and keeps theirs). An imported file is a take
+once it is linked to the shot (`media_update {id, shots: ["sh03"]}`). Final's checklist counts the shots with a pick.
+
 `final_get` (read only) answers "what is left?": `ready`, `failing`, the **ready-to-render checklist** (every second
-scripted, every scene has shots, every shot an approved frame / take / clip, every asset approved, no open notes, no
+scripted, every scene has shots, every shot an approved frame / take / clip, every shot a picked take, every asset approved, no open notes, no
 open round, costs within the cap, an export is possible; derived from the files, each failing line with its gaps),
 `pending` (every row not approved yet, grouped: lyrics, script, breakdown, characters, scenery, storyboard, requests;
 with status, why, est / spent cost, open notes) and `costs` (spent from the merged ledger, committed, drafts, the shots
@@ -204,7 +213,8 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
   `request_run` (it enforces all of this) to calling a provider yourself.
 - Never approve on the director's behalf, never mark their notes resolved without doing what they asked.
 - Never pick, mix or dismiss a proposal (the director's, in the page), and never write `proposals.json` or
-  `proposals/*.svg` by hand: `proposals_add` sanitises and records them.
+  `proposals/*.svg` by hand: `proposals_add` sanitises and records them. Never pick a take or write a shot's `clip` (or
+  `takes.json`): propose with `take_propose`; the director picks in the page.
 - Never try to work around a project locked for render (409): no hand edits of the files, no snapshot restores; ask the
   director to unlock it in the Final stage.
 - Never `round_absorb` a note you did not apply, and never call `round_finish` before every note of the round is

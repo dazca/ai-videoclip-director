@@ -95,8 +95,8 @@ export async function verifyFinal({ browser, OUT }) {
     await shot('v15_checklist', await clipOf('.fnck', 0));
     await shot('v15_costs', await clipOf('.fncost', 0));
     const costTxt = await pg.evaluate(() => document.querySelector('.fncost').textContent);
-    check('"Ready to render": 8 derived lines (scripted, shots, frames, assets, notes, round, cap, export) matching final_get; each failing line lists its gaps as links; the costs panel shows spent / committed / est. remaining against the cap from the merged ledger',
-      ck.length === 8 && ck.every(c => fg.checklist.find(x => x.id === c.id)?.ok === c.ok) && ck.filter(c => !c.ok).every(c => c.gaps > 0) && ck.some(c => !c.ok)
+    check('"Ready to render": 9 derived lines (scripted, shots, frames, takes, assets, notes, round, cap, export) matching final_get; each failing line lists its gaps as links; the costs panel shows spent / committed / est. remaining against the cap from the merged ledger',
+      ck.length === 9 && ck.every(c => fg.checklist.find(x => x.id === c.id)?.ok === c.ok) && ck.filter(c => !c.ok).every(c => c.gaps > 0) && ck.some(c => !c.ok)
       && v1.costs.merged && v1.costs.cap === fg.costs.cap && v1.costs.drafts === fg.costs.drafts && /spent/.test(costTxt) && /est\. remaining/.test(costTxt) && costTxt.includes('$' + fg.costs.cap),
       { ck, costs: v1.costs });
     // a failing line's gap jumps to the stage that holds it

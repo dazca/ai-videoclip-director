@@ -14,7 +14,7 @@
 // review rounds and revisions (round_get / round_absorb / round_reply / round_finish, the page-only send / close / restore, the
 // compare, the opt-in mirror), proposals (proposals_add with the SVG sanitiser, proposals_get, the page-only picks, the "3 more"
 // asks answered by the next set, the free local generator), final approvals (final_get, the page-only lock: a locked project
-// refuses agent writes, proposals included),
+// refuses agent writes, proposals included), take selection (takes_get / take_propose; the pick is the page's, on the shot),
 // resources, the director-session prompt, the guard rules (edit voids approval, director-only approvals, media kind,
 // CSRF / Host / token checks, path traversal and the PRIVATE rule) and the offline (files only) mode. The temp folder
 // is removed at the end, whatever happens; data/demo must be byte-identical afterwards.
@@ -127,7 +127,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve', 'character_get', 'character_iteration_add', 'character_note_add', 'look_create',
     'asset_get', 'asset_iteration_add', 'asset_note_add', 'variant_create',
     'storyboard_get', 'shots_update', 'shot_note_add', 'shot_note_resolve', 'gaps_get', 'notes_get', 'notes_add', 'notes_status', 'request_run', 'generators_get',
-    'round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get', 'proposals_add', 'proposals_get', 'final_get'];
+    'round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get', 'proposals_add', 'proposals_get', 'final_get', 'takes_get', 'take_propose'];
   check('tools/list has every tool', EXPECT.every(t => tools.includes(t)), { count: tools.length, missing: EXPECT.filter(t => !tools.includes(t)) });
   const schemaOk = (await mcp.listTools()).tools.every(t => t.description?.length > 40 && t.inputSchema?.type === 'object');
   check('every tool has a description and a JSON schema', schemaOk);
@@ -1271,7 +1271,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const g = await call(mcp, 'final_get', { project: FP }), gs = await call(mcp, 'final_get', { project: FP, group: 'storyboard' });
   const ids = (g.checklist || []).map(c => c.id);
   check('final_get (read only): the checklist (scripted, shots, frames, assets, notes, round, cap, export; each ok / detail / gaps), the pending rows by group with status, why, cost and approvable, the costs against the cap; the group filter; no tool to lock / unlock',
-    tools.includes('final_get') && !tools.some(t => /^final_(lock|unlock)$/.test(t)) && ['scripted', 'shots', 'frames', 'assets', 'notes', 'round', 'cap', 'export'].every(i => ids.includes(i))
+    tools.includes('final_get') && !tools.some(t => /^final_(lock|unlock)$/.test(t)) && ['scripted', 'shots', 'frames', 'takes', 'assets', 'notes', 'round', 'cap', 'export'].every(i => ids.includes(i))
     && g.ready === false && g.locked === null && g.pending?.length > 3 && g.pending.every(r => r.key && r.group && r.st && r.why) && typeof g.costs?.cap === 'number' && g.costs.merged === true
     && gs.pending.length && gs.pending.every(r => r.group === 'storyboard'), { ids, ready: g.ready, n: g.pending?.length, costs: g.costs, groups: g.counts?.by_group });
   const agentLock = await post(`/api/op/final_lock?project=${FP}`, { force: true, via: 'page' });
@@ -1292,6 +1292,44 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     { agentLock: agentLock.status, lk: lk.body, w1: w1.error?.slice(0, 90), w2: w2.error?.slice(0, 60), w3: w3.error?.slice(0, 60), locked: r1.locked?.revision });
   const ul = await pageOp('final_unlock'), w4 = await call(mcp, 'notes_add', { project: FP, target: { stage: 'final', kind: 'stage', id: null }, text: 'mcp: after unlock' });
   check('unlock (page): the agent writes again; the lock stays in revisions.json locks[] with unlocked_at', ul.status === 200 && !w4.error && FJ('revisions.json').lock === null && FJ('revisions.json').locks?.[0]?.unlocked_at, { ul: ul.status, w4: w4.error });
+}
+// 19. take selection (ROADMAP_v4 D6): takes_get (read only: the takes of a shot / a request, fps, duration, the pick, the
+// proposals), take_propose (checked like a pick: a take of that shot, in / out inside its duration); the pick is the page's
+// (take_act: no tool, 403 to the agent); it lands on the storyboard shot as clip{request, take, file, in_ms, out_ms, alt[]}
+// through a new version; the agent's shots_update carries it forward; Final counts it
+{
+  const TP = 'mcp-takes';
+  S.duplicateProject(PROJECT, TP, true);
+  const TJ = (f) => JSON.parse(fs.readFileSync(path.join(DATA, TP, f), 'utf8'));
+  const pageOp = (name, body = {}) => post(`/api/op/${name}?project=${TP}`, body, { origin: URL_ });
+  const tools = (await mcp.listTools()).tools.map(t => t.name);
+  const tg = await call(mcp, 'takes_get', { project: TP, shot: 's2-wall' }), both = await call(mcp, 'takes_get', { project: TP });
+  const vids = (tg.takes || []).filter(t => t.kind === 'video');
+  check('takes_get {shot}: the shot\'s takes (media linked to it, its clip uses\' job: C1 take 0 and 1, the still) with kind, take, duration, fps, absolute file; nothing picked yet; neither shot nor request: 400; no take_act tool',
+    tools.includes('takes_get') && tools.includes('take_propose') && !tools.includes('take_act') && vids.map(t => t.media).join() === 'C1_0,C1_1' && vids.every(t => t.duration_ms === 3000 && t.fps > 0 && t.abs && fs.existsSync(t.abs))
+    && tg.takes.some(t => t.kind === 'image') && tg.picked === null && /400/.test(both.error || ''), { takes: tg.takes?.map(t => [t.media, t.kind, t.take, t.duration_ms, t.fps]), both: both.error?.slice(0, 60) });
+  const pr = await call(mcp, 'take_propose', { project: TP, shot: 's2-wall', take: 1, request: 'C1', in_ms: '0:00.500', out_ms: 1500, why: 'take 1 is calmer; alternative for 0:06.0: take 0' });
+  const again = await call(mcp, 'take_propose', { project: TP, shot: 's2-wall', media: 'C1_1', in_ms: 500, out_ms: 1500, why: 'take 1 is calmer (updated)' });
+  const off = await call(mcp, 'take_propose', { project: TP, shot: 's2-wall', media: 'C2_0', why: 'another shot\'s take' });
+  const long = await call(mcp, 'take_propose', { project: TP, shot: 's2-wall', media: 'C1_1', in_ms: 2000, out_ms: 3500, why: 'past the end' });
+  const agentPick = await post(`/api/op/take_act?project=${TP}`, { act: 'pick', shot: 's2-wall', media: 'C1_1', in_ms: 500, out_ms: 1500 });
+  let offPick = null; try { S.ops.take_act(TP, { act: 'pick', shot: 's2-wall', media: 'C1_1', in_ms: 500, out_ms: 1500 }); offPick = 200; } catch (e) { offPick = e.code; }
+  check('take_propose: an open proposal in takes.json (take 1 of C1 named by number + request, in as m:ss.mmm); the same take and range again only updates its why; another shot\'s take and out past the duration are refused; the agent cannot pick (403 over HTTP and offline)',
+    pr.proposal?.id === 'tp01' && pr.proposal.in_ms === 500 && pr.proposal.out_ms === 1500 && pr.proposal.take === 1 && again.updated === true && TJ('takes.json').proposals.length === 1 && /calmer \(updated\)/.test(TJ('takes.json').proposals[0].why)
+    && /not a take of s2-wall/.test(off.error || '') && /inside the take/.test(long.error || '') && agentPick.status === 403 && offPick === 403,
+    { pr: pr.changed || pr.error || pr, again, off: off.error?.slice(0, 80), long: long.error?.slice(0, 80), agentPick: agentPick.status, offPick });
+  const pk = await pageOp('take_act', { act: 'pick', shot: 's2-wall', media: 'C1_1', in_ms: 500, out_ms: 1500, note: 'calmer', alt: [{ media: 'C1_0', t: 6000, note: 'brighter' }], proposal: 'tp01' });
+  const sbj = TJ('storyboard.json'), cur = sbj.versions.find(v => v.id === sbj.current), clip = cur.shots.find(s => s.id === 's2-wall').clip;
+  const tg2 = await call(mcp, 'takes_get', { project: TP, shot: 's2-wall' }), sg = await call(mcp, 'storyboard_get', { project: TP });
+  const up = await call(mcp, 'shots_update', { project: TP, upsert: [{ id: 's2-wall', text: 'mcp: agent text', clip: { file: 'media/clip/C1_0.mp4', in_ms: 0, out_ms: 100 } }] });
+  const sbj2 = TJ('storyboard.json'), cur2 = sbj2.versions.find(v => v.id === sbj2.current).shots.find(s => s.id === 's2-wall');
+  const fg = await call(mcp, 'final_get', { project: TP }), tk = fg.checklist?.find(c => c.id === 'takes');
+  check('the page picks (take_act): a new storyboard version with shot.clip {request, take, file, in_ms, out_ms, note, alt[{take, file, t, note}], via page}; takes_get / storyboard_get show it; the proposal is "picked"; the agent\'s shots_update keeps it (its clip ignored); Final\'s "takes" line counts it',
+    pk.status === 200 && clip?.take === 1 && clip.file === 'media/clip/C1_1.mp4' && clip.in_ms === 500 && clip.out_ms === 1500 && clip.alt?.[0]?.take === 0 && clip.alt[0].t === 6000 && clip.via === 'page' && cur.via === 'page'
+    && tg2.picked?.file === clip.file && tg2.takes.find(t => t.media === 'C1_1').picked === true && tg2.takes.find(t => t.media === 'C1_0').alt_for?.[0]?.t === 6000 && TJ('takes.json').proposals[0].status === 'picked'
+    && sg.scenes.flatMap(s => s.shots).concat(sg.outside_script || []).find(s => s.id === 's2-wall')?.clip?.take === 1
+    && cur2.text === 'mcp: agent text' && cur2.clip?.file === clip.file && (up.warnings || []).some(w => /clip ignored/.test(w)) && tk && /^1 of \d+ shots picked/.test(tk.detail),
+    { clip, version: sbj.current, picked: tg2.picked?.media, warnings: up.warnings, tk: tk?.detail });
 }
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {

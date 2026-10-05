@@ -72,7 +72,8 @@ notes are dismissed only by the director), and the old `notes_list` / `note_add`
 linked to the change) / `round_reply` / `round_finish`, and `revisions_get` (the revisions R1, R2, …, and a per-stage compare
 of two); proposals: `proposals_add` (3 free choices on a scene, a shot, a lyric line, a look: SVG made with code, sanitised
 on the server, or a short text) / `proposals_get` (the sets, the director's picks and mix notes, the "3 more" asks); `final_get` (stage 7, read only: the ready-to-render checklist, everything not approved yet by stage with its cost,
-the costs against the cap, the lock); `approvals_get` / `approve` / `request_changes`, `requests_list` /
+the costs against the cap, the lock); `takes_get` / `take_propose` (take selection: the takes of a shot or a request, and the agent's
+proposed take with in / out and why; the pick is the director's, in the page); `approvals_get` / `approve` / `request_changes`, `requests_list` /
 `request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`), `costs_get` (one total over costs.json and
 `media_add`, `notes_list` / `note_add` / `note_resolve`, `approvals_get` / `approve` / `request_changes`, `requests_list` /
 `request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`; `takes`), `request_run` (run approved requests: the runner) / `generators_get`, `costs_get` (one total over costs.json and
@@ -265,6 +266,17 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   storyboard's shots (frame thumbnails), and the cast / status columns follow them. Commands: palette "Storyboard: …",
   right-click a shot (board or timeline): open in the storyboard, frame, split, merge, move, copy / paste frame,
   request, note, delete.
+- **Takes** (D6 take selection; `tabs/takes.js`, logic `js/takes.js` shared with `takes_get`): the Shot panel's **takes**
+  section (and Review › **Takes**, per request or shot) shows every take of the shot as a compact card: the runner's outputs of
+  its requests (`gen/<request>/<request>_<take>.<ext>`) and any registered media linked to the shot, its clip uses or its
+  requests (imports too). Hover a card to scrub its video, click to open it in the editor, ⤢ for full size, Shift+click to
+  mark it B. The editor: the video, a mini strip of the take with **in / out** handles (drag; snapped to the take's frames;
+  the video follows; ⇤in / out⇥ take the video's time), a readout (length, frames, how it fits the shot), a note, **Pick
+  take** (saved on the storyboard shot as `clip{request, take, file, in_ms, out_ms, note, alt[]}` through a new version;
+  approval stays separate), **+ alt** (this take as an alternative for a song time: "bigger smile, alt for 2:19.84"),
+  **A/B** (the dock plays A and B side by side in lockstep over their ranges), unpick. The agent's proposals (◆, from
+  `take_propose`) sit above the editor with a one-click **Pick**. The timeline **clips** column shows the pick (★ take,
+  in–out) over its shot, and Final's checklist counts the shots with a picked take.
 - **Final stage** (stage 7, final approvals; `tabs/final.js`, logic `js/final.js` shared with `final_get`): ONE compact
   table of everything not approved yet, grouped by stage: the lyrics stage not done, scenes not ok, breakdown items not
   ok, identity / base trees and looks / variants not approved, shots and clip takes (approvals.json) not approved, draft
@@ -348,7 +360,7 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
 | script | text, drive | on | W/S/B + action per lyric line (TREATMENT §2), approval dot |
 | scenes | text, follow | on | stage 2 (`scenes.json`): each scene (title, text, sketch count, status colour; stage 3: its characters and locations from `breakdown.json`, + the count of other items) on the left, its beats on the right, each at its own time; double-click = open it in the script stage |
 | shots | text, follow | on | stage 6 (`storyboard.json`, else `shots.json`): each storyboard shot, its frame sketch (else the render frame), kind, status dot |
-| clips | text, follow | on | world-clip uses (clip.take +in-point), frame at the in-point, location colour; overlaps share width |
+| clips | text, follow | on | world-clip uses (clip.take +in-point), frame at the in-point, location colour; overlaps share width; a storyboard shot's picked take (★ take, in–out, alternatives count) over the shot, replacing the uses it lists |
 | cast | text, follow | on | cast chips + location letters per storyboard shot |
 | status | text, follow | on | approval chips for the shot and each clip use inside it |
 | cost | text, drive | hidden | $ per generation job at its first use, running Σ / cap |
@@ -387,6 +399,7 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `scenes.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, scenes[{id: "sc03", t0, t1, title, text, line_ids[], beats[{id: "b1", t, text}], sketches[ids]}]}], states{<scene>: {status: draft/needs_you/ok, by, via, at}}, notes[{id: "sn01", scene \| null, beat?, text, by, via, to?: "agent", kind?: request/fill_gaps, gaps?, status, at, version, replies[]}], intake{<question>: {text, by, via, at, asked?}}}`: stage 2, the script draft (shared with the page). Versions are immutable (a save appends; restore copies); statuses and intake answers live outside them; only the page sets a scene `ok`. A missing file reads as v1 derived from `script.json` (`stages` -> scenes, `lines` -> beats), which is never rewritten. Shapes and logic: `js/scenes.js` |
 | `breakdown.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, script?, items[{id: "bi03", kind: character/location/prop/wardrobe/fx, name, description, links[{scene, beats[], note?}], source: agent/director, aliases?, for? (wardrobe: the character item), dropped?}]}], states{<item>: {status: draft/review/ok, entity_id?, look_id?, by, via, at}}, notes[{id: "bn01", item \| null, scene?, text, by, via, to?: "agent", kind?: request/extract, status, at, version, replies[]}]}`: stage 3, the breakdown (shared with the page). Versions are immutable (a save appends; restore copies); statuses and entity links live outside them; only the page sets an item `ok` or links it to an entity ("Create entity": a draft entity in `entities/`, or a look on a character). Links name scene / beat ids of `scenes.json`. Shapes and logic: `js/breakdown.js` |
 | `storyboard.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, script?, shots[{id: "sh03", scene, t0, t1, kind: wide/medium/close/insert/performance/xp-desktop/…, title, text, camera, sketch, beats[], cast[], locations[], props[], variants{<entity>: <variant / look> \| null}, gen: still/video/null, clips[], thumb?, section?}]}], notes[{id: "sbn01", shot, scene?, text, by, via, to?: "agent", kind?: request/storyboard/fill_gaps, gaps?, status, at, version, replies[]}]}`: stage 6, the storyboard. A version is immutable (a save appends one); the shots of a scene tile it; the variant each asset needs is the scene's (entity `uses`) unless `variants` overrides it. The shot's approval is `approvals.json` `shot:<id>`. Missing = v1 derived from `shots.json` (never rewritten; its readers keep working). Logic: `js/storyboard.js` |
+| `takes.json` | the agent's take proposals (the server's; the page reads it): `{v: 1, rev, proposals[{id: "tp03", shot, request, job, take, file, media, kind, in_ms, out_ms, why, by, via: "agent", at, status: open/picked/dismissed}]}`. The pick itself is the storyboard shot's `clip{request, take, file, media, kind, in_ms, out_ms, note, alt[{take, file?, t, note}], by, via: "page", at, proposal?}` (written only by the page's `take_act`, carried forward by every other save) |
 | `sketches/<id>.json` / `.png` / `.mask.png` | a sketch: `{id, w, h, paper, underlay{src, opacity, fit}, strokes[], mask[], pins[{n, x, y, text}], title?, created, updated, by, via}` (format: `core/sketch/sketch.js`), the flattened image and the edit mask; written by `sketch_save`, registered in `media.json` (`kind: "sketch"`, `sketch`, `mask`, `scenes[]`, `pins`); under `private/sketches/` when drawn over a private image; not snapshotted |
 | `.snapshots/<yyyymmdd-hhmmss>-<slug>/` | copies of the small JSON files (no peaks, thumbs, `_src`, settings, revisions.json) + `.meta.json {id, at, message, auto, files, revision?, immutable?}` |
 | `revisions.json` | the review rounds and revisions (written by the server only; the page reads it): `{v: 1, rev, rounds[{n, status: sent/finished/closed, sent_at, sent_by, notes[ids], ask (the note to the agent), base (the snapshot when sent), finished_at?, summary?, closed_at?, revision?}], revisions[{id: "R3", n, round, created, summary, notes_absorbed[], notes_replied[], files_changed[], cost_usd, cost_delta, snapshot, base, by, via, git?: {commit} \| {skipped}}], restores[{at, revision, previous}], lock?: {at, revision, snapshot, summary, by, via, ready, failing?, pending} \| null, locks[]}`. A revision's snapshot is never changed; restoring one snapshots the current state first and keeps notes.json. "Lock for render" (stage 7) closes a revision with `final: true` and sets `lock` (the history in `locks[]`, `unlocked_at` when the director unlocks); while `lock` is set every agent write is refused (409). Logic: `js/revisions.js`, `lib/ops/rounds.mjs`, `lib/ops/final.mjs` |
@@ -533,6 +546,12 @@ small files are served in one read so no handle stays open.
   word, a summary). `/data/<p>/` never serves a dot-folder or dot-file (`.snapshots`, `.history`); the compare op reads
   snapshots for the page and names revisions only as `R<n>`, `R0` or `now`. The git mirror runs `git` with
   `--git-dir=data/<p>/.history/.git` (never the workbench repository) and only when the director turned it on.
+- Take selection (D6): picking a take (`take_act`: pick / unpick / dismiss) is the page's act only (via "page" from this
+  server's Origin; no MCP tool; 403 to the agent surface, a claimed via "page", a foreign Origin and offline). A pick and a
+  `take_propose` must name a registered media file of the project that is a take of that shot (not a path, a render, audio
+  or another shot's take: 400 / 404), with 0 <= in < out <= the take's duration (a still: no range) and alternatives inside
+  the song; request / take / kind come from the media entry. A page save of `storyboard.json` keeps the server's picks and
+  the agent's `shots_update` ignores `clip`; `takes.json` is not a page save.
 - Final approvals (stage 7): `final_get` is read only; approving from the Final list goes through the page's own paths
   (the agent surface still gets 403 on approvals). "Lock for render" / "Unlock" (`final_lock` / `final_unlock`) are the
   page's only (via "page" from this server's Origin; no MCP tool; 403 to the agent surface, a claimed via "page", a
