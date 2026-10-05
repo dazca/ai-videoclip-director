@@ -34,6 +34,8 @@ export function setMode(stage, m) {
   document.dispatchEvent(new CustomEvent('wb:timemode', { detail: { stage, mode: m === 'time' ? 'time' : 'list' } }));
 }
 export const toggle = (stage) => setMode(stage, isTime(stage) ? 'list' : 'time');
+// back on the timeline page: clamp its scroll to the song's end (js/timeline.js clampEnd; review #3 MEDIUM 9)
+document.addEventListener('wb:page', (e) => { if (e.detail === 'timeline') requestAnimationFrame(() => WB()?.timeline?.clampEnd?.()); });
 export function axisAt(el) { for (const a of axes) if (a.sc.contains(el)) return a; return null; }
 
 // a row's slot: its height, and how much text it holds: tmshort (< 2 lines: one line of text, ellipsis), tmtiny (< 1

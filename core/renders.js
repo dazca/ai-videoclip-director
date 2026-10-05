@@ -15,6 +15,7 @@ import { store, toast, esc, mediaUrl } from '../js/store.js';
 import * as RN from '../js/renders.js';
 import { chaptersView } from '../js/chapters.js';
 import { currentScript } from '../js/scenes.js';
+import { packagesHtml } from './package.js';
 
 const CSS = `.rnp{border:1px solid var(--line2);background:var(--bg2);margin:4px 0;padding:3px 6px;font-size:11.5px}
 .fnrend.rnp{flex:none;margin:2px 4px;max-height:36vh;overflow:auto}
@@ -118,17 +119,19 @@ export function openSheet(id) {
 export function openSettings() {
   css();
   const c = doc().config || RN.DEFAULT_CONFIG;
-  const nums = ['min_free_mb', 'ram_wait_s', 'ram_tries', 'abort_below_mb', 'workers', 'width', 'height', 'fps', 'excerpt_max_s', 'sheet_every_s', 'timeout_min'];
+  const nums = ['min_free_mb', 'ram_wait_s', 'ram_tries', 'abort_below_mb', 'workers', 'width', 'height', 'fps', 'excerpt_max_s', 'sheet_every_s', 'timeout_min', 'verify_n', 'sample_fps'];
   const d = openDialog({ id: 'rnsettings', title: 'Render settings', wide: true, html: `<div class="rnform">
     <span>Command</span><span><textarea data-f="command" spellcheck="false" placeholder="node&#10;C:\\path\\to\\node_modules\\hyperframes\\dist\\cli.js&#10;render&#10;-o&#10;{out}&#10;-w&#10;{workers}">${esc((c.command || []).join('\n'))}</textarea><span class="dim">one argument a line, the program first; no shell. It must write {out}. Placeholders: ${Object.keys(RN.PLACEHOLDERS).map(k => `<code title="${esc(RN.PLACEHOLDERS[k])}">{${k}}</code>`).join(' ')}</span></span>
     <span>Folder</span><span><input data-f="cwd" value="${esc(c.cwd || '')}" placeholder="absolute folder it runs in (empty: the project folder)" spellcheck="false"></span>
     <span>Warm-up</span><span><textarea data-f="warm" style="height:54px" spellcheck="false" placeholder="optional: a command run first (warm the frame cache)">${esc((c.warm || []).join('\n'))}</textarea></span>
+    <span>Composition</span><span><input data-f="composition" value="${esc(c.composition || '')}" placeholder="absolute folder of the HyperFrames composition (empty: the folder above)" spellcheck="false"><span class="dim">File › Export › Interactive HTML package… packages it: entry <input data-f="entry" value="${esc(c.entry || 'index.html')}" style="width:110px" spellcheck="false"> · HyperFrames dist folder <input data-f="hyperframes" value="${esc(c.hyperframes || '')}" style="width:200px" placeholder="optional" spellcheck="false"></span></span>
     <span>Etiquette</span><span class="num">${nums.map(k => `<label title="${k}">${k.replace(/_/g, ' ')} <input data-n="${k}" value="${esc(c[k])}"></label>`).join('')}</span>
     </div><div class="rnfoot"><span class="rnres dim">only you set this: an agent proposes renders, never a command</span><span class="sp"></span><button data-x="save" class="pri">Save</button></div>` });
   d.el.addEventListener('click', async (e) => {
     if (!e.target.closest('[data-x=save]')) return;
     const lines = (f) => d.el.querySelector(`[data-f=${f}]`).value.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
-    const config = { command: lines('command'), cwd: d.el.querySelector('[data-f=cwd]').value.trim() || null, warm: lines('warm'), ...Object.fromEntries(nums.map(k => [k, d.el.querySelector(`[data-n=${k}]`).value.trim()])) };
+    const val = (f) => d.el.querySelector(`[data-f=${f}]`).value.trim() || null;
+    const config = { command: lines('command'), cwd: val('cwd'), warm: lines('warm'), composition: val('composition'), entry: val('entry'), hyperframes: val('hyperframes'), ...Object.fromEntries(nums.map(k => [k, d.el.querySelector(`[data-n=${k}]`).value.trim()])) };
     try { await store.op('render_config', { config }); toast('render settings saved'); d.close(); }
     catch (er) { const r = d.el.querySelector('.rnres'); r.className = 'rnres rnerr'; r.textContent = er.message; }
   });
@@ -176,6 +179,7 @@ export function mountRenders(host) {
       + (rs.length ? rs.slice(0, 8).map(r => `<div class="rnrow" data-sel="request:${esc(r.id)}"><span><b>${esc(RN.specLabel(r))}</b><div class="dim">${esc(r.id)}${r.render?.why ? ' · ' + esc(r.render.why) : ''}</div></span><span class="chip ${({ done: 's-locked', running: 's-review', failed: 's-changes', withdrawn: 's-archived' })[r.status] || ''}">${esc(r.status)}</span>`
         + `<span class="rnlog" title="${esc(tail(r))}">${r.status === 'running' ? esc(tail(r) || RN.PHASES[r.render_run?.phase] || '') : r.render_run?.ram ? `RAM min ${esc(r.render_run.ram.min_mb)} MB${r.render_run.revision ? ' · ' + esc(r.render_run.revision) : ''}` : esc(r.by || '')}</span><span>${renderActions(r)}</span></div>`).join('')
         : '<div class="dim" style="padding:2px 0">no render yet: + New render… (or the agent proposes one); chapters first, then the full film</div>')
+      + packagesHtml()
       + (sh.length ? `<div class="rnsh">${sh.map(s => `<div class="rncard" data-rn="sheet" data-id="${esc(s.id)}" title="${esc(s.title || s.id)}"><img src="${esc(imgUrl(s))}" alt="" loading="lazy"><div>${esc(s.kind === 'seams' ? 'seams' : s.from)} ${esc(s.source && s.source !== 'storyboard' ? s.source : '')} ${badge(s)}</div><div class="dim">${esc(s.revision || 'R0')} · ${esc(String(s.at || '').slice(5, 16).replace('T', ' '))}</div></div>`).join('')}</div>` : '');
   };
   panels.add(draw); draw();

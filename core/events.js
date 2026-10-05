@@ -76,7 +76,7 @@ function eventDialog({ id = null, t = 0, name = '', kind = 'stop', note = '' } =
   const e = id ? ev(id) : null, cx = ctx(), anchored = e ? E.anchoredTo(e.id, cx) : [];
   const kinds = E.KINDS.map(k => `<option value="${k}"${(e?.kind || kind) === k ? ' selected' : ''}>${E.KIND_ICON[k]} ${E.KIND_LABEL[k]}</option>`).join('');
   const el = dialog(e ? `Event ${e.id}` : 'New named event', e ? `${e.status}${e.via === 'agent' ? ' · by the agent' : ''}` : 'a sync point a cut can land on',
-    `<div class="evg2"><span>Name</span><input name="name" value="${esc(e?.name ?? name)}" spellcheck="false" placeholder="her hi there">
+    `<div class="evg2"><span>Name</span><input name="name" value="${esc(e?.name ?? name)}" spellcheck="false" placeholder="e.g. first stop">
       <span>Kind</span><select name="kind">${kinds}</select>
       <span>Time</span><span><input class="tm" name="t" value="${fmt(e?.t ?? t, true)}"${anchored.length ? ' disabled' : ''} spellcheck="false"> ${anchored.length ? `<span class="dim">⚓ ${anchored.length} boundar${anchored.length === 1 ? 'y follows' : 'ies follow'} it: ${esc(anchored.map(a => `${a.kind} ${a.id}.${a.edge}`).join(', '))} (set the measured time and re-time)</span>` : '<a data-x="tplay">= playhead</a>'}</span>
       ${e ? `<span>Measured</span><span><input class="tm" name="measured" value="${Number.isFinite(e.measured) ? fmt(e.measured, true) : ''}" placeholder="where it landed" spellcheck="false"> <a data-x="mplay">= playhead</a> · <a data-x="mclear">clear</a> <span class="dim">where it really landed in the chosen take</span></span>` : ''}
@@ -191,7 +191,7 @@ async function apply(body) {
 
 // ------------------------------------------------------------------ import an audio events.json
 export function openImport() {
-  const el = dialog('Import events', 'an audio events.json [{id, t, kind, note}] (the first film\'s audio/out/final/events.json: t in seconds)',
+  const el = dialog('Import events', 'an events.json from an audio tool: [{id, t, kind, note}], t in seconds',
     `<div class="evg2"><span>File</span><input type="file" name="file" accept=".json,application/json">
       <span>or paste</span><textarea name="json" spellcheck="false" placeholder='[{"id": "her_hi_there", "t": 141.86, "kind": "line", "note": "…"}]'></textarea>
       <span>Times in</span><select name="unit"><option value="auto">auto (seconds when they fit the song)</option><option value="s">seconds</option><option value="ms">milliseconds</option></select>

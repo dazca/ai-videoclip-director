@@ -162,7 +162,7 @@ fs.watch(DATA_ROOT, { recursive: true }, (_ev, name) => {
   if (!name) { clearTimeout(watchTimer.get('*')); watchTimer.set('*', setTimeout(() => notify('*', ['*']), 80)); return; }   // Windows drops names when its event buffer overflows
   const f = name.replace(/\\/g, '/');
   // (gen/: the runner's outputs, job.json and lock: the page follows requests.json and media.json instead; .history: the git mirror)
-  if (f.startsWith('.') || f.startsWith('_import-') || f.endsWith('.zip') || f.endsWith('.part') || f.endsWith('.tmp') || f.endsWith('.lock') || f.includes('/.snapshots') || f.includes('/.history') || f.includes('/.uploads') || f.includes('/thumbs/') || /\/gen(\/|$)/.test(f) || /\/(renders|sheets)(\/|$)/.test(f) || f.includes('/.sheet-')) return;
+  if (f.startsWith('.') || f.startsWith('_import-') || f.endsWith('.zip') || f.endsWith('.part') || f.endsWith('.tmp') || f.endsWith('.lock') || f.includes('/.snapshots') || f.includes('/.history') || f.includes('/.uploads') || f.includes('/thumbs/') || /\/gen(\/|$)/.test(f) || /\/(renders|sheets|exports\/package)(\/|$)/.test(f) || f.includes('/.sheet-')) return;
   const i = f.indexOf('/'); if (i < 0) return;
   clearTimeout(watchTimer.get(f));
   watchTimer.set(f, setTimeout(() => notify(f.slice(0, i), [f.slice(i + 1)]), 80));
@@ -530,6 +530,8 @@ http.createServer(async (req, res) => {
         // E4: the render command and starting / cancelling a render are the director's (page only: the agent proposes); E8: who
         // made a sheet / asked for a second opinion (provenance); E7: using a song version and uploading a song are the page's
         if (name === 'render_config' || name === 'render_start' || name === 'render_cancel' || name === 'render_propose' || name === 'sheet_make' || name === 'sheet_ask') body.via = fromPage ? 'page' : 'agent';
+        // C5: exporting the interactive HTML package is the director's (page only); an agent proposes one
+        if (name === 'package_start' || name === 'package_cancel' || name === 'package_propose') body.via = fromPage ? 'page' : 'agent';
         if (name === 'song_version_use' || name === 'song_upload' || name === 'song_version_add') body.via = fromPage ? 'page' : 'agent';
         // G5 / G6: uploading a file to import / start a project from is the page's; a personal backup (include_private) is the page's
         if (name === 'project_upload' || name === 'project_import' || name === 'project_export') body.via = fromPage ? 'page' : 'agent';

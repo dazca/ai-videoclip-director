@@ -288,6 +288,15 @@ the constants. Song takes: `suno_brief` (style + lyrics with [section] tags, wit
 calls Suno); register a take they bring back with `song_version_add` (an LRC if you have one) and show `song_version_plan`; using it
 is theirs (Lyrics › versions…), then re-time the events to the new take (E1).
 
+**The interactive HTML package (C5).** When the cut is rendered and the director wants the web hand-off, propose it:
+`package_propose {why, against?}` (a draft request of kind `package`; `against` = a done render id, default the newest). You never
+start it and never name a path or a command: the director presses File › Export › Interactive HTML package… (a confirm: the
+composition of their Render settings, the render it is checked against), and the workbench runs its own exporter
+(`exporters/hyperframes-html/export.mjs --interactive`) then `verify.mjs --against` that render, one heavy job at a time with the
+renders. `renders_get` then lists `exports` (the jobs) and `packages` (each with `report {frames, pass, rate, verdict, worst[]}`): tell
+the director the pass rate and, if it fails, which song times differ. It works while the project is locked for render (that is when
+it is wanted). A note on a Queue row: `notes_add {target: {stage: "final", kind: "request", id}}`.
+
 ## Projects as zips, a new project from a song (G5 / G6)
 
 `project_export` writes the project as `exports/<p>-<stamp>.zip` (a manifest with sha256s): use it to hand a project over or back

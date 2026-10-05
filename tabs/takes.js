@@ -84,7 +84,7 @@ export function takesHtml(shot) {
   if (!shot) return '<div class="dim tkno">save the storyboard first: a pick names a saved shot</div>';
   const takes = shotTakes(shot), s = stateFor(shot, takes), t = takes.find(x => x.media === s.sel), pick = shot.clip;
   const head = `<div class="tkhd"><span class="dim">${takes.length ? `${takes.length} take${takes.length > 1 ? 's' : ''}` : 'no takes yet'}</span>${pick ? `<span class="tkpkd" title="${esc(pick.note || '')}">★ ${esc(T.takeName({ ...pick, job: store.mediaById?.[pick.media]?.job }))}${pick.out_ms != null ? ` ${(pick.in_ms / 1000).toFixed(2)}–${(pick.out_ms / 1000).toFixed(2)} s` : ''}${pick.alt?.length ? ` · ${pick.alt.length} alt` : ''}</span>` : '<span class="dim">· none picked</span>'}</div>`;
-  if (!takes.length) return `<div class="tkw" data-shot="${esc(shot.id)}">${head}<div class="dim tkno">runner outputs of this shot's requests and media linked to it (media_update shots) show here</div></div>`;
+  if (!takes.length) return `<div class="tkw" data-shot="${esc(shot.id)}">${head}<div class="dim tkno">the takes of this shot show here: its requests' outputs, and files you import (File › Import media… › Use as… › take)</div></div>`;
   // the cards (+ the agent's proposals) and the editor: one column in the Shot panel, side by side in Review › Takes
   return `<div class="tkw" data-shot="${esc(shot.id)}"><div class="tkcol">${head}<div class="tkstrip0">${takes.map(x => cardHtml(x, shot, s)).join('')}</div>${proposalsHtml(shot, takes)}</div>${t ? editorHtml(t, shot, s) : ''}</div>`;
 }

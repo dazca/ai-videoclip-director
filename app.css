@@ -1186,6 +1186,7 @@ button.on { color: var(--acc); }
 .fnrow button { height: 16px; line-height: 12px; font-size: 11px; padding: 0 4px; flex: none; cursor: pointer; } .fnrow button[data-x=approve]:not(:disabled) { color: #9fd8b0; } .fnrow button:disabled { opacity: .35; cursor: default; }
 .fnj { color: #9db7d6; cursor: pointer; flex: none; }
 .fnlockbar { flex: none; height: 18px; line-height: 18px; padding: 0 6px; background: #1d3048; color: #b8d8f8; font-size: 11px; border-bottom: 1px solid #2e5078; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fnlockbar a[data-runcmd] { color: #f0f6ff; text-decoration: underline; cursor: pointer; }
 .apws { display: flex; flex-direction: column; height: 100%; } .apws .aplist { flex: 1; min-height: 0; }
 .apraw { flex: none; max-height: 30%; overflow: auto; border-top: 1px solid var(--line); padding: 2px 6px; font-size: 11px; } .apraw summary { cursor: pointer; color: var(--dim); }
 .fnchg { display: flex; gap: 6px; align-items: center; padding: 1px 6px 2px 44px; border-bottom: 1px solid var(--line2); font-size: 11px; background: #22191a; } .fnchg input { flex: 1; height: 18px; font-size: 12px; }

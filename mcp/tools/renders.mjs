@@ -1,6 +1,7 @@
 // MCP tools: E4 render jobs and E8 contact sheets + second opinions (lib/ops/renders.mjs, js/renders.js). The agent proposes
 // a render and reviews sheets; setting the render command, starting and cancelling a render are the director's, in the page
-// (render_config / render_start / render_cancel: no tool), and asking for a second opinion is the director's button.
+// (render_config / render_start / render_cancel: no tool), and asking for a second opinion is the director's button. C5: the agent
+// proposes an HTML package export (package_propose); starting / cancelling it is the director's (package_start / package_cancel: no tool).
 import { z } from 'zod';
 import { mcp, op, wrap, project, time, by } from './_shared.mjs';
 
@@ -10,8 +11,11 @@ mcp.registerTool('renders_get', {
     + 'set: false = none yet), the machine (free RAM now, the render lock: one render at a time), the render jobs (requests of kind "render": scope excerpt | chapter | full, '
     + 't0 / t1, status draft | running | done | failed, run {phase waiting_ram | warming | rendering | sheets | done | failed, ram, out, sheets, revision}, outputs, '
     + 'the log\'s tail of a running one, or of `id`), the etiquette\'s order (chapters not rendered yet: the full film comes after them), and the sheets with their latest '
-    + 'review and open second-opinion asks. A render is local and costs $0, but it is heavy: you propose one (render_propose) and the director starts it in the page.',
-  inputSchema: { project, id: z.string().optional().describe('a render request id: its full log tail'), log_lines: z.number().int().optional() },
+    + 'review and open second-opinion asks. A render is local and costs $0, but it is heavy: you propose one (render_propose) and the director starts it in the page. '
+    + 'C5: `exports` (the HTML package jobs: status, run {phase waiting_ram | exporting | verifying | done | failed, report}), `packages` (each done package: dir, the render '
+    + 'it was checked against, report {frames, pass, rate, verdict, worst [{t, mad, psnr, image}]}, revision), `against` (the render the next export would be checked '
+    + 'against) and `composition` (the folder the director set).',
+  inputSchema: { project, id: z.string().optional().describe('a render or package request id: its full log tail'), log_lines: z.number().int().optional() },
 }, wrap((a) => op('renders_get', a)));
 
 mcp.registerTool('render_propose', {
@@ -23,6 +27,17 @@ mcp.registerTool('render_propose', {
     + 'linked to the request and the revision; then review the sheets (sheets_get, sheet_review).',
   inputSchema: { project, scope: z.enum(['excerpt', 'chapter', 'full']), t0: time.optional(), t1: time.optional(), chapter: z.string().optional(), why: z.string().optional(), by },
 }, wrap((a) => op('render_propose', { ...a, t0: ms(a.t0), t1: ms(a.t1) })));
+
+mcp.registerTool('package_propose', {
+  title: 'Propose an interactive HTML package export',
+  description: 'C5: the composition as an interactive HTML package (exporters/hyperframes-html: byte-identical, lazy media, the click-anything layer), checked frame by '
+    + 'frame against a render. A DRAFT request of kind "package": why = what it is for ("hand-off to the web site"), against = a done render id (default: the newest done '
+    + 'render). You never start it, and you name no path and no command: the composition folder, the exporter and the output folder are the director\'s render settings '
+    + 'and the workbench\'s own scripts. The director starts it in the page (File › Export › Interactive HTML package…, one heavy job at a time with renders, the RAM '
+    + 'floor); the package is written to exports/package/<id>/ and registered with its frame-match report (renders_get: exports, packages). Allowed while the project is '
+    + 'locked for render (that is when it is wanted).',
+  inputSchema: { project, why: z.string().optional(), against: z.string().optional().describe('a done render request id (renders_get)'), by },
+}, wrap((a) => op('package_propose', a)));
 
 mcp.registerTool('sheet_make', {
   title: 'Make a contact sheet',

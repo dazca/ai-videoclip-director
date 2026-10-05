@@ -250,7 +250,7 @@ SPEC v3: "Once this is done, we fill other gaps and let user do the final approv
 - Where: `tabs/final.js`, `revisions.json`.
 - Size: S. Dep: B7, C1.
 
-**C5. Render handoff from the page.**
+**C5. Render handoff from the page.** (done 2026-10-05: `core/package.js`, `lib/ops/renders.mjs` package_*, verify v30)
 - Missing: File › Export › **Interactive HTML package**. The helper runs `exporters/hyperframes-html/export.mjs` and then `verify.mjs --against <render>`, and shows the frame-match report. Today this exists only as a CLI and is missing from the File menu.
 - Where: `core/projects.js`, `serve.mjs` (helper op), `exporters/`.
 - Why: the standing requirement "interactive HTML export, 1:1 with the render".
@@ -644,3 +644,12 @@ Rules for the loop:
   song in the page (the wizard takes a dropped song + a .txt / .lrc file, chunked upload with progress, the server reads the song: ffprobe,
   waveform, energy, the beat grid estimated (`tempo`), lyric timings; no path typing). Server-side for now (the G3 browser backends will
   reuse the same format); verify v29, tools/security-projectzip.mjs.
+- 2026-10-05: done: C5 the render handoff from the page (File › Export › Interactive HTML package…: the confirm with the composition of
+  the render settings and the render it is checked against; the workbench's exporter --interactive, then verify.mjs --against the render,
+  an excerpt compared inside its range (`--from / --to`); the frame-match report with the worst frames as thumbnails; registered in
+  renders.json `packages[]` with the revision; one heavy job at a time with the renders (the machine lock, the RAM floor); an agent's
+  `package_propose`, the page-only `package_start` / `package_cancel`) and the review #3 leftovers (a Notes column in Review › Queue on
+  `final / request / <id>`; the timeline's scroll clamped to the song's end when it is shown again, v19 intact; the low items: no developer
+  words in Costs / Takes / the event dialogs, "xp-desktop" offered only where used, "+ chapter" instead of a "no chapter" dropdown, the
+  chapters column's hint, "1 look", "No song time", two-decimal estimates, the lock bar's links to the exports); verify v30,
+  tools/security-package.mjs.

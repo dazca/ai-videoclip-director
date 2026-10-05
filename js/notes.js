@@ -32,7 +32,7 @@ export const KINDS = {
   characters: ['stage', 'asset', 'tree', 'node', 'use'],
   scenery: ['stage', 'asset', 'tree', 'node', 'use'],
   storyboard: ['stage', 'scene', 'shot'],
-  final: ['stage', 'shot'],
+  final: ['stage', 'shot', 'request'],   // request: a row of Review › Queue (its Notes column)
   timeline: ['time'],
 };
 export const STATUSES = ['open', 'absorbed', 'dismissed'];

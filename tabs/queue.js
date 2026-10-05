@@ -36,6 +36,8 @@ import * as SB from '../js/storyboard.js';
 import { openWaves } from './waves.js';
 import { ui } from '../core/palette.js';
 import { renderActions } from '../core/renders.js';
+import { packageActions } from '../core/package.js';
+import { NotesColumn, NC_MIN } from '../core/notescol.js';
 const CLS = { draft: '', approved: 's-approved', queued: 's-review', running: 's-review', done: 's-locked', failed: 's-changes', rejected: 's-changes', withdrawn: 's-archived' };
 // who wrote a request (lib/ops/requests.mjs requestAuthor): the page's own drafts are the director's; withdrawn = its author took it back
 const author = (r) => { const v = r.log?.[0]?.via; return v === 'page' ? 'director' : v === 'agent' ? 'agent' : r.by === 'director' ? 'director' : 'agent'; };
@@ -101,7 +103,7 @@ export default {
     // the generator per kind (Settings > Generator; settings.json generators, default fal) and the runner's live progress
     // (no choice made: the server's default from generators_get: fal with a key, else Open in another app; review #3 blocker 5)
     let GI = null;
-    const genOf = (r) => r.kind === 'render' ? 'local render' : (['draft', 'approved', 'failed'].includes(r.status) ? null : r.generator || r.handoff?.generator) || store.settings?.generators?.[genKindOf(r)] || GI?.default || 'fal';
+    const genOf = (r) => r.kind === 'render' ? 'local render' : r.kind === 'package' ? 'local export' : (['draft', 'approved', 'failed'].includes(r.status) ? null : r.generator || r.handoff?.generator) || store.settings?.generators?.[genKindOf(r)] || GI?.default || 'fal';
     const sel = new Set();   // ticked draft rows (Approve / Reject selected)
     const money = (x) => `$${(Number(x) || 0).toFixed(2)}`;
     const privRef = (p) => isPrivatePath(p) || !!store.mediaByPath?.[p]?.private;
@@ -125,7 +127,8 @@ export default {
     const counted = (c) => c?.counted === true || ['recorded', 'counted'].includes(c?.status);
     const costLbl = (r) => { if (!B.isHistory(r)) return `${money(r.actual_cost_usd)} spent`; const c = r.history.cost || {}; return counted(c) ? `${money(c.usd ?? r.actual_cost_usd)} spent` : c.usd != null ? `${money(c.usd)} est. (not counted)` : 'cost unknown'; };
     const actions = (r) => {
-      if (r.kind === 'render') return renderActions(r);   // E4: Render… (a confirm), Cancel, Log, the sheets: core/renders.js
+      if (r.kind === 'render') return renderActions(r);
+      if (r.kind === 'package') return packageActions(r);   // C5: Export… (the dialog), Progress, Cancel, Report, Log: core/package.js   // E4: Render… (a confirm), Cancel, Log, the sheets: core/renders.js
       const gen = genOf(r), runLbl = gen === 'openwith' ? 'Export prompt pack' : `Run · ${money(r.est_cost)}`;
       // made in another app (no fal key, or chosen): nothing is paid through the workbench, so it is approved at $0 (the cap untouched)
       if (r.status === 'draft' && gen === 'openwith') return `<button data-x="approve0" class="pri" title="approve it to be made in another app: Run exports its prompt pack; nothing is paid through the workbench ($0 against the cap)">Approve · $0 (another app)</button>${author(r) === 'director' ? '<button data-x="withdraw" title="your own draft: take it back (not a rejection)">Withdraw</button>' : '<button data-x="reject">Reject</button>'}`;
@@ -178,7 +181,7 @@ export default {
           <td><span class="chip ${CLS[r.status] || ''}"${r.status === 'withdrawn' ? ' title="its author took it back (not a rejection by the director)"' : ''}>${esc(r.status)}</span>${B.isHistory(r) ? '<div class="dim qhtag" title="imported from a job book: never run again">history</div>' : ''}</td><td>${esc(r.kind)}${r.recipe ? ' <span class="qrec" title="built from the photoreal recipe (its blocks are stored with the request)">recipe</span>' : ''}<div class="dim">${esc(B.isHistory(r) ? r.history.book : genOf(r))}</div>${r.video ? `<div class="dim qvid" title="${esc(PRICES[r.video.model]?.name || r.video.model)}">${esc(r.video.model)} · ${esc(r.video.seconds)} s${r.video.end ? ' · start→end' : ''}${r.video.ref_video ? ' · ref video' : ''}</div>` : ''}</td>
           <td>${t != null ? `<a data-t="${Number(t) || 0}">${esc(r.target)} ${fmt(t)}</a>` : esc(r.target || '')}</td>
           <td class="qp"><textarea data-x="prompt" rows="1" title="${esc(String(r.prompt || '').slice(0, 600))}" ${['draft', 'approved'].includes(r.status) ? '' : 'readonly'}>${esc(r.prompt)}</textarea>${(r.warnings || []).length ? `<div class="chreqw">${r.warnings.map(w => `<span>⚠ ${esc(w)}</span>`).join('')}</div>` : ''}</td>
-          <td><input data-x="cost" type="number" step="0.01" min="0" value="${Number(r.est_cost) || 0}" style="width:4.5em"${['draft', 'approved'].includes(r.status) ? '' : ' disabled'}>${r.takes > 1 ? `<div class="dim qtakes" title="the estimate covers every take">${r.takes} takes · ${money((Number(r.est_cost) || 0) / r.takes)} each</div>` : ''}</td>
+          <td><input data-x="cost" type="number" step="0.01" min="0" value="${(Number(r.est_cost) || 0).toFixed(2)}" style="width:4.5em"${['draft', 'approved'].includes(r.status) ? '' : ' disabled'}>${r.takes > 1 ? `<div class="dim qtakes" title="the estimate covers every take">${r.takes} takes · ${money((Number(r.est_cost) || 0) / r.takes)} each</div>` : ''}</td>
           <td class="refs">${thumbs(r.refs || [], '', refTags(r))}${(r.outputs || []).length ? `<span class="qarrow">→</span>${thumbs(r.outputs, 'out')}` : ''}${privBox(r)}</td>
           <td class="dim">${esc((r.at || '').replace('T', ' ').slice(5, 16))}</td>
           <td class="qbtns">${b ? batchActions(r, b) : B.isHistory(r) ? histActions(r) : actions(r)}</td></tr>`; }).join('')}`;
@@ -238,6 +241,11 @@ export default {
     };
     const batchAct = async (body, ok) => { try { const j = await store.op('batch_act', body); if (ok) toast(ok(j)); return j; } catch (er) { toast(`not done: ${er.message}`); return null; } };
     render();
+    // review #3 (UX 4): the Notes column here too: one cell per request row (target final / request / <id>), the 260 px minimum
+    new NotesColumn({ stage: 'final', scroller: $list, allStages: true, width: () => NC_MIN, scope: (n) => n.target.stage === 'final' && (n.target.kind === 'request' || n.target.kind === 'stage'),
+      top: { label: 'notes on the final cut', targets: [{ stage: 'final', kind: 'stage', id: null }] },
+      rows: () => [...$list.querySelectorAll('tr[data-id]')].map(e => ({ el: e, targets: [{ stage: 'final', kind: 'request', id: e.dataset.id }] })),
+      current: () => { const f = $list.querySelector('tr[data-id].sel, tr[data-id]:focus-within'); return f ? { stage: 'final', kind: 'request', id: f.dataset.id } : null; } });
     store.generators().then(g => { GI = g; render(); }).catch(() => {});
     // results made in another app, dropped (or picked) on a handed-off row: uploaded into its results/ (handoff_upload, page
     // only), then collected (request_run: its outputs at $0)

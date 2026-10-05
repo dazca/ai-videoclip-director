@@ -12,6 +12,7 @@ import { assetApproval } from '../js/flow.js';
 import { lookWorld } from '../js/worlds.js';
 
 const M = (p) => store.mediaByPath[p];
+const nn = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;   // "1 look · 0 dances" (review #3 LOW 15)
 const lock = (p) => isPrivatePath(p) ? '<i class="lock" title="private: crop of a real photo; local only, never exported">🔒</i>' : '';
 const thumb = (p) => mediaAttr(M(p)?.thumb || p);
 const arr = (v) => Array.isArray(v) ? v : [];   // looks / clips written by hand may lack images, garments, used…
@@ -52,7 +53,7 @@ function charGrid() {
   const lk = (e, l) => { const hero = arr(l.images).find(p => /b_variations|H0/.test(p)) || arr(l.images)[0];
     return `<div class="lk" data-look="${esc(e.id)}/${esc(l.id)}" data-dock="look:${esc(e.id)}/${esc(l.id)}" title="${esc(`${l.name || l.id}${arr(l.garments).length ? ': ' + arr(l.garments).join(', ') : ''}${lookWorld(l) ? ' · world ' + l.context : ''} · ${l.status || 'draft'}`)}">${im(hero, 'lki')}<span class="lkn">${esc(l.name || l.id)}</span><span class="lkm"><i class="lks s-${l.status === 'approved' ? 'approved' : 'draft'}"></i>${lookWorld(l) ? esc(l.context) : '<em>no world</em>'}</span></div>`; };
   const lead = (e) => `<div class="cc card lead" data-ent="${esc(e.id)}" data-open="${esc(e.id)}">
-      <div class="ci"><div class="ch">${achip(e)}<b>${esc(e.name)}</b>${e.private_refs?.length ? ' <i class="lock" title="has private identity refs (local only)">🔒</i>' : ''}</div><div class="cm dim">${(e.looks || []).length} looks · ${(e.motion || []).length} dances${e.lives ? ' · ' + e.lives.length + ' lives' : ''}</div><div class="cr">${esc(e.role || '')}</div></div>
+      <div class="ci"><div class="ch">${achip(e)}<b>${esc(e.name)}</b>${e.private_refs?.length ? ' <i class="lock" title="has private identity refs (local only)">🔒</i>' : ''}</div><div class="cm dim">${nn((e.looks || []).length, 'look')} · ${nn((e.motion || []).length, 'dance')}${e.lives ? ' · ' + e.lives.length + ' lives' : ''}</div><div class="cr">${esc(e.role || '')}</div></div>
       <div class="cb">${im(e.face, 'face')}${im(e.body, 'body')}</div>
       <div class="clooks">${(e.looks || []).filter(l => l && l.id).map(l => lk(e, l)).join('')}<div class="lk add" data-newlook="${esc(e.id)}" title="design a new costume for ${esc(e.name)}: a draft generation request with a cost estimate"><span class="plus">+</span><b>New look</b></div></div>
       <div class="strip">${cells(e.sheets?.angles?.[0])}${cells(e.sheets?.expressions?.[0])}${!e.sheets?.angles ? (e.sheets?.['full body'] || []).map(p => im(p, 'sq')).join('') + (e.looks || []).flatMap(l => arr(l.images).slice(2, 4)).map(p => im(p, 'sq')).join('') : ''}</div></div>`;

@@ -129,10 +129,11 @@ export function finalView(I) {
   }
 
   // 7. draft requests (a render job is not approved: the director starts it with Render…, E4: Final › Renders and sheets)
-  for (const r of reqs.filter(x => x.status === 'draft' && x.kind !== 'render')) {
+  for (const r of reqs.filter(x => x.status === 'draft' && x.kind !== 'render' && x.kind !== 'package')) {
     const l = A.linkOf(r), shotId = /^shot:/.test(r.target || '') ? r.target.slice(5) : null, sh = shotId ? shots.find(s => s.id === shotId) : null;
     const stage = l ? A.TYPE[l.type || 'character']?.stage : null;
     const targets = l ? [{ stage, kind: 'tree', id: `${l.id}/${l.tree || A.rootTree(l.type || 'character')}` }] : sh ? [{ stage: 'final', kind: 'shot', id: sh.id }] : [{ stage: 'final', kind: 'stage', id: null }];
+    targets.push({ stage: 'final', kind: 'request', id: r.id });   // the notes written on its Queue row show here too
     rows.push({ key: 'request:' + r.id, group: 'requests', kind: 'request', id: r.id, title: `${r.kind || 'request'} · ${r.id}`, sub: `${r.target || (l ? `${l.type || 'character'}:${l.id} ${l.tree || ''}` : '')}${r.tool ? ' · ' + r.tool : ''}${r.prompt ? ' · ' + clip(r.prompt, 90) : ''}`,
       ...(sh ? { t0: sh.t0, t1: sh.t1 } : {}), thumb: null, status: 'draft', st: 'draft', why: (r.warnings || []).length ? '⚠ ' + clip(r.warnings[0], 80) : `by ${r.by || 'agent'}: approve to commit $${money(r.est_cost).toFixed(2)}`,
       est_usd: money(r.est_cost) || null, spent_usd: null, commit_usd: money(r.est_cost), targets, jump: { view: 'queue' },

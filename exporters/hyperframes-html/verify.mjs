@@ -3,7 +3,8 @@
 // package of it (for example the same export without --lazy-media: then frames must match pixel for pixel).
 //
 //   node verify.mjs <outDir> --against <render.mp4 | otherPackageDir> [--n 12 | --times 4,18.5,... | --every 2]
-//                   [--seams] [--play 6] [--report <dir>] [--max-mad 5] [--min-psnr 20]
+//                   [--seams] [--play 6] [--report <dir>] [--max-mad 5] [--min-psnr 20] [--from s --to s]
+// --from / --to: the render is an excerpt that starts at the composition's time --from (frames are compared inside the range)
 //
 // --every s: a frame every s seconds; --seams: also just after the start and just before the end of every visible
 // range in manifest.json (shot changes, where a lazily loaded file first shows). Against a package the thresholds
@@ -59,17 +60,23 @@ if (!REF_PKG) {
   if (!(FPS > 0)) { console.error(`cannot read the frame rate of ${RENDER} (r_frame_rate ${vs.r_frame_rate})`); process.exit(2); }
   startPts = Number(vs.start_time) || 0;
 }
+// --from s [--to s]: the render is an excerpt of the composition (its first frame is the composition's time --from): frame times are
+// taken inside [from, to) and the render is read at t - from (the workbench's package job checks against an excerpt render this way)
+const FROM = Math.max(0, Number(argv('--from', 0)) || 0), TO = Math.min(D, argv('--to') != null ? Number(argv('--to')) : D);
+if (!(TO > FROM)) { console.error(`--from / --to: a range inside the composition (0-${D} s)`); process.exit(2); }
+R.range = { from: FROM, to: TO };
 let times;
 if (argv('--times')) times = argv('--times').split(',').map(Number);
-else if (argv('--every')) { const e = Number(argv('--every')); times = e > 0 ? Array.from({ length: Math.floor((D - 1e-3) / e) + 1 }, (_, k) => k * e) : []; }
-else { const n = Number(argv('--n', 12)); times = Array.from({ length: n }, (_, k) => D * (k + 0.5) / n); }
+else if (argv('--every')) { const e = Number(argv('--every')); times = e > 0 ? Array.from({ length: Math.floor((TO - FROM - 1e-3) / e) + 1 }, (_, k) => FROM + k * e) : []; }
+else { const n = Number(argv('--n', 12)); times = Array.from({ length: n }, (_, k) => FROM + (TO - FROM) * (k + 0.5) / n); }
 if (flag('--seams')) for (const a of M.assets) for (const [p, q] of (a.usage && a.usage.visible) || []) times.push(p + 0.05, q - 0.05);
-times = [...new Set(times.filter((t) => t >= 0 && t < D).map((t) => +t.toFixed(3)))].sort((p, q) => p - q);
+times = [...new Set(times.filter((t) => t >= FROM && t < TO).map((t) => +t.toFixed(3)))].sort((p, q) => p - q);
 if (!times.length || times.some((t) => !Number.isFinite(t))) { console.error('need at least one frame time: --n >= 1, --every s or --times a,b,c (numbers)'); process.exit(2); }
 // frame times: against a package, the composition's fps (else 30, the runtime's canonical rate). The player drives
 // the timeline directly or through the HyperFrames runtime (which snaps to frames) depending on how fast the timeline
 // registers, so both sides are sent exact frame times.
 if (REF_PKG) FPS = Number(M.composition.fps) || 30;
+const FROM_I = REF_PKG ? 0 : Math.round(FROM * FPS);   // the render's frame 0 is the composition's frame FROM_I
 const frames = times.map((t) => Math.min(Math.round(t * FPS), Math.floor((D - 1e-3) * FPS)) / FPS);
 
 // ---------- 2. load
@@ -134,14 +141,14 @@ for (const t of frames) {
   const i = Math.round(t * FPS);
   const { shot, pend } = await capture(P, t);
   const ref = REF ? await capture(REF, t) : null;
-  const A = rgb(shot, W, H), B = REF ? rgb(ref.shot, W, H) : rgb(RENDER, W, H, Math.max(0, startPts + (i - 0.25) / FPS).toFixed(4));
+  const A = rgb(shot, W, H), B = REF ? rgb(ref.shot, W, H) : rgb(RENDER, W, H, Math.max(0, startPts + (i - FROM_I - 0.25) / FPS).toFixed(4));
   let sad = 0, se = 0, diff = 0; for (let k = 0; k < A.length; k++) { const d = A[k] - B[k]; sad += d < 0 ? -d : d; se += d * d; if (d) diff++; }
   const mad = sad / A.length / 255 * 100, mse = se / A.length, psnr = mse === 0 ? 99 : 10 * Math.log10(255 * 255 / mse);
   const name = `cmp-${t.toFixed(3)}.jpg`;
   const bad = mad > MAX_MAD || psnr < MIN_PSNR;
   writeFileSync(join(REPORT, 'ours.png'), shot);
   if (REF) writeFileSync(join(REPORT, 'ref.png'), ref.shot);
-  if (!REF || bad) execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', join(REPORT, 'ours.png'), ...(REF ? ['-i', join(REPORT, 'ref.png')] : ['-ss', Math.max(0, startPts + (i - 0.25) / FPS).toFixed(4), '-i', RENDER]),
+  if (!REF || bad) execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', join(REPORT, 'ours.png'), ...(REF ? ['-i', join(REPORT, 'ref.png')] : ['-ss', Math.max(0, startPts + (i - FROM_I - 0.25) / FPS).toFixed(4), '-i', RENDER]),
     '-filter_complex', `[1:v]scale=${W}:${H}[r];[0:v][r]hstack=inputs=2,scale=1600:-2`, '-frames:v', '1', '-q:v', '4', join(REPORT, name)]);
   const pendAll = [...pend, ...(ref ? ref.pend.map((x) => 'ref:' + x) : [])];
   res.push({ t: +t.toFixed(3), frame: i, madPct: +mad.toFixed(3), psnr: +psnr.toFixed(2), differingSamples: diff, pendingMedia: pendAll, image: !REF || bad ? name : undefined });

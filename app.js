@@ -18,7 +18,8 @@ import './core/importmedia.js';   // File › Import media…, drop files on the
 import './core/compexport.js';    // File › Export composition data… (E9: edl.json for the HyperFrames composition)
 import './core/projectzip.js';    // File › Export project as zip… / Import project from zip… (G5; a .zip dropped on the page)
 import './core/events.js';        // E1: named events (+ Named event here, the event dialog, Re-time after the take…, Import events…)
-import './core/renders.js';       // E4 / E8: render jobs (Render… with a confirm, settings), contact sheets, second opinions
+import './core/renders.js';
+import './core/package.js';       // C5: File › Export › Interactive HTML package… (the exporter + its frame match against the render)       // E4 / E8: render jobs (Render… with a confirm, settings), contact sheets, second opinions
 import { mountRail } from './core/rail.js';
 import { wizard } from './core/wizard.js';
 import { watchCode } from './core/stale.js';

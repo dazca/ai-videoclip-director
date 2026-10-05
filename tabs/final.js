@@ -34,7 +34,8 @@ export class FinalList {
     if (panels) mountRenders(this.$('.fnrend'));
     if (notes) this.nc = new NotesColumn({ stage, scroller: this.$('.fnlist'), allStages: true,
       top: { label: 'notes on the final cut', targets: [{ stage: 'final', kind: 'stage', id: null }] },
-      scope: (n) => n.target.stage === 'final' || this.tkeys?.has(keyOf(n.target)),
+      // a note on a Queue row (final / request) shows here only while that request is a row (a draft): the others stay in the Queue
+      scope: (n) => (n.target.stage === 'final' && n.target.kind !== 'request') || this.tkeys?.has(keyOf(n.target)),
       rows: () => [...this.el.querySelectorAll('.fnlist .fnrow[data-key]')].map(e => { const r = this.byKey?.get(e.dataset.key), nx = e.nextElementSibling?.classList.contains('fnchg') ? e.nextElementSibling : null; return r ? (nx ? { els: [e, nx], targets: r.targets } : { el: e, targets: r.targets }) : null; }).filter(Boolean),
       current: () => { const f = this.el.querySelector('.fnrow.on'); return f ? this.byKey?.get(f.dataset.key)?.targets[0] || null : null; } });
     el.addEventListener('click', (e) => this.click(e));
@@ -88,7 +89,7 @@ export class FinalList {
       + (this.o.panels ? (L ? `<span class="fnlocked" title="${esc(`locked by the director at ${String(L.at).replace('T', ' ')}${L.summary ? '\n' + L.summary : ''}\nagents cannot change anything until you unlock`)}">🔒 Locked for render · ${esc(L.revision)}</span><button data-x="unlock" title="agents may write again">Unlock</button>`
         : '<span class="dim" title="the stage bar’s Lock for render…: close a revision (the final snapshot) and lock the project">lock: the stage bar ↑</span>') : '');   // review #3 (UX 8): one Lock button, the bar's
     const lb = this.$('.fnlockbar'); lb.hidden = !(L && this.o.panels);
-    lb.innerHTML = L && this.o.panels ? `🔒 <b>Locked for render</b> · ${esc(L.revision)} (the final snapshot) · ${esc(String(L.at).replace('T', ' ').slice(0, 16))}${L.ready === false ? ` · locked with ${esc((L.failing || []).join(', '))} failing` : ''} · agents cannot change anything (409) until you unlock` : '';
+    lb.innerHTML = L && this.o.panels ? `🔒 <b>Locked for render</b> · ${esc(L.revision)} (the final snapshot) · ${esc(String(L.at).replace('T', ' ').slice(0, 16))}${L.ready === false ? ` · locked with ${esc((L.failing || []).join(', '))} failing` : ''} · agents cannot change anything (409) until you unlock · next: <a data-runcmd="file.exportComposition" title="the picks as edl.json for the composition">Export composition data…</a>, render it, then <a data-runcmd="file.exportPackage" title="the composition as an interactive HTML package, checked frame by frame against the render">Export the HTML package…</a>` : '';
     if (this.o.panels) this.$('.fntop').innerHTML = this.checklistHtml(v) + this.costsHtml(v.costs);
     const gs = FN.GROUPS.map(g => ({ g, rs: rows.filter(r => r.group === g.id) })).filter(x => x.rs.length);
     const on = this.el.querySelector('.fnrow.on')?.dataset.key;
@@ -112,7 +113,7 @@ export class FinalList {
   // song time (an asset tree, a request without a shot) in a last group
   timeGroups(rows) {
     const secs = [...(store.song?.sections || [])].sort((a, b) => a.t0 - b.t0).map(s => ({ label: store.secLabel(s), t0: s.t0, t1: s.t1, rs: [] }));
-    const none = { label: 'no song time', t0: null, rs: [] };
+    const none = { label: 'No song time', t0: null, rs: [] };
     for (const r of rows) { if (r.t0 == null) { none.rs.push(r); continue; } (secs.find(g => r.t0 >= g.t0 && r.t0 < g.t1) || secs[secs.length - 1] || none).rs.push(r); }
     for (const g of secs) g.rs.sort((a, b) => a.t0 - b.t0);
     return [...secs, none].filter(g => g.rs.length);

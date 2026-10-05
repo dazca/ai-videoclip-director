@@ -11,6 +11,7 @@ const CSS = `.tl .col-chapters .it{overflow:hidden}
 .tl .chp b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
 .tl .chp i{display:block;font-style:normal;font-size:10px;color:var(--chc,#aaa);white-space:nowrap}
 .tl .chp span{display:block;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl .chp.chnone{--chc:var(--line);background:none;cursor:default} .tl .chp.chnone span{white-space:normal}
 .tl .chp.st-planned{--chc:#8a8f98}.tl .chp.st-generating{--chc:#f5a524}.tl .chp.st-built{--chc:#5aa9e6}.tl .chp.st-approved{--chc:#46a758}`;
 
 export function chaptersColumn(tl, store) {
@@ -25,6 +26,12 @@ export function chaptersColumn(tl, store) {
         const e = document.createElement('div'); e.className = 'it';
         e.innerHTML = `<div class="chp st-${esc(ch.status)}" data-act="seek" data-t="${ch.t0}" data-sel="chapter:${esc(ch.id)}" title="${esc(`${ch.id} ${ch.name} · ${fmt(ch.t0, true)}–${fmt(ch.t1, true)} · ${ch.status}: ${ch.why}${ch.owner ? '\nowner: ' + ch.owner : ''}${ch.file ? '\nbuilt in: ' + ch.file : ''}\n(double-click: open in the storyboard)`)}"><b>${esc(ch.name)}</b><i>${esc(ch.status)}${ch.shots ? ` ${ch.picked}/${ch.shots}` : ''}</i>${ch.owner ? `<span>${esc(ch.owner)}</span>` : ''}</div>`;
         c.body.appendChild(e); c.items.push({ t0: ch.t0, t1: ch.t1, el: e, x: ch });
+      }
+      // review #3 LOW 16: shown with no chapter yet, the band says how to make one (never a blank column)
+      if (!c.items.length && store.song?.duration_ms > 0) {
+        const e = document.createElement('div'); e.className = 'it';
+        e.innerHTML = '<div class="chp chnone" title="group scenes into chapters in the Storyboard: a scene header\'s + chapter"><span>no chapters yet: Storyboard › a scene\'s + chapter</span></div>';
+        c.body.appendChild(e); c.items.push({ t0: 0, t1: Math.min(store.song.duration_ms, 30000), el: e, x: null });
       }
     },
     act(c, a) { if (a.dataset.act === 'seek') tl.seek(Number(a.dataset.t)); },

@@ -2043,6 +2043,36 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
     { over: over.error, privImp: privImp.error, outside: outside.error, up: up.status, upImp: upImp.status });
 }
 // ==================== 29. (G5) the project as a zip: END ====================
+// ==================== 30. (C5) the HTML package export: the agent proposes, the page starts ====================
+// package_propose over MCP: a draft request of kind package (why, against); nothing it names is a path or a command; no tool starts
+// or cancels it (the HTTP ops answer 403 to the agent token); renders_get lists it under exports; request_run refuses it; a note on
+// a Queue row (final / request / <id>) over notes_add, 404 for an unknown request; allowed while the project is locked for render.
+{
+  const XP = 'mcp-pkg';
+  S.duplicateProject(PROJECT, XP, false);
+  const AGENT_TOKEN = fs.readFileSync(path.join(DATA, '.wb-agent-token'), 'utf8').trim();
+  const agentOp = (name, body = {}) => fetch(`${URL_}/api/op/${name}?project=${XP}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-wb-agent-token': AGENT_TOKEN }, body: JSON.stringify(body) }).then(async r => ({ status: r.status, body: await r.json().catch(() => null) }));
+  const tl = (await mcp.listTools()).tools.map(t => t.name);
+  const pp = await call(mcp, 'package_propose', { project: XP, why: 'hand-off to the web site', composition: 'C:/x', command: ['calc'] });
+  const id = pp.request?.id, RJ = () => JSON.parse(fs.readFileSync(path.join(DATA, XP, 'requests.json'), 'utf8'));
+  const rq = RJ().items.find(r => r.id === id);
+  const rg = await call(mcp, 'renders_get', { project: XP });
+  const st = await agentOp('package_start', { id }), cn = await agentOp('package_cancel', { id });
+  const run = await call(mcp, 'request_run', { project: XP, ids: [id] });
+  check('C5 package_propose over MCP: a draft request of kind package with its why only (no path, no command); no tool starts or cancels it (HTTP 403 to the agent); renders_get lists it under exports with the composition and the render it would be checked against; request_run refuses it',
+    !pp.error && rq?.kind === 'package' && rq.status === 'draft' && JSON.stringify(rq.package) === '{"why":"hand-off to the web site"}' && tl.includes('package_propose') && !tl.includes('package_start') && !tl.includes('package_cancel')
+    && st.status === 403 && cn.status === 403 && !rg.error && rg.exports?.some(x => x.id === id && x.status === 'draft') && 'composition' in rg && 'against' in rg && Array.isArray(rg.packages)
+    && !(run.started || []).length && (run.refused || []).some(x => /package/.test(x.why)),
+    { pp: pp.error || pp.warnings, pkg: rq?.package, st: st.status, cn: cn.status, rg: rg.error || { exports: rg.exports?.length, composition: rg.composition }, run: run.error || run.refused });
+  const nOk = await call(mcp, 'notes_add', { project: XP, target: { stage: 'final', kind: 'request', id }, text: 'needs the 1080p render' });
+  const nBad = await call(mcp, 'notes_add', { project: XP, target: { stage: 'final', kind: 'request', id: 'nope' }, text: 'x' });
+  const lk = await post(`/api/op/final_lock?project=${XP}`, { force: true, summary: 'mcp' }, { origin: URL_ });
+  const lp = await call(mcp, 'package_propose', { project: XP, why: 'after the lock' }), lr = await call(mcp, 'render_propose', { project: XP, scope: 'excerpt', t0: 0, t1: 2000 });
+  check('C5 a note on a Queue row: notes_add target final / request / <id> (404 for an unknown request); on a project locked for render package_propose still works (a draft) while render_propose is 409',
+    !nOk.error && JSON.stringify(nOk).includes('"kind":"request"') && /404/.test(nBad.error || '') && lk.status === 200 && !lp.error && lp.request?.kind === 'package' && /409/.test(lr.error || ''),
+    { nOk: nOk.error || 'ok', nBad: nBad.error, lk: lk.status, lp: lp.error || lp.request?.status, lr: lr.error });
+}
+// ==================== 30. (C5) the HTML package export: END ====================
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {
   // ---------------------------------------------------------------- clean up whatever happened

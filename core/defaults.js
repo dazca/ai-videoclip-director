@@ -256,7 +256,7 @@ menus.contribute('menubar:File', [
   '-', 'file.snapshot', { label: 'Revert to snapshot', submenu: () => projects.snaps.length ? projects.snaps.slice(0, 30).map(s => ({ label: s.message || s.id, detail: s.at.replace('T', ' ').slice(0, 16) + (s.auto ? ' auto' : ''), run: () => projects.restore(s.id) })).concat(projects.snaps.length > 30 ? ['-', 'file.revert'] : []) : [{ label: '(no snapshots yet: Ctrl+S)', disabled: true }] },
   '-', 'file.saveAs', 'file.duplicate',
   '-', 'file.importMedia', { label: 'Import', submenu: ['song', 'stems', 'lyrics', 'images'].map(w => ({ cmd: 'file.import', args: { what: w }, label: `${w}…` })) },
-  { label: 'Export', submenu: ['file.exportBundle', 'file.exportCsv', 'file.exportBoard'] },
+  { label: 'Export', submenu: [{ cmd: 'file.exportPackage', label: 'Interactive HTML package…' }, '-', 'file.exportBundle', 'file.exportCsv', 'file.exportBoard'] },
   '-', 'file.delete',
 ]);
 menus.contribute('menubar:Edit', ['edit.undo', 'edit.redo', '-', 'edit.find', 'edit.rename', 'edit.duplicate', 'edit.delete', '-', 'edit.approve', 'edit.changes', 'edit.draft', '-', 'edit.selectSection', 'edit.clearSel', 'edit.copyTime', '-', 'edit.settings', 'edit.keybindings']);

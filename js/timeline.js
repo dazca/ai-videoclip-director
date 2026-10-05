@@ -140,6 +140,15 @@ export class Timeline {
   timeAtRead() { return this.warp ? this.warp.t(this.scroller.scrollTop + this.readOffset()) : 0; }
   readOffset() { return Math.max(0, (this.scroller.clientHeight - this.headH) * READ_LINE); }
   scrollToTime(t) { this.scroller.scrollTop = Math.max(0, this.warp.y(t) - this.readOffset()); }
+  // review #3 MEDIUM 9: back on the timeline from a stage's Time view (which may read up to the room below the song), never show
+  // a screen of nothing: the song's end at most at the bottom edge. Only on that page switch and never while playing, so the
+  // shared reading position (and the stages' Time views, verify v19) is untouched otherwise. -> true when it moved
+  clampEnd() {
+    if (!this.warp || this.player?.playing) return false;
+    const sc = this.scroller, max = Math.max(0, Math.ceil(this.warp.total + 24 - (sc.clientHeight - this.headH)));
+    if (sc.scrollTop <= max + 0.5) return false;
+    sc.scrollTop = max; this.drawLanes?.(); return true;
+  }
 
   relayout({ all = false } = {}) {
     const t0 = performance.now();

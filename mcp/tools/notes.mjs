@@ -8,7 +8,7 @@ import { mcp, op, wrap, project, time, by } from './_shared.mjs';
 const STAGES = ['lyrics', 'script', 'breakdown', 'characters', 'scenery', 'storyboard', 'final', 'timeline'];
 const target = z.object({
   stage: z.enum(STAGES),
-  kind: z.string().describe('per stage: lyrics stage | section | line; script stage | scene | beat; breakdown stage | item | scene; characters / scenery stage | asset | tree | node | use; storyboard stage | scene | shot; final stage | shot; timeline time'),
+  kind: z.string().describe('per stage: lyrics stage | section | line; script stage | scene | beat; breakdown stage | item | scene; characters / scenery stage | asset | tree | node | use; storyboard stage | scene | shot; final stage | shot | request (a Queue row: a request id); timeline time'),
   id: z.string().nullable().optional().describe('the row: a line id ("verse/2"), a scene ("sc03"), a beat ("sc03/b2"), an item ("bi04"), an asset ("ada"), a node ("ada/n03"), a tree ("ada/look:night-out"), a use ("ada/sc02": the asset in a scene), a shot ("sh07"); none for "stage" and "time"'),
   w: z.array(z.number().int()).length(2).optional().describe('lyrics line: [first, last] word index'),
   quote: z.string().optional().describe('lyrics line: the exact words (instead of w)'),
