@@ -22,6 +22,8 @@ import './core/renders.js';       // E4 / E8: render jobs (Render… with a conf
 import { mountRail } from './core/rail.js';
 import { wizard } from './core/wizard.js';
 import { watchCode } from './core/stale.js';
+import { t } from './core/i18n.js';
+import { onboarding } from './core/onboarding.js';   // G8: the first-run onboarding, Help › Welcome… / System check…
 
 const ctx = { store, timeline: null, goto: null };
 window.WB = Object.assign(window.WB || {}, { store, ctx, commands, keymap, menus, palette, ui, cheatsheet, history, selection, dock, projects, exporter, context,
@@ -46,7 +48,7 @@ function setTopbar(show) { document.body.classList.toggle('notop', !show); prefs
 function renderTop() {
   const nav = $top.querySelector('nav');
   const all = allPages();
-  nav.innerHTML = all.filter(p => p.tab !== false).map(p => { const n = all.indexOf(p) + 1; return `<a data-tab="${esc(p.id)}" class="${p.id === active ? 'on' : ''}" title="${n <= 9 ? 'key ' + n : ''}">${esc(p.title)}${p.custom ? '<i data-close="' + esc(p.id) + '" title="close page">×</i>' : ''}</a>`; }).join('');
+  nav.innerHTML = all.filter(p => p.tab !== false).map(p => { const n = all.indexOf(p) + 1; return `<a data-tab="${esc(p.id)}" class="${p.id === active ? 'on' : ''}" title="${n <= 9 ? 'key ' + n : ''}">${esc(p.custom ? p.title : t('page.' + p.id, null, p.title))}${p.custom ? '<i data-close="' + esc(p.id) + '" title="close page">×</i>' : ''}</a>`; }).join('');
   $top.querySelector('[data-gear]')?.classList.toggle('on', active === 'settings');
 }
 function buildTop() {
@@ -83,7 +85,7 @@ function buildPage(p) {
 function renderSubnav(p) {
   const rec = pages[p.id]; if (!rec?.nav) return;
   const cur = viewOfPage(p);
-  rec.nav.innerHTML = p.subs.map(s => { let n = ''; try { n = s.count?.(store) ?? ''; } catch (e) { /* data not loaded yet */ } return `<a data-sub="${esc(s.id)}" class="${s.id === cur ? 'on' : ''}" role="tab">${esc(s.title)}<i>${esc(n)}</i></a>`; }).join('');
+  rec.nav.innerHTML = p.subs.map(s => { let n = ''; try { n = s.count?.(store) ?? ''; } catch (e) { /* data not loaded yet */ } return `<a data-sub="${esc(s.id)}" class="${s.id === cur ? 'on' : ''}" role="tab">${esc(t('sub.' + s.id, null, s.title))}<i>${esc(n)}</i></a>`; }).join('');
 }
 // Assets search: hide the cards / rows of the visible view that do not match (text, ids, titles, status chip)
 // F4: a view with its own status filter (Media: on the timeline / picked / unused / private) hides the page's approval-status
@@ -178,7 +180,7 @@ $panes.addEventListener('click', (e) => { const s = e.target.closest('.subnav [d
 // keep the sub-nav counts fresh
 store.on(() => { const p = pageById(active); if (p?.subs) renderSubnav(p); });
 // the top bar's "N open notes" (every stage and the timeline; the rail has the count per stage; a sent round's ask is not a note)
-function renderOpenNotes() { const a = $top.querySelector('.opennotes'); if (!a || !store.notes) return; const k = store.notes.notes.filter(n => n.status === 'open' && n.ask !== 'round').length; a.textContent = k ? `all open notes: ${k}` : 'no open notes'; a.classList.toggle('none', !k); }
+function renderOpenNotes() { const a = $top.querySelector('.opennotes'); if (!a || !store.notes) return; const k = store.notes.notes.filter(n => n.status === 'open' && n.ask !== 'round').length; a.textContent = k ? t('top.openNotes', { n: k }) : t('top.noNotes'); a.classList.toggle('none', !k); }
 store.on((w) => { if (w === 'notes' || w === 'all') renderOpenNotes(); });
 
 // live UI channel: an agent's ui_focus (MCP) -> POST /api/ui -> SSE -> here. Apply it, then ack so the agent knows a
@@ -223,11 +225,7 @@ addEventListener('keydown', (e) => {
 (async function boot() {
   const t0 = performance.now();
   buildTop();
-  try { await store.loadAll(); } catch (e) {
-    const pre = document.createElement('pre'); pre.className = 'err';
-    pre.textContent = `could not load data for project "${PROJECT}": ${e.message}\nRun: node serve.mjs (in the workbench folder) and open http://localhost:8140/`;
-    document.body.replaceChildren(pre); return;
-  }
+  try { await store.loadAll(); } catch (e) { onboarding.loadError(PROJECT, e); return; }   // G8: a clear error screen, Retry
   keymap.rebuild();
   renderOpenNotes();
   mountRail();
@@ -245,6 +243,8 @@ addEventListener('keydown', (e) => {
   document.title = `${PROJECT} · Director Workbench`;
   window.WB.boot = { dataMs: tData, firstRenderMs: performance.now() - t0, timelineBuildMs: ctx.timeline.perf.firstRender };
   document.body.dataset.ready = '1';
+  // G8: a first run (the helper made the data folder; no project of the director's yet): the onboarding, before anything else
+  if (await onboarding.maybe()) return;
   // an empty project (no lyrics, no lines): the new-project wizard, on its lyrics step, to fill this one
   if (!store.song.lines.length && !store.lyrics?.versions?.length) {
     let seen = false; try { seen = !!sessionStorage.getItem('wb:wizSeen:' + PROJECT); sessionStorage.setItem('wb:wizSeen:' + PROJECT, '1'); } catch (e) { /* storage blocked */ }

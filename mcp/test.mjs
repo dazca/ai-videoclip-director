@@ -2043,6 +2043,47 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
     { over: over.error, privImp: privImp.error, outside: outside.error, up: up.status, upImp: upImp.status });
 }
 // ==================== 29. (G5) the project as a zip: END ====================
+
+// ==================== 30. (G7) the npm helper: bin/cli.mjs mcp = the MCP server + the page server in ONE process ====================
+{
+  const HD = path.join(TMP, 'helper-data'), HP = PORT + 7;
+  const henv = { ...process.env }; for (const k of ['WORKBENCH_DATA', 'WORKBENCH_URL', 'WORKBENCH_OFFLINE', 'WB_PROJECT', 'WORKBENCH_PROJECT', 'WB_AGENT_TOKEN', 'WB_TOKEN']) delete henv[k];
+  let hlog = '';
+  const ht = new StdioClientTransport({ command: process.execPath, args: [path.join(WB, 'bin', 'cli.mjs'), 'mcp', '--data', HD, '--port', String(HP)], env: henv, stderr: 'pipe' });
+  ht.stderr?.on('data', (d) => { hlog += d; });
+  const hc = new Client({ name: 'workbench-helper-test', version: '1.0.0' });
+  try {
+    await hc.connect(ht);
+    const st = await call(hc, 'status', {});
+    const page = await fetch(`http://localhost:${HP}/?project=demo`).then(async r => ({ status: r.status, html: await r.text() })).catch(e => ({ status: 0, html: String(e) }));
+    const made = ['_template', 'demo', '.wb-first-run', '.wb-agent-token'].filter(f => fs.existsSync(path.join(HD, f)));
+    check('G7 `ai-videoclip-director mcp --data <dir> --port <p>`: a first run makes the data folder (the template, the demo, the onboarding mark, the agent token); the MCP server answers AND the page is served from the same process (status: server up at that port, mode http, the helper\'s data folder); nothing on stdout but the protocol',
+      made.length === 4 && st.server?.up === true && st.server.url === `http://localhost:${HP}` && st.mode === 'http' && path.resolve(st.data_dir) === path.resolve(HD) && page.status === 200 && /name="wb-token"/.test(page.html) && /serving the page/.test(hlog),
+      { made, server: st.server?.url, up: st.server?.up, mode: st.mode, data: st.data_dir, page: page.status, log: hlog.slice(0, 200) });
+    const na = await call(hc, 'notes_add', { project: 'demo', target: { stage: 'lyrics', kind: 'stage' }, text: 'G7 helper: an agent note through the in-process server' });
+    const nj = JSON.parse(fs.readFileSync(path.join(HD, 'demo', 'notes.json'), 'utf8'));
+    const n = nj.notes.find(x => /G7 helper/.test(x.text));
+    check('G7 a tool write goes through the in-process server with the agent token: stamped via agent (never the director), in the helper\'s data folder',
+      !na.error && n?.via === 'agent', { na: na.error || na.id, via: n?.via });
+    // a second MCP process on the same port finds the running workbench and uses it (no second server)
+    let log2 = '';
+    const t2 = new StdioClientTransport({ command: process.execPath, args: [path.join(WB, 'bin', 'cli.mjs'), 'mcp', '--data', HD, '--port', String(HP)], env: henv, stderr: 'pipe' });
+    t2.stderr?.on('data', (d) => { log2 += d; });
+    const c2 = new Client({ name: 'workbench-helper-test-2', version: '1.0.0' });
+    await c2.connect(t2);
+    const st2 = await call(c2, 'status', {});
+    await c2.close().catch(() => {});
+    check('G7 a second `mcp` on the same port uses the workbench already serving there (no second server; mode http)', st2.server?.up === true && st2.mode === 'http' && !/serving the page/.test(log2), { up: st2.server?.up, log2: log2.slice(0, 200) });
+    const con = spawnSync(process.execPath, [path.join(WB, 'bin', 'cli.mjs'), 'connect', '--data', HD, '--port', String(HP)], { encoding: 'utf8', env: henv });
+    const ver = spawnSync(process.execPath, [path.join(WB, 'bin', 'cli.mjs'), '--version'], { encoding: 'utf8' });
+    check('G7 `connect` prints the claude mcp add line for this helper (bin/cli.mjs mcp --data … --port …) and where the agent token lives, never the token; --version = package.json',
+      con.status === 0 && /claude mcp add workbench -- node .*bin\/cli\.mjs"? mcp --data .* --port \d+/.test(con.stdout) && /\.wb-agent-token/.test(con.stdout)
+      && !con.stdout.includes(fs.readFileSync(path.join(HD, '.wb-agent-token'), 'utf8').trim()) && ver.stdout.trim() === JSON.parse(fs.readFileSync(path.join(WB, 'package.json'), 'utf8')).version,
+      { out: con.stdout.slice(0, 300), ver: ver.stdout.trim() });
+  } catch (e) { check('G7 helper block ran', false, String(e.stack || e) + '\n' + hlog.slice(-600)); }
+  finally { await hc.close().catch(() => {}); }
+}
+// ==================== 30. (G7) the npm helper: END ====================
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {
   // ---------------------------------------------------------------- clean up whatever happened

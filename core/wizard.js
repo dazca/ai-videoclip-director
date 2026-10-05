@@ -9,7 +9,8 @@
 // the energy, the beat grid estimated from the song when no BPM is typed, the lyric timings; LRC tags win) while the
 // wizard shows the steps and their progress, then the result (length, BPM and where it came from, lines and their timing)
 // and opens the project. A path on this machine still works ("or a path on this machine").
-//   WB.wizard.open({fill?: boolean}); WB.wizard.hold = true keeps the result on screen (tests)
+//   WB.wizard.open({fill?: boolean, start?: 'song'}); WB.wizard.hold = true keeps the result on screen (tests)
+// start 'song' (G8, the onboarding's "Start from a song"): after the name, Next goes straight to the song step (lyrics: Back)
 import { store, toast, esc, PROJECT, postJSON, prefs } from '../js/store.js';
 import { slugId, projects } from './projects.js';
 import { uploadStaged } from './projectzip.js';
@@ -32,7 +33,7 @@ export const wizard = {
   hold: false,
   isOpen: () => !!box,
   close() { box?.remove(); box = null; },
-  open({ fill = false } = {}) {
+  open({ fill = false, start = null } = {}) {
     this.close();
     if (!document.getElementById('wzcss')) { const s = document.createElement('style'); s.id = 'wzcss'; s.textContent = CSS; document.head.appendChild(s); }
     const st = { step: fill ? 1 : 0, fill, title: '', id: '', idTouched: false, lyrics: '', song: '', file: null, bpm: '', prep: false, busy: false };
@@ -91,7 +92,7 @@ export const wizard = {
         await projects.refresh().catch(() => {});
         if (projects.list.some(p => p.id === st.id)) return err(`a project "${st.id}" already exists: pick another id`);
       }
-      if (what === 'next') { st.step++; return render(); }
+      if (what === 'next') { st.step = start === 'song' && st.step === 0 ? 2 : st.step + 1; return render(); }
       if (what !== 'create') return;
       if (st.bpm && !(Number(st.bpm) > 20 && Number(st.bpm) <= 400)) return err('bpm: a number between 20 and 400');
       const btn = $('[data-w=create]'); btn.disabled = true; err(st.song ? 'creating… (reading the song with ffmpeg)' : 'creating…');

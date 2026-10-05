@@ -1,5 +1,5 @@
 {
-  "name": "director-workbench",
+  "name": "ai-videoclip-director",
   "version": "0.3.0",
   "description": "A vertical, time-synced, multi-column workbench for directing a music video with an AI agent (plus an MCP server so any Claude session can drive it).",
   "license": "MIT",
@@ -9,16 +9,51 @@
     "node": ">=20"
   },
   "bin": {
+    "ai-videoclip-director": "bin/cli.mjs",
     "workbench-mcp": "mcp/server.mjs"
   },
+  "files": [
+    "bin/",
+    "serve.mjs",
+    "index.html",
+    "dock.html",
+    "app.js",
+    "app.css",
+    "README.md",
+    "CLAUDE.md",
+    "LICENSE",
+    "SPEC_v2.md",
+    "workbench.config.example.json",
+    "lib/",
+    "js/",
+    "core/",
+    "tabs/",
+    "mcp/server.mjs",
+    "mcp/client.mjs",
+    "mcp/tools/",
+    "generators/",
+    "importers/new_project.mjs",
+    "exporters/composition-data.mjs",
+    "exporters/composition-data/",
+    "templates/",
+    "catalog/",
+    "docs/",
+    "data/_template/",
+    "data/demo/",
+    "tools/run.mjs",
+    "tools/contact.mjs",
+    "tools/make_demo.mjs",
+    ".claude/skills/director-workbench/"
+  ],
   "scripts": {
-    "start": "node serve.mjs",
+    "start": "node bin/cli.mjs serve",
     "mcp": "node mcp/server.mjs",
     "verify": "node tools/verify.mjs --project demo && node tools/verify-stages.mjs",
     "test:mcp": "node mcp/test.mjs",
     "new-project": "node importers/new_project.mjs",
     "demo": "node tools/make_demo.mjs",
-    "test:security": "node tools/security-test.mjs && node tools/security-exporter.mjs && node tools/security-composition.mjs && node tools/security-worlds.mjs && node tools/security-renders.mjs && node tools/security-review3.mjs && node tools/security-projectzip.mjs"
+    "test:security": "node tools/security-test.mjs && node tools/security-exporter.mjs && node tools/security-composition.mjs && node tools/security-worlds.mjs && node tools/security-renders.mjs && node tools/security-review3.mjs && node tools/security-projectzip.mjs && node tools/security-pairing.mjs",
+    "helper": "node bin/cli.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.0",

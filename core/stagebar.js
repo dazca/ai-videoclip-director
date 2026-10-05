@@ -18,6 +18,8 @@ import { STAGES, STATUS_LABEL, stageById, stageTip } from '../js/flow.js';
 import { TIME_STAGES, isTime, setMode } from './timemode.js';
 import { menus } from './menus.js';
 import { commands } from './commands.js';
+import { t } from './i18n.js';
+const stName = (s) => t('stage.' + s.id, null, s.title);   // G8
 
 export const SLOTS = ['name', 'status', 'mark', 'flag', 'primary', 'ask', 'round', 'info', 'time', 'prev', 'next'];
 // what "Ask the agent…" offers on each stage (commands; each one writes a note the agent reads)
@@ -40,14 +42,14 @@ const WB = () => window.WB;
 function primaryOf(id) {
   const a = WB().stageActions?.[id];
   if (a?.primary) return { label: a.primary.label, title: a.primary.title || a.primary.label, can: () => !!a.primary.can?.(), run: () => a.primary.run() };
-  return { label: SAVE_LABEL[id] || 'Save version', title: `${SAVE_LABEL[id] ? 'send the edit request of the open sketch' : 'save your edits as a new version'} (Ctrl+Enter)`, can: () => !!a?.canSave?.(), run: () => a?.save?.() };
+  return { label: SAVE_LABEL[id] ? t('bar.sendEdit') : t('bar.saveVersion'), title: `${SAVE_LABEL[id] ? 'send the edit request of the open sketch' : 'save your edits as a new version'} (Ctrl+Enter)`, can: () => !!a?.canSave?.(), run: () => a?.save?.() };
 }
 function roundSlot() {
   const R = WB().rounds; if (!R) return '<span data-slot="round"></span>';
   let s; try { s = R.state(); } catch (e) { return '<span data-slot="round"></span>'; }
-  if (s.phase === 'collecting') return `<button data-slot="round" data-rv="send" class="sgrnd"${s.open ? '' : ' disabled'} title="${esc(`Round ${s.n}: every open note of yours (in any stage) goes to the agent as one ask`)}">Send round ${s.n} (${s.open})</button>`;
-  if (s.phase === 'sent') return `<button data-slot="round" data-rv="close" class="sgrnd sec" title="${esc(`Round ${s.n} is with Claude. Close revision ${s.next}: snapshot the project now`)}">Round ${s.n}: Claude working</button>`;
-  return `<button data-slot="round" data-rv="close" class="sgrnd" title="${esc(`Claude finished round ${s.n}: close revision ${s.next} (snapshot, compare later)`)}">Close revision ${esc(s.next)}</button>`;
+  if (s.phase === 'collecting') return `<button data-slot="round" data-rv="send" class="sgrnd"${s.open ? '' : ' disabled'} title="${esc(`Round ${s.n}: every open note of yours (in any stage) goes to the agent as one ask`)}">${esc(t('bar.sendRound', { n: s.n, k: s.open }))}</button>`;
+  if (s.phase === 'sent') return `<button data-slot="round" data-rv="close" class="sgrnd sec" title="${esc(`Round ${s.n} is with Claude. Close revision ${s.next}: snapshot the project now`)}">${esc(t('bar.roundWorking', { n: s.n }))}</button>`;
+  return `<button data-slot="round" data-rv="close" class="sgrnd" title="${esc(`Claude finished round ${s.n}: close revision ${s.next} (snapshot, compare later)`)}">${esc(t('bar.closeRevision', { id: s.next }))}</button>`;
 }
 export const stageBar = {
   render(bar, id) {
@@ -56,18 +58,18 @@ export const stageBar = {
     const mark = s.status !== 'empty' && s.status !== s.shown ? `\nmarked: ${STATUS_LABEL[s.status]}` : '';
     const p = primaryOf(id), prev = STAGES[i - 1], next = STAGES[i + 1];
     bar.dataset.stage = id;
-    bar.innerHTML = `<b data-slot="name" class="sgname">${d.n} · ${esc(d.title)}</b>`
-      + `<span data-slot="status" class="sgst st-${s.shown}" data-shown="${s.shown}" title="${esc(stageTip(s) + mark)}"><i></i>${esc(s.shown_label)}</span>`
-      + (done ? `<button data-slot="mark" data-st="in_progress" class="sgb1" title="${esc(s.changed ? `back to in progress (${s.changed})` : 'back to in progress')}">Reopen</button>`
-        : `<button data-slot="mark" data-st="done" class="sgb1" title="${esc(ready ? 'sign this stage off (only you can)' : `sign this stage off (only you can). Not ready yet: ${s.content?.blockers.join('; ')}. Marked anyway, it shows done ⚠ until the content is ready`)}">Mark done</button>`)
-      + `<button data-slot="flag" data-st="${flagged ? 'in_progress' : 'needs_you'}" class="sgb2${flagged ? ' on' : ''}" title="${flagged ? 'flagged: needs you (click: clear the flag)' : 'flag it for later: it shows "needs you" on the rail'}">Needs you</button>`
+    bar.innerHTML = `<b data-slot="name" class="sgname">${d.n} · ${esc(stName(d))}</b>`
+      + `<span data-slot="status" class="sgst st-${s.shown}" data-shown="${s.shown}" title="${esc(stageTip(s) + mark)}"><i></i>${esc(s.shown === 'changed' && s.done_ok === false ? s.shown_label : t('shown.' + s.shown, null, s.shown_label))}</span>`
+      + (done ? `<button data-slot="mark" data-st="in_progress" class="sgb1" title="${esc(s.changed ? `back to in progress (${s.changed})` : 'back to in progress')}">${esc(t('bar.reopen'))}</button>`
+        : `<button data-slot="mark" data-st="done" class="sgb1" title="${esc(ready ? 'sign this stage off (only you can)' : `sign this stage off (only you can). Not ready yet: ${s.content?.blockers.join('; ')}. Marked anyway, it shows done ⚠ until the content is ready`)}">${esc(t('bar.markDone'))}</button>`)
+      + `<button data-slot="flag" data-st="${flagged ? 'in_progress' : 'needs_you'}" class="sgb2${flagged ? ' on' : ''}" title="${flagged ? 'flagged: needs you (click: clear the flag)' : 'flag it for later: it shows "needs you" on the rail'}">${esc(t('bar.needsYou'))}</button>`
       + `<button data-slot="primary" class="sgpri" title="${esc(p.title)}"${p.can() ? '' : ' disabled'}>${esc(p.label)}</button>`
-      + `<button data-slot="ask" class="sgask" data-ask="1" title="ask the agent: a note it reads (MCP), from this stage">Ask the agent…</button>`
+      + `<button data-slot="ask" class="sgask" data-ask="1" title="ask the agent: a note it reads (MCP), from this stage">${esc(t('bar.ask'))}</button>`
       + roundSlot()
-      + `<span data-slot="info" class="dim sgbl" title="${esc(stageTip(s))}">${WB().agent?.none?.() ? '<a class="sgcon" data-connect="1" title="no agent has written since the server started: the asks wait in the Notes. Help › Connect Claude…">no agent connected · Connect Claude…</a> · ' : ''}${s.changed ? `<b class="stw">⚠ ${esc(s.changed)}</b> · ` : ''}${s.blockers_all.length ? esc(s.blockers_all.join(' · ')) : 'nothing blocking'}${s.note ? ` · <span class="sgnote" title="${esc(`${s.updated_by || ''} ${s.updated || ''}`)}">${s.via === 'agent' ? 'agent: ' : ''}${esc(s.note)}</span>` : ''}</span>`
-      + (TIME_STAGES.includes(id) ? `<span data-slot="time" class="sgtm" title="${esc(`List: the stage's own list (the default). Time: ${id === 'final' ? 'the rows grouped by song section, in time order' : "the rows on the timeline's time axis (the same y for the same ms); a click on an empty spot seeks"}. Alt+T`)}"><a data-tm="list" class="${isTime(id) ? '' : 'on'}">List</a><a data-tm="time" class="${isTime(id) ? 'on' : ''}">Time</a></span>` : '<span data-slot="time" class="sgtm none"></span>')
-      + `<a data-slot="prev" class="sgnv"${prev ? ` data-go="${prev.id}" title="Alt+Shift+${prev.n}"` : ''}>${prev ? `‹ ${esc(prev.title)}` : ''}</a>`
-      + `<a data-slot="next" class="sgnv"${next ? ` data-go="${next.id}" title="Alt+Shift+${next.n}"` : ''}>${next ? `${esc(next.title)} ›` : ''}</a>`;
+      + `<span data-slot="info" class="dim sgbl" title="${esc(stageTip(s))}">${WB().agent?.none?.() ? '<a class="sgcon" data-connect="1" title="no agent has written since the server started: the asks wait in the Notes. Help › Connect Claude…">' + esc(t('bar.noAgent')) + '</a> · ' : ''}${s.changed ? `<b class="stw">⚠ ${esc(s.changed)}</b> · ` : ''}${s.blockers_all.length ? esc(s.blockers_all.join(' · ')) : esc(t('bar.nothingBlocking'))}${s.note ? ` · <span class="sgnote" title="${esc(`${s.updated_by || ''} ${s.updated || ''}`)}">${s.via === 'agent' ? 'agent: ' : ''}${esc(s.note)}</span>` : ''}</span>`
+      + (TIME_STAGES.includes(id) ? `<span data-slot="time" class="sgtm" title="${esc(`List: the stage's own list (the default). Time: ${id === 'final' ? 'the rows grouped by song section, in time order' : "the rows on the timeline's time axis (the same y for the same ms); a click on an empty spot seeks"}. Alt+T`)}"><a data-tm="list" class="${isTime(id) ? '' : 'on'}">${esc(t('bar.list'))}</a><a data-tm="time" class="${isTime(id) ? 'on' : ''}">${esc(t('bar.time'))}</a></span>` : '<span data-slot="time" class="sgtm none"></span>')
+      + `<a data-slot="prev" class="sgnv"${prev ? ` data-go="${prev.id}" title="Alt+Shift+${prev.n}"` : ''}>${prev ? `‹ ${esc(stName(prev))}` : ''}</a>`
+      + `<a data-slot="next" class="sgnv"${next ? ` data-go="${next.id}" title="Alt+Shift+${next.n}"` : ''}>${next ? `${esc(stName(next))} ›` : ''}</a>`;
   },
   // the primary button follows the stage's draft (dirty / clean) without a full re-render
   refreshPrimary(bar) { const b = bar.querySelector('[data-slot=primary]'), id = bar.dataset.stage; if (b && id) { const p = primaryOf(id); b.disabled = !p.can(); if (b.textContent !== p.label) b.textContent = p.label; } },

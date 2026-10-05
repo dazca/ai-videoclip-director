@@ -1,6 +1,7 @@
 // Menus: popup menus with submenus (keyboard navigable), context-menu contributions, the compact menu bar.
 // Item lists are described in core/commands.js (WB.menus.contribute). Rows 20 px, 12 px type, key hints on the right.
 import { commands, context, keyLabel } from './commands.js';
+import { t } from './i18n.js';
 
 const contrib = new Map();       // context -> [{items}]
 export const BAR = ['File', 'Edit', 'View', 'Timeline', 'Generate', 'Window', 'Help'];
@@ -145,7 +146,7 @@ document.addEventListener('keydown', (e) => {
 let barEl = null;
 export function renderMenuBar(host) {
   barEl = document.createElement('span'); barEl.className = 'mbar';
-  barEl.innerHTML = BAR.map(n => `<b data-m="${n}">${n}</b>`).join('');
+  barEl.innerHTML = BAR.map(n => `<b data-m="${n}">${esc(t('menu.' + n, null, n))}</b>`).join('');   // G8: the title by lookup, data-m the id
   host.prepend(barEl);
   barEl.addEventListener('pointerdown', (e) => {
     const b = e.target.closest('[data-m]'); if (!b) return;

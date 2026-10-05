@@ -160,6 +160,7 @@ export const store = {
       let pending = new Set(), timer = 0, opened = false;
       // after a reconnect (server restart) re-read everything: changes made while disconnected sent no event
       es.onopen = () => { if (opened) { this.reload(['song.json']); document.dispatchEvent(new CustomEvent('wb:reconnect')); } opened = true; };
+      es.onerror = () => document.dispatchEvent(new CustomEvent('wb:disconnect'));   // G8: core/stale.js checks the server and says it is down
       es.onmessage = (ev) => {
         const { project, file, ui, run } = JSON.parse(ev.data);
         if (project !== PROJECT && project !== '*') return;

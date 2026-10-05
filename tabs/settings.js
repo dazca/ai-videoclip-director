@@ -1,6 +1,10 @@
 // Settings: the generator per kind (D9: which plugin runs an approved request: fal, "Open in another app", ComfyUI (not
 // built yet); settings.json generators {image, video, motion}, default fal), zoom floor, linear mode, header mode, columns
 // (visibility, width), and the keybindings of every command (stored in data/<project>/settings.json, conflicts flagged in red).
+// G8: the language (Settings › language: the chrome's strings, core/i18n.js; a reload draws it again) and G7's paired pages
+// (pages on another origin paired with this helper: listed and revoked here, the local page only; POST /api/pairings).
+import { t, lang, setLang, LANGS } from '../core/i18n.js';
+import { postJSON, toast } from '../js/store.js';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 export default {
   mount(el, ctx) {
@@ -9,21 +13,24 @@ export default {
   },
   show(ctx) {
     const tl = ctx.timeline, el = this.el; if (!tl) return;
-    el.innerHTML = `<h4 class="gen">generator <i class="dim">(what runs an approved request, per kind · the fal key stays in your environment, never in the project)</i></h4><div class="genbox dim">loading…</div>
-      <h4 class="costset">costs <i class="dim">(spend made outside the queue, counted in the one total: Review › Costs)</i></h4><div class="falgenbox"><table class="tbl"><tr><td title="a falgen folder (a runner that spends outside the queue: its gen/spent.json and the via-falgen rows of its LEDGER.md, read only); relative to the media base, inside it">falgen folder</td><td><input data-x=falgen class="falgenin" value="${esc(typeof window.WB.store.settings?.falgen === 'string' ? window.WB.store.settings.falgen : window.WB.store.settings?.falgen?.dir || '')}" placeholder="e.g. project/gen (relative to the media base)" spellcheck="false" style="width:22em"> <span class="falgenst dim">…</span></td></tr></table></div>
-      <h4>project</h4><table class="tbl"><tr><td title="every sung or spoken word must show on screen (a window, a chat, a caption…) at its time: the timeline's 'on screen' column, the Lyrics stage's counts and Final's checklist line follow it. Off: none of them is shown or blocks">lyric gate: every sung word on screen</td><td><input type=checkbox data-x=gate ${window.WB.store.settings?.lyric_gate !== false ? 'checked' : ''}> <span class="dim">off for a new project; turn it on when the lyrics must show on screen</span></td></tr></table>
-      <h4>view</h4><table class="tbl"><tr><td>min px / second (floor)</td><td><input type=number data-x=pps value="${tl.pxPerSec.toFixed(1)}" min=2 max=800 step=1></td></tr>
+    el.innerHTML = `<h4 class="lang">${esc(t('set.language'))} <i class="dim">(${esc(t('set.languageHint'))})</i></h4><div class="langbox"><select data-x=lang>${LANGS.map(l => `<option value="${l.id}"${l.id === lang() ? ' selected' : ''}>${esc(l.name)}</option>`).join('')}</select></div>
+      <h4 class="gen">${esc(t('set.generator'))} <i class="dim">(what runs an approved request, per kind · the fal key stays in your environment, never in the project)</i></h4><div class="genbox dim">loading…</div>
+      <h4 class="costset">${esc(t('set.costs'))} <i class="dim">(spend made outside the queue, counted in the one total: Review › Costs)</i></h4><div class="falgenbox"><table class="tbl"><tr><td title="a falgen folder (a runner that spends outside the queue: its gen/spent.json and the via-falgen rows of its LEDGER.md, read only); relative to the media base, inside it">falgen folder</td><td><input data-x=falgen class="falgenin" value="${esc(typeof window.WB.store.settings?.falgen === 'string' ? window.WB.store.settings.falgen : window.WB.store.settings?.falgen?.dir || '')}" placeholder="e.g. project/gen (relative to the media base)" spellcheck="false" style="width:22em"> <span class="falgenst dim">…</span></td></tr></table></div>
+      <h4>${esc(t('set.project'))}</h4><table class="tbl"><tr><td title="every sung or spoken word must show on screen (a window, a chat, a caption…) at its time: the timeline's 'on screen' column, the Lyrics stage's counts and Final's checklist line follow it. Off: none of them is shown or blocks">lyric gate: every sung word on screen</td><td><input type=checkbox data-x=gate ${window.WB.store.settings?.lyric_gate !== false ? 'checked' : ''}> <span class="dim">off for a new project; turn it on when the lyrics must show on screen</span></td></tr></table>
+      <h4>${esc(t('set.view'))}</h4><table class="tbl"><tr><td>min px / second (floor)</td><td><input type=number data-x=pps value="${tl.pxPerSec.toFixed(1)}" min=2 max=800 step=1></td></tr>
       <tr><td>linear time (no warp)</td><td><input type=checkbox data-x=lin ${tl.linear ? 'checked' : ''}></td></tr>
       <tr><td>column header</td><td><select data-x=hdr>${['full', 'thin', 'hidden'].map((n, i) => `<option value=${i} ${i === tl.headerMode ? 'selected' : ''}>${n}</option>`).join('')}</select></td></tr></table>
-      <h4>columns</h4><table class="tbl">${tl.cols.map(c => `<tr id="cs-${c.id}"><td>${esc(c.def.title)}</td><td><input type=checkbox data-c="${c.id}" ${c.hidden ? '' : 'checked'}> width <input type=number data-w="${c.id}" value="${Math.round(c.w)}" min=3 style="width:5em"> ${c.def.kind === 'text' ? c.mode : 'lane'}</td></tr>`).join('')}
+      <h4>${esc(t('set.columns'))}</h4><table class="tbl">${tl.cols.map(c => `<tr id="cs-${c.id}"><td>${esc(c.def.title)}</td><td><input type=checkbox data-c="${c.id}" ${c.hidden ? '' : 'checked'}> width <input type=number data-w="${c.id}" value="${Math.round(c.w)}" min=3 style="width:5em"> ${c.def.kind === 'text' ? c.mode : 'lane'}</td></tr>`).join('')}
       <tr><td></td><td><button data-x=reset>reset layout and preferences</button></td></tr></table>
-      <h4 class="kb">keybindings <i class="dim">(project settings.json · click + then press the keys · Esc cancels)</i></h4>
+      <h4 class="paired">${esc(t('set.paired'))} <i class="dim">(${esc(t('set.pairedHint'))})</i></h4><div class="pairbox dim">…</div>
+      <h4 class="kb">${esc(t('set.keybindings'))} <i class="dim">(project settings.json · click + then press the keys · Esc cancels)</i></h4>
       <div class="kbbar"><input class="kbf" placeholder="filter commands" value="${esc(this.filter)}"> <button data-x=kbreset>reset all to defaults</button> <span class="kbc"></span></div>
       <table class="tbl kbt"></table>`;
-    this.renderKeys(); this.renderGen(); this.renderFalgen();
+    this.renderKeys(); this.renderGen(); this.renderFalgen(); this.renderPairs();
     el.querySelector('.kbf').addEventListener('input', (e) => { this.filter = e.target.value; this.renderKeys(); });
     el.onchange = (e) => {
       const d = e.target.dataset;
+      if (d.x === 'lang') return setLang(e.target.value);
       if (d.x === 'pps') { tl.pxPerSec = Number(e.target.value) || 16; tl.save(); tl.relayout(); }
       if (d.x === 'lin') tl.toggleLinear();
       if (d.x === 'gate') window.WB.store.setSettings((s) => { s.lyric_gate = e.target.checked; });   // review #3: the lyric gate, opt-in per project
@@ -40,6 +47,7 @@ export default {
         location.reload();
       }
       if (t.dataset.x === 'kbreset') K.resetAll();
+      if (t.dataset.revoke) return this.renderPairs({ action: 'revoke', id: t.dataset.revoke });
       if (t.dataset.fglink) { const inp = this.el.querySelector('[data-x=falgen]'); inp.value = t.dataset.fglink; inp.dispatchEvent(new Event('change', { bubbles: true })); return; }
       const row = t.closest('tr[data-id]'); if (!row) return;
       const id = row.dataset.id, keys = window.WB.commands.keysFor(id);
@@ -61,6 +69,16 @@ export default {
         <td class="${g.ready && runs ? 'ok' : 'no'}">${runs ? (g.ready ? `✓ ${esc(g.why)}` : g.id === 'fal' && !info.fal_key.found ? '✕ no fal key (below)' : `✕ ${esc(g.why)}`) : `✕ ${esc(g.label)} does not run ${esc(k)} yet (D3b): pick "Open in another app" for now`}</td></tr>`;
     }).join('')}</table>
       <div class="dim">fal key: ${info.fal_key.found ? `found in ${esc(info.fal_key.source)}` : `not found${info.fal_key.why ? ` (${esc(info.fal_key.why)})` : ''}: set FAL_KEY before starting the server, or fal_key_file in workbench.config.json`} · Review › Queue runs approved requests only, up to 2 at once, the cap checked for each</div>`;
+  },
+  // G7: the pages paired with this helper (never their tokens): origin, scope, when; Revoke cuts one off at once
+  async renderPairs(body = { action: 'list' }) {
+    const box = this.el?.querySelector('.pairbox'); if (!box) return;
+    let j = null; try { const r = await postJSON('/api/pairings', body); j = r.ok ? await r.json() : null; } catch (e) { /* static page */ }
+    if (!j) { box.textContent = 'the server did not answer'; return; }
+    if (body.action === 'revoke') toast(t('set.revoked', { id: body.id }));
+    box.classList.toggle('dim', !j.pairings.length);
+    box.innerHTML = j.pairings.length ? `<table class="tbl pairtbl"><tr><th>${esc(t('set.pairedCol'))}</th><th></th></tr>${j.pairings.map(p => `<tr data-pair="${esc(p.id)}"><td><b>${esc(p.origin)}</b> · ${esc(t('set.scope.' + p.scope, null, p.scope))} · ${esc(String(p.created).replace('T', ' '))} · ${esc(String(p.last_used).replace('T', ' '))} <span class="dim">${esc(p.id)}</span></td><td><button data-revoke="${esc(p.id)}">${esc(t('set.revoke'))}</button></td></tr>`).join('')}</table>`
+      : esc(t('set.pairedNone'));
   },
   // the falgen link as costs_get sees it: linked (from settings.json or project.json), an error, or the folders nearby
   async renderFalgen() {

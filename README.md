@@ -12,8 +12,25 @@ Node 20+; ffmpeg / ffprobe on PATH for importing songs and making thumbnails.
 
 ```
 npm install                      # @modelcontextprotocol/sdk + zod; puppeteer-core for the tests
-npm start                        # node serve.mjs -> http://localhost:8140/   (port: first argument)
+npm start                        # the helper: node bin/cli.mjs serve -> http://localhost:8140/   (node serve.mjs [port] still works)
 ```
+
+**Without a clone (G7, the npm helper)**: `npx ai-videoclip-director` (not published yet: today `npm pack` in this folder and
+`npx ./ai-videoclip-director-<version>.tgz`). The commands:
+
+```
+npx ai-videoclip-director [serve] [--data <dir>] [--port 8140] [--lan] [--no-open]   # the page server (the default)
+npx ai-videoclip-director mcp [--data <dir>] [--port 8140]    # the MCP server for Claude Code; it also serves the page from the
+                                                              # same process when no workbench answers on the port
+npx ai-videoclip-director connect [--data <dir>]              # how to connect Claude Code (the claude mcp add line)
+npx ai-videoclip-director pair [--origin https://…] [--read-only] | --list | --revoke <id>   # pairing (below)
+```
+
+The data folder: `--data`, else `WORKBENCH_DATA`, else `data/` in a clone, else `~/ai-videoclip-director` (an npx install lives in a
+cache that can be wiped; your projects must not). A **first run** makes it with the template and the demo, prints the URL and the
+Connect command, opens the browser once, and the page opens on the **onboarding**: the three ways to start (a song, lyrics only, the
+demo), Connect Claude, where the data lives, and a check of this computer (ffmpeg, the fal key, Claude); English, Catalan or Spanish
+(Settings › language later; Help › Welcome… shows it again). `<data>/workbench.config.json` is read when there is no other config.
 
 The page opens the default project (`$WB_PROJECT`, else `default_project` in `workbench.config.json`, else `demo`);
 any other with `?project=<id>`. **Try it**: `data/demo/` is a 20 s synthetic project (tone track, test-pattern
@@ -866,6 +883,34 @@ node exporters/hyperframes-html/serve.mjs  <outDir>                             
 ```
 
 Details: `exporters/hyperframes-html/README.md`.
+
+## Pairing a hosted page with this computer (G7, the local side)
+
+The hosted app (G1, not built yet) is the same page served from another origin; the data stays on your computer and the page
+reaches it through the helper. The local side is ready:
+
+1. In a terminal: `npx ai-videoclip-director pair` (optionally `--origin https://director.example`, `--read-only`). It prints a
+   short code like `K7QF-2MXD`: it works **once**, for **10 minutes**; 5 wrong codes void every pending code.
+2. The hosted page sends it once: `POST http://localhost:8140/api/pair {code}` from its own Origin. The helper answers a token
+   **bound to that Origin** (`{token, id, origin, scope}`), stored only as a hash in `<data>/.wb-pairings.json` (never served).
+3. The page sends `x-wb-pair-token` on every request. Another Origin with it, or no Origin, gets 403. Scope `director` (the default):
+   the page acts as you (approvals, picks...) when the browser says `Sec-Fetch-Site`; **never your private files** (403; JSON
+   scrubbed), never a personal backup, never pairing management, Reveal or the onboarding flag. Scope `read`: GET only.
+4. **Settings › Paired pages** lists the pairings (origin, scope, created, last used; never a token) and **Revoke** cuts one off at
+   once; also `pair --list` / `pair --revoke <id>` in the terminal.
+
+The browser side: an https page calling `http://localhost` is allowed as a "potentially trustworthy" origin, but Chrome asks for
+**Local Network Access** (Chrome 142+: a permission prompt "this site wants to connect to devices on your local network"; older
+versions send a Private Network Access preflight with `Access-Control-Request-Private-Network: true`). The helper answers CORS
+preflights only for `/api/pair` and for Origins that hold a pairing, with `Access-Control-Allow-Private-Network: true`. The page's
+fetches should pass `targetAddressSpace: "loopback"` (Chrome) so the prompt names the right thing. Server-Sent Events
+(`/api/events`) cannot carry the token header: a hosted page polls for now (G1 will add a token in the URL or a WebSocket).
+
+**Safari**: Safari blocks an https page's requests to `http://localhost` / `http://127.0.0.1` as mixed content in many versions
+(WebKit's localhost exemption is partial and has changed between releases), and has no Local Network Access prompt. If the hosted
+page cannot reach the helper in Safari: open the helper's own page instead (`http://localhost:8140/`: the same app, served locally,
+no pairing needed), or use Chrome, Edge or Firefox for the hosted page. Firefox treats `http://localhost` as potentially trustworthy
+and needs no prompt.
 
 ## The project as a zip (G5)
 

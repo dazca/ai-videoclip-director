@@ -11,7 +11,8 @@ requests the director approved).
 
 ```
 npm install                      # MCP SDK + zod (runtime), puppeteer-core (tests only)
-npm start                        # node serve.mjs -> http://localhost:8140/  (port: first argument)
+npm start                        # node bin/cli.mjs serve -> http://localhost:8140/  (node serve.mjs [port] still works)
+npx ai-videoclip-director [serve|mcp|connect|pair] [--data <dir>] [--port <p>]   # G7: the helper (see "The npm helper")
 npm run test:mcp                 # MCP end-to-end test on the demo project
 npm run verify                   # headless UI suite on the demo project (screenshots -> shots/, gitignored)
 node importers/new_project.mjs my-song --song song.mp3 --lyrics lyrics.lrc --title "My Song" --bpm 96
@@ -27,6 +28,29 @@ node mcp/client.mjs project_import '{"path":"data/<id>/exports/<file>.zip"}'   #
 ```
 
 In the page: File › Export project as zip… / Import project from zip… (G5) and File › New project… with a dropped song (G6).
+
+**The npm helper (G7, `bin/cli.mjs`; package name `ai-videoclip-director`, `private: true` until Dani decides to publish).**
+`serve` (default) = the page server; `mcp` = the MCP server for Claude Code, and when no workbench answers on the port it serves the
+page from the SAME process (stdout stays the protocol: the server's log goes to stderr; the port taken by something else: the MCP
+server alone, offline); `connect` prints the `claude mcp add` line for this install; `pair` makes a one-time pairing code (below).
+The data folder: `--data`, else `WORKBENCH_DATA`, else `<workbench>/data` in a clone, else `~/ai-videoclip-director` for an npm / npx
+install (never inside the package cache). A first run (no `.wb-agent-token` in the folder yet) copies `_template` and `demo` from the
+package, writes `<data>/.wb-first-run` (the page's onboarding: `/api/status first_run` while it exists and the director has no project
+of their own; the page's "Not now" or any start removes it, `POST /api/onboarding {done}`, page only) and prints the URL and the
+Connect command. `serve.mjs` exports `ready` (a promise: listening) and `server`; run alone it exits on a listen error, under the
+helper (`WB_HELPER=1`) the helper decides. `mcp/client.mjs` loads the SDK from the package's node_modules, else hoisted (npx). Check a
+package with `npm pack` and `npx ./ai-videoclip-director-<v>.tgz --version` from another folder; never `npm publish`.
+
+**G8: onboarding, i18n, error states.** `core/i18n.js` (`t(key, vars?, fallback?)`, `lang()`, `setLang(id)`: a per-browser choice in
+localStorage `wb:lang`, default English, never guessed) over one table per language: `core/strings-en.js` (the fallback),
+`strings-ca.js`, `strings-es.js`. Translated: the menu bar titles (`data-m` keeps the English id), the pages and sub-views, the stage
+names, the rail, the stage bar's buttons, Settings' headings, dialogs' OK / Cancel, the onboarding, the system check and every error
+bar. A new chrome string: a key in all three tables (v31 fails on a key missing in ca / es), `t('key')` where it is drawn; keep a
+fixed-width slot's label short (the stage bar's Mark done is 66 px). `core/onboarding.js`: the onboarding (`maybe()` at boot, Help ›
+Welcome…), Help › System check… (`health.open()`: server, code, ffmpeg / ffprobe from `/api/status tools`, the fal key from
+`generators_get`, Claude, the data folder), the boot error screen (`loadError`: Retry / Open the demo). `core/stale.js` draws the one
+warning bar, most urgent first: server down (the change feed dropped and `/api/status` fails; polled every 2 s, gone when it is back),
+stale code / reload, ffmpeg missing (once a session, How to fix…).
 
 **A stale server.** The server hashes its code at start (`serve.mjs`, `lib/`, `js/`, `tabs/`, `core/`, `app.js`). `/api/status`
 `code` and the header `x-wb-code` on every `/api` response carry it. When the files on disk differ, `status` says
@@ -70,6 +94,8 @@ win: `WB_PROJECT`, `WORKBENCH_DATA`, `WORKBENCH_MEDIA_BASE`, `FAL_KEY`.
 | `tools/verify-renders.mjs`, `tools/security-renders.mjs` | v27 of the UI suite (E4 / E7 / E8 in the page and over MCP, a fake ffmpeg render; screenshots `v27_*.png`) and their security regressions (page-only acts, a render never started by an agent, the command never an agent's, sheet paths not traversable, song files) |
 | `lib/zip.mjs`, `lib/ops/projectio.mjs`, `core/projectzip.js`, `core/wizard.js`, `mcp/tools/projectio.mjs` | G5 the project as a zip and G6 a new project from a song: the dependency-free zip writer / validating reader (node:zlib + CRC-32; store / deflate; no zip64), the ops (`project_export` (private media out by default, JSON scrubbed, `workbench-export.json` with sha256s; `include_private` page only), `project_upload` (page only: chunks staged in `<data>/.uploads/`, kind zip / song), `project_import` (validate everything, a NEW project, the director's decisions demoted, costs kept), `createFromSong` (`/api/projects/new {song_upload}`: createGuidedProject + `attachSong {estimate}`), `exportPlan`, `inspectZip`, `badName`, `demote`), File › Export project as zip… / Import project from zip… (a dropped .zip opens it; `uploadStaged` shared with the wizard), the wizard's dropped song / .lrc with its steps and progress, the tools; `importers/new_project.mjs` `tempo(x)` estimates the BPM and first downbeat |
 | `tools/verify-projectzip.mjs`, `tools/security-projectzip.mjs` | v29 of the UI suite (G5 export / import in the page, G6 the song wizard; screenshots `v29_*.png`) and their security regressions (zip-slip, sizes, checksums, ids, private media, demotion, page-only upload) |
+| `bin/cli.mjs`, `lib/pairing.mjs`, `tools/security-pairing.mjs` | G7 the npm helper (`serve` / `mcp` in one process / `connect` / `pair`; the data folder and its first run) and pairing (one-time codes, Origin-bound scoped tokens, list / revoke; only hashes stored in `<data>/.wb-pairings.json`) with its security regressions (in `npm run test:security`) |
+| `core/i18n.js`, `core/strings-{en,ca,es}.js`, `core/onboarding.js`, `core/stale.js`, `tools/verify-onboarding.mjs` | G8 the i18n layer and its three tables, the first-run onboarding, Help › System check…, the boot error screen, the warning bar (server down / stale / no ffmpeg); v31 of the UI suite (the helper's first run, the onboarding in 3 languages, the chrome in Spanish, Settings › language and › Paired pages, the error states; screenshots `v31_*.png`) |
 | `tools/verify-layout.mjs` | v26 of the UI suite (run by `npm run verify`, or alone): F7 the timeline fills the height at 1280 / 1600 and keeps every column on screen, the docked preview narrows the columns; F8 the same stage bar on every stage; F9 the Connect dialog (and its quick test, run as shown); F10 About; E10 interpretations over MCP and in the page; screenshots `v26_*.png` |
 | `tools/verify-review3.mjs`, `tools/security-review3.mjs` | v28 of the UI suite (review #3): a new user's walk-through with no agent, no fal key and a media root named `media/`, from the wizard to Lock for render and the composition export without leaving the page; the re-time's held items; a wrapped lyric line in one block; screenshots `v28_*.png`. Its security twin (in `npm run test:security`): one check per review #3 finding (M1, M2, L1-L3, I5, Make public, results from another app, media roots) |
 | `js/events.js`, `js/eventscol.js`, `core/events.js`, `lib/ops/events.mjs`, `mcp/tools/events.mjs` | E1, named sync points: the shared logic (events.json v2 and the old array, kinds, `snapToEvent` (the nearest accepted event within 1 s), anchors (`anchorsOf`, `reanchor` for a draft, `settleAnchors` for a write: the anchor wins), `retimePlan` (anchored boundaries + the cuts that sit on them, old -> new, problems), `importList` (an audio events.json in seconds)), the timeline's events column (drag = measured), the page acts (the event dialog, + Named event here / at a word, Import events…, Re-time after the take… with its preview and one undo step, the Time view markers), the ops and the agent tools |
@@ -892,6 +918,19 @@ of t). The first film's `xp/world.js` is NOT changed: its adoption is a proposal
   needs_you / review, stages done -> in_progress, the render lock and command dropped; snapshots too); an agent imports only a
   path under a project's `exports/` or a media root, never a private one (403), and never an upload (403). A new project from an
   uploaded song (`/api/projects/new {song_upload}`) is the page's (403).
+- Pairing (G7, `lib/pairing.mjs`, `serve.mjs`; tools/security-pairing.mjs): a page on another origin (the future hosted app) reaches
+  the helper only through a pairing. `ai-videoclip-director pair` (the terminal: the trusted channel) makes a code of 8 characters
+  (no 0/O/1/I), single use, 10 minutes, optionally bound to one `--origin`; 5 wrong codes void every pending code. `POST /api/pair
+  {code}` needs the page's own Origin (https, or http on a loopback name; never this server's own Origin, never no Origin) and answers
+  `{token, id, origin, scope}` with CORS for that Origin only. Codes and tokens are stored as sha256 only (`<data>/.wb-pairings.json`,
+  a dot-file outside every project: never served). `x-wb-pair-token` is checked on every request: unknown, revoked, another Origin or
+  no Origin -> 403 (it never falls back to the page or agent rules). Scope `director`: the request is the page (S9) only with a
+  browser's `Sec-Fetch-Site` (cross-site / same-site) and no agent token, else it is an agent; private files are 403 to it and its
+  JSON is scrubbed (like a LAN client), `include_private` is 403, and `/api/pair`, `/api/pairings`, `/api/reveal`, `/api/onboarding`
+  are 403. Scope `read`: every POST 403. CORS preflights are answered (204, `Access-Control-Allow-Private-Network: true` for PNA /
+  LNA) only for `/api/pair` and Origins holding a pairing; every other foreign Origin keeps the old 403 on writes and gets no CORS on
+  reads. The list and Revoke (`POST /api/pairings {action: list | revoke, id}`) are the LOCAL page's only (S9 page + localhost); a
+  revoked token is refused at once. SSE (`/api/events`) carries no pair token (a paired page polls). Safari: README "Pairing".
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.
 
@@ -1064,6 +1103,9 @@ listed in `GENERATORS` (`lib/run.mjs`). Tests never call fal: `tools/mock-fal.mj
   `c.ncCol`, `c.ncTarget`), `menubar:<File|Edit|View|Timeline|Generate|Window|Help>`. Elements with `data-sel="kind:id"`
   are selectable. A "+ Add" act goes first in its row's menu as `{label: '+ Add', submenu: [...]}` (with `notes.addHere`
   last) and is a command, so it is in the palette too; a stage draft edit records `history.push({label, undo, redo})`.
+- **A string in the chrome** (menus, pages, stages, rail, stage bar, Settings headings, onboarding, error bars): a key in
+  `core/strings-en.js`, `strings-ca.js` and `strings-es.js`, drawn with `t('key', {vars})` from `core/i18n.js` (never a language
+  test in the code); v31 fails when ca / es lack a key.
 - **A Notes column** (every stage has one): `new NotesColumn({stage, scroller, rows: () => [{el | els, targets[],
   match?, sub?, targetAt?}], top?, scope?, current?, active?})` from `core/notescol.js` on the stage's scroll container;
   it re-aligns itself when the rows change. Offer Alt+N as `WB.stageActions[stage].note = () => nc.editCurrent()`.
