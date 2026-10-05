@@ -136,7 +136,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve', 'character_get', 'character_iteration_add', 'character_note_add', 'look_create',
     'asset_get', 'asset_iteration_add', 'asset_note_add', 'variant_create',
     'storyboard_get', 'shots_update', 'shot_note_add', 'shot_note_resolve', 'gaps_get', 'notes_get', 'notes_add', 'notes_status', 'request_run', 'generators_get',
-    'round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get', 'proposals_add', 'proposals_get', 'final_get', 'takes_get', 'take_propose', 'surfaces_get', 'surface_propose', 'media_scan', 'media_import', 'batches_get', 'waves_propose', 'events_get', 'event_add', 'retime_propose'];
+    'round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get', 'proposals_add', 'proposals_get', 'final_get', 'takes_get', 'take_propose', 'surfaces_get', 'surface_propose', 'media_scan', 'media_import', 'batches_get', 'waves_propose', 'events_get', 'event_add', 'retime_propose', 'interpretation_set'];
   check('tools/list has every tool', EXPECT.every(t => tools.includes(t)), { count: tools.length, missing: EXPECT.filter(t => !tools.includes(t)) });
   const schemaOk = (await mcp.listTools()).tools.every(t => t.description?.length > 40 && t.inputSchema?.type === 'object');
   check('every tool has a description and a JSON schema', schemaOk);
@@ -364,6 +364,32 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     ig.questions?.length === 9 && ig.unanswered?.length === 9 && ia.updated?.length === 2 && iq.updated?.[0] === 'who' && /400|Invalid enum/.test(ib.error || '') && ig2.unanswered.length === 7
     && ig2.questions.find(q => q.id === 'mood').via === 'agent' && ig2.questions.find(q => q.id === 'mood').by === 'director' && !!ig2.questions.find(q => q.id === 'who').asked_in_chat && pageIntake,
     { unanswered: ig2.unanswered, bad: ib.error, pageIntake });
+  // E10: the agent's interpretation next to the verbatim answer: written via "agent" (status proposed), never the answer's
+  // text; no tool accepts it, and interpretation_act without the page is 403 (also claiming via "page"); a question
+  // without an answer has nothing to interpret (409); the director accepts / edits in the page; an edited one is theirs (409)
+  {
+    const tools = (await mcp.listTools()).tools.map(t => t.name);
+    const iset = await call(mcp, 'interpretation_set', { key: 'mood', text: 'mcp: high-key light, saturated primaries, quick cuts on the bar', by: 'claude' });
+    const inone = await call(mcp, 'interpretation_set', { key: 'era', text: 'x' });
+    const iget = await call(mcp, 'intake_get'), mood = iget.questions?.find(q => q.id === 'mood');
+    const agentAct = await post(`/api/op/interpretation_act?project=${PROJECT}`, { key: 'mood', act: 'accept' });
+    const claimed = await post(`/api/op/interpretation_act?project=${PROJECT}`, { key: 'mood', act: 'accept', via: 'page' });
+    const sc = JSON.parse(fs.readFileSync(path.join(D, 'scenes.json'), 'utf8'));
+    // an agent's save of scenes.json cannot forge "accepted" either: the server keeps its own interpretation
+    const forged = JSON.parse(JSON.stringify(sc)); forged.intake.mood.interpretation = { ...forged.intake.mood.interpretation, status: 'accepted', text: 'forged' };
+    const fsave = await fetch(`${URL_}/api/save/scenes.json?project=${PROJECT}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-wb-token': TOKEN }, body: JSON.stringify({ base_rev: sc.rev, data: forged }) }).then(r => r.status);
+    const after = JSON.parse(fs.readFileSync(path.join(D, 'scenes.json'), 'utf8')).intake.mood;
+    const pageAcc = await post(`/api/op/interpretation_act?project=${PROJECT}`, { key: 'mood', act: 'accept' }, { origin: URL_ });
+    const pageEd = await post(`/api/op/interpretation_act?project=${PROJECT}`, { key: 'mood', act: 'edit', text: 'bright, playful, primaries; cut on every bar' }, { origin: URL_ });
+    const again = await call(mcp, 'interpretation_set', { key: 'mood', text: 'mcp: overwrite' });
+    const fin = (await call(mcp, 'intake_get')).questions.find(q => q.id === 'mood');
+    check('E10 interpretation_set: under the verbatim answer, marked the agent\'s (via agent, proposed), the answer untouched; nothing to interpret without an answer (409); no tool accepts, interpretation_act without the page 403 (also via "page"); an agent save cannot forge accepted; the director accepts / edits in the page; an edited one is theirs (409)',
+      tools.includes('interpretation_set') && !tools.includes('interpretation_act') && !iset.error && mood?.answer === 'mcp: bright and playful' && mood?.interpretation?.via === 'agent' && mood.interpretation.by === 'claude' && mood.interpretation.status === 'proposed'
+      && /409/.test(inone.error || '') && agentAct.status === 403 && claimed.status === 403 && after.interpretation?.status === 'proposed' && after.interpretation?.text !== 'forged'
+      && pageAcc.status === 200 && pageAcc.body?.interpretation?.status === 'accepted' && pageEd.status === 200 && pageEd.body?.interpretation?.status === 'edited' && pageEd.body.interpretation.agent_text?.startsWith('mcp: high-key')
+      && /409/.test(again.error || '') && fin.interpretation?.text === 'bright, playful, primaries; cut on every bar' && fin.answer === 'mcp: bright and playful',
+      { iset: iset.error, inone: inone.error, mood: mood?.interpretation, agentAct: agentAct.status, claimed: claimed.status, fsave, after: after.interpretation?.status, pageAcc: pageAcc.status, pageEd: pageEd.status, again: again.error });
+  }
   // remove a scene -> a gap; fill it (snapped to lines); the ok status is refused; a needs_you is fine
   const u1 = await call(mcp, 'scenes_update', { remove: ['sc03'], message: 'mcp: drop the outro' });
   const g1 = await call(mcp, 'script_get');

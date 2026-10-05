@@ -14,6 +14,7 @@ import { columnAt, visibleColumn, columns as noteColumns } from './notescol.js';
 import { noteTime } from '../js/notes.js';
 import { currentScript } from '../js/scenes.js';
 import { axisAt } from './timemode.js';
+import { connect, about } from './connect.js';   // F9 Help › Connect Claude…, F10 About (the real version + commit)
 
 const REPO_URL = 'https://github.com/dazca/ai-videoclip-director';
 
@@ -237,7 +238,8 @@ add('Window', [
   { id: 'help.issue', title: 'Report a problem or suggest a feature', group: 'Help', run: () => window.open(REPO_URL + '/issues/new', '_blank', 'noopener') },
   { id: 'help.menu', title: 'Open the menu bar (keyboard)', group: 'Help', keys: ['F10'], run: () => { tabs().setTopbar(true); openBar('File', { keyboard: true }); } },
   // the version is package.json's, from the server's /api/status (review #2 F10); none shown when the server does not say
-  { id: 'help.about', title: 'About the workbench', group: 'Help', run: async () => { let v = ''; try { const j = await (await fetch('/api/status')).json(); v = j.version || j.app_version || ''; } catch (e) { /* static host */ } toast(`Director Workbench${v ? ' ' + v : ''} · project ${PROJECT} · ${commands.list().length} commands`); } },
+  { id: 'help.connect', title: 'Connect Claude…', group: 'Help', run: () => connect.open() },
+  { id: 'help.about', title: 'About the workbench', group: 'Help', run: () => about.open() },
 ]);
 // 1..9 = pages in registry order (1 Timeline, 2 Assets, 3 Review, 4 Settings, then custom pages); Alt+1..9 = columns
 for (let i = 1; i <= 9; i++) C.push({ group: 'Window', id: `window.tab${i}`, title: () => { const p = tabs()?.pages()[i - 1]; return `Page ${i}${p ? ': ' + p.title : ''}`; }, keys: [String(i)], when: () => !!tabs()?.pages()[i - 1], checked: (c) => tabs().pages()[i - 1]?.id === c.tab, run: () => tabs().show(tabs().pages()[i - 1].id) });
@@ -270,7 +272,7 @@ menus.contribute('menubar:Generate', ['gen.regenerate', 'gen.newCostume', 'gen.r
   { label: () => { const it = store.requests?.items || []; const q = it.filter(r => r.status === 'approved' || r.status === 'queued').reduce((s, r) => s + (r.est_cost || 0), 0); const spent = (store.costs?.items || []).reduce((s, x) => s + x.usd, 0); return `spent $${spent.toFixed(0)} + queued $${q.toFixed(2)} / cap $${store.costs?.cap_usd ?? '?'}`; }, disabled: true }]);
 menus.contribute('menubar:Window', [() => tabs().pages().slice(0, 9).map((p, i) => `window.tab${i + 1}`),
   ...PAGE_SUBMENUS(), '-', 'window.newPage', 'window.closePage', '-', 'view.dock', 'view.palette', 'view.topbar']);
-menus.contribute('menubar:Help', ['window.cheat', 'view.palette', 'edit.keybindings', 'help.menu', '-', 'help.readme', 'help.source', 'help.issue', 'help.about']);
+menus.contribute('menubar:Help', ['window.cheat', 'view.palette', 'edit.keybindings', 'help.menu', '-', 'help.connect', '-', 'help.readme', 'help.source', 'help.issue', 'help.about']);
 
 // ------------------------------------------------------------------ context menus
 // the timeline's + Add comes first on any right-click on the sheet (contextArgs puts "tladd" before the item's own context)

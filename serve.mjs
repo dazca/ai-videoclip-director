@@ -16,7 +16,9 @@
 // GET  /...                              files under the workbench folder; /data/<p>/... from the data folder
 // GET  /media/<path>                     read-only files under media_base, only below the configured media_roots (Range supported)
 // GET  /api/config                       {default_project, media_roots, private_re} (the page reads it at boot)
-// GET  /api/status                       {ok, code {hash, started, disk, stale, changed}, default_project, pages, data_dir}
+// GET  /api/status                       {ok, version (package.json), commit (git describe, or null), code {hash, started, disk, stale, changed}, default_project, pages, data_dir}
+// GET  /api/connect                      local only (Help › Connect Claude…): {server, client (absolute paths of mcp/server.mjs, mcp/client.mjs), url,
+//                                        data_dir, token_file (the agent token's PATH; never its value), pages, last_agent {what, project, at}, version, commit}
 //                                        (every /api response carries the header x-wb-code: the hash of the code it runs)
 // POST /api/save/<file>                  body {base_rev, data}; <file> in WRITABLE; 409 + current file when base_rev is stale
 // GET  /api/events                       Server-Sent Events {"project", "file"} whenever a data file changes on disk,
@@ -42,7 +44,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { pipeline } from 'node:stream';
 import os from 'node:os';
 import crypto from 'node:crypto';
@@ -79,6 +81,10 @@ const AGENT_TOKEN = (() => {
 // x-wb-code on every /api response carry it; the MCP server and the page compare it with the files on disk (stale = restart)
 const CODE = S.codeState(), STARTED = new Date().toISOString().slice(0, 19);
 const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(WB, 'package.json'), 'utf8')).version; } catch (e) { return null; } })();   // About shows it
+// F10: the git commit this folder is at (short hash, "-dirty" with local changes), when git and a checkout are there; About shows it
+const COMMIT = (() => { try { return execFileSync('git', ['describe', '--always', '--dirty', '--abbrev=7'], { cwd: WB, timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).toString().trim() || null; } catch (e) { return null; } })();
+// F9: the last write an agent made through this server (Help › Connect Claude… shows it; never the token)
+let LAST_AGENT = null;
 function codeStatus() {
   const disk = S.codeState(), changed = S.codeDiff(CODE, disk);
   return { hash: CODE.hash, started: STARTED, disk: disk.hash, stale: changed.length > 0, changed: changed.slice(0, 20),
@@ -329,6 +335,7 @@ function stampPage(name, data, cur, fromPage = true) {
       const c = cur.intake?.[k] || {}, a = {};
       if (typeof v.text === 'string') Object.assign(a, v.text === c.text ? { text: c.text, by: c.by, via: c.via, at: c.at } : { text: v.text.slice(0, 8000), ...W, at });
       if (v.asked) a.asked = c.asked || { ...W, at };
+      if (c.interpretation) a.interpretation = c.interpretation;   // E10: the server's (interpretation_set / interpretation_act), never a save's
       ik[k] = a;
     }
     data.intake = ik;
@@ -360,10 +367,10 @@ function stampPage(name, data, cur, fromPage = true) {
     data.notes = data.notes.map(n => {
       const c = cn.get(n.id), cr = new Map((c?.replies || []).map(r => [r.id, r]));
       const replies = (Array.isArray(n.replies) ? n.replies : []).map((r, k) => { const o = cr.get(r.id); return o ? { ...o } : { id: typeof r.id === 'string' && r.id ? r.id.slice(0, 60) : `${n.id}.${k + 1}`, text: String(r.text).slice(0, 8000), ...W, at }; });
-      if (!c) { const { legacy: _l, absorbed_in: _a, closed_via: _v, change: _c, ...x } = n; return { ...x, ...W, created: at, round: cur.round || 1, absorbed_in: null, replies, ...(n.status !== 'open' ? { closed_by: W.by, closed_via: W.via, closed_at: at } : {}) }; }
+      if (!c) { const { legacy: _l, absorbed_in: _a, closed_via: _v, change: _c, interpretation: _i, ...x } = n; return { ...x, ...W, created: at, round: cur.round || 1, absorbed_in: null, replies, ...(n.status !== 'open' ? { closed_by: W.by, closed_via: W.via, closed_at: at } : {}) }; }
       if (!fromPage && n.status !== c.status && c.via !== 'agent' && (n.status === 'dismissed' || c.status === 'dismissed')) deny(`note ${n.id} ${n.status === 'dismissed' ? 'dismissed' : 'reopened'} (the director's note)`);
       const out = { ...n, by: c.by, via: c.via, created: c.created, target: c.target, round: c.round, replies, text: c.via === 'agent' || !fromPage ? c.text : n.text };
-      for (const k of ['legacy', 'absorbed_in', 'reply_to', 'change']) { if (c[k] !== undefined) out[k] = c[k]; else delete out[k]; }
+      for (const k of ['legacy', 'absorbed_in', 'reply_to', 'change', 'interpretation']) { if (c[k] !== undefined) out[k] = c[k]; else delete out[k]; }   // interpretation (E10): the server's
       if (n.status !== c.status) { if (n.status === 'open') { delete out.closed_by; delete out.closed_via; delete out.closed_at; } else Object.assign(out, { closed_by: W.by, closed_via: W.via, closed_at: at }); }
       else for (const k of ['closed_by', 'closed_via', 'closed_at']) { if (c[k] !== undefined) out[k] = c[k]; else delete out[k]; }
       return out;
@@ -411,7 +418,15 @@ http.createServer(async (req, res) => {
       res.write(': hi\n\n'); const c = { res, project: url.searchParams.get('project') || null }; clients.add(c); req.on('close', () => clients.delete(c)); flushPendingUi(c); return;
     }
     if (p === '/api/config') return json(res, 200, { default_project: DEFAULT, media_roots: CFG.mediaRoots, private_re: CFG.privateSrc });
-    if (p === '/api/status') return json(res, 200, { ok: true, app: 'director-workbench', version: VERSION, code: codeStatus(), default_project: DEFAULT, pages: clients.size, pages_by_project: [...clients].reduce((o, c) => (o[c.project || '*'] = (o[c.project || '*'] || 0) + 1, o), {}), data_dir: DATA_ROOT });
+    if (p === '/api/status') return json(res, 200, { ok: true, app: 'director-workbench', version: VERSION, commit: COMMIT, code: codeStatus(), default_project: DEFAULT, pages: clients.size, pages_by_project: [...clients].reduce((o, c) => (o[c.project || '*'] = (o[c.project || '*'] || 0) + 1, o), {}), data_dir: DATA_ROOT });
+    // F9 (Help › Connect Claude…): how to connect a Claude Code chat: the paths and the connection state, local only. The agent
+    // token's FILE is named, its value never leaves the server here (screenshots, exports)
+    if (p === '/api/connect') {
+      if (!isLocal(req)) return json(res, 403, { error: 'local only' });
+      return json(res, 200, { workbench: WB, server: path.join(WB, 'mcp', 'server.mjs'), client: path.join(WB, 'mcp', 'client.mjs'), url: `http://localhost:${PORT}`, default_url: PORT === 8140,
+        data_dir: DATA_ROOT, token_file: AGENT_TOKEN_FILE, token_file_exists: fs.existsSync(AGENT_TOKEN_FILE), token_from_env: !!process.env.WB_AGENT_TOKEN,
+        pages: clients.size, last_agent: LAST_AGENT, version: VERSION, commit: COMMIT });
+    }
     if (p === '/api/projects' && req.method === 'GET') return json(res, 200, S.listProjects());
     if (p === '/api/snapshots' && req.method === 'GET') return json(res, 200, S.listSnapshots(project));
     if (p.startsWith('/api/') && req.method === 'POST') {
@@ -426,6 +441,7 @@ http.createServer(async (req, res) => {
       // who writes (S9): the page (the director) or an agent; every stamp, page-only act and lock check follows it
       const fromPage = isPage(req);
       res.setHeader('x-wb-client', fromPage ? 'page' : 'agent');
+      if (!fromPage) LAST_AGENT = { what: p.startsWith('/api/op/') ? p.slice(8) : p.slice(5), project, at: new Date().toISOString().slice(0, 19) };
       // a project locked for render (Final stage, page only) refuses every write that is not the page's own: 409 + why
       if (!fromPage && (p.startsWith('/api/save/') || p === '/api/restore')) S.lockGate(project, p.startsWith('/api/save/') ? 'save' : 'snapshot_restore');
       if (!fromPage && p === '/api/projects/delete' && S.validId(body.id)) S.lockGate(body.id, 'project_delete');
@@ -478,6 +494,8 @@ http.createServer(async (req, res) => {
         if (name === 'batch_act' || name === 'jobbooks_import' || name === 'waves_plan') body.via = fromPage ? 'page' : 'agent';
         // E1: changing / accepting the named events and applying / undoing a re-time are the director's (page only); an agent's
         // event and re-time are proposals
+        // E10: accepting / editing the agent's interpretation of an intake answer or a note is the director's (page only)
+        if (name === 'interpretation_act') body.via = fromPage ? 'page' : 'agent';
         if (name === 'events_act' || name === 'retime_apply' || name === 'retime_undo' || name === 'event_add' || name === 'retime_propose') body.via = fromPage ? 'page' : 'agent';
         if (!fromPage) S.lockGate(project, name, body);   // a locked project refuses every agent write, proposals included
         delete body.import_ok;   // only a local script calling lib/store.mjs directly may import approved looks

@@ -8,6 +8,7 @@
 // Right-click: + Add › scene here / beat at this time / note (undoable). Side panel: the intake questions, versions with
 // a side-by-side diff and restore. "Fill the gaps" writes an ask for the agent listing the unscripted ranges (MCP
 // script_get / notes_get, scenes_update). Format: js/scenes.js, js/notes.js.
+import { interpHtml } from '../core/interp.js';   // E10: the agent's reading under a verbatim answer
 import { store, prefs, toast, esc, PROJECT, postJSON, mediaUrl } from '../js/store.js';
 import { fmt } from '../js/timeline.js';
 import { commands } from '../core/commands.js';
@@ -387,7 +388,7 @@ class Workspace {
     if (this.side === 'intake') {
       list.innerHTML = `<div class="lyvh"><span class="dim">${unanswered ? `${unanswered} of ${SC.INTAKE.length} open · answer here or in a chat with the agent` : 'all answered'}</span><button data-a="askdraft" title="a note asking the agent to draft the scenes from these answers (also: the stage bar's Ask the agent…)">Ask the agent to draft</button></div>`
         + SC.INTAKE.map(q => { const a = this.doc.intake[q.id] || {};
-          return `<div class="scq${a.text ? ' done' : ''}" data-q="${q.id}"><div class="scqh"><b>${esc(q.q)}</b>${a.asked ? `<span class="to" title="${esc(`asked by ${a.asked.via === 'agent' ? 'the agent' : 'the director'} ${a.asked.at || ''}`)}">asked in chat</span>` : ''}<span class="sp"></span>${a.text ? who(a) : ''}</div><textarea rows="2" placeholder="${esc(q.hint)}" spellcheck="false">${esc(a.text || '')}</textarea></div>`; }).join('');
+          return `<div class="scq${a.text ? ' done' : ''}" data-q="${q.id}"><div class="scqh"><b>${esc(q.q)}</b>${a.asked ? `<span class="to" title="${esc(`asked by ${a.asked.via === 'agent' ? 'the agent' : 'the director'} ${a.asked.at || ''}`)}">asked in chat</span>` : ''}<span class="sp"></span>${a.text ? who(a) : ''}</div><textarea rows="2" placeholder="${esc(q.hint)}" spellcheck="false">${esc(a.text || '')}</textarea>${interpHtml(a.interpretation, { key: q.id })}</div>`; }).join('');
       return;
     }
     const vs = [...this.doc.versions].reverse(), { a, b } = this.ab;

@@ -17,6 +17,7 @@ export class Timeline {
     this.layout = prefs.get('layout', {});
     this.pxPerSec = prefs.get('pxPerSec', 16);
     this.linear = prefs.get('linear', false);
+    this.fill = prefs.get('fillSong', true);   // F7: a song shorter than the window fills its height (off after an explicit zoom; Fit song turns it on)
     this.headerMode = prefs.get('headerMode', 0); // 0 full, 1 thin, 2 hidden
     this.follow = true;
     this.loop = null;
@@ -101,15 +102,16 @@ export class Timeline {
     const eff = (c) => c.collapsed ? STRIP_W - 4 : Math.max(3, Math.round(c.w));
     let sum = vis.reduce((s, c) => s + eff(c), 0);
     const flex = vis.find(c => c.id === 'notes' && !c.collapsed) || vis[vis.length - 1];
-    // too wide for the window (1280 px with the default columns): the wide text columns give up width, down to 65% of
-    // their own (never below 60 px), in proportion to what they can give, so the notes column (the last one) stays whole
-    // on screen; only what is still left over scrolls sideways
+    // too wide for the window (1280 px with the default columns, or a docked preview): the wide text columns give up
+    // width in proportion to what they can give, first down to 65% of their own (never below 60 px), then (F7) down to 40%
+    // (never below 40 px), so the notes column (the last one) stays whole on screen; only what is still left over scrolls
     const give = new Map();
-    if (sum > avail && avail > 0) {
-      const can = vis.filter(c => c !== flex && c.def.kind === 'text' && !c.collapsed && eff(c) > 90).map(c => [c, eff(c) - Math.max(60, Math.round(eff(c) * 0.65))]);
+    for (const [frac, floor, minW] of [[0.65, 60, 90], [0.4, 40, 60]]) {
+      if (!(sum > avail && avail > 0)) break;
+      const can = vis.filter(c => c !== flex && c.def.kind === 'text' && !c.collapsed && eff(c) - (give.get(c) || 0) > minW)
+        .map(c => [c, Math.max(0, eff(c) - (give.get(c) || 0) - Math.max(floor, Math.round(eff(c) * frac)))]).filter(([, g]) => g > 0);
       const room = can.reduce((s, [, g]) => s + g, 0), need = Math.min(room, sum - avail);
-      if (need > 0) for (const [c, g] of can) give.set(c, Math.floor(need * g / room));
-      sum -= [...give.values()].reduce((s, g) => s + g, 0);
+      if (need > 0) for (const [c, g] of can) { const k = Math.min(g, Math.ceil(need * g / room)); give.set(c, (give.get(c) || 0) + k); sum -= k; }   // ceil: no pixel left over to scroll
     }
     for (const c of this.cols) {
       if (c.hidden) { c.el.style.display = 'none'; c.head.style.display = 'none'; c.vw = 0; continue; }
@@ -119,7 +121,7 @@ export class Timeline {
       if (w !== c.vw || strip !== c.strip) c.dirty = true;
       c.vw = w; c.x = x; c.strip = strip; x += w;
       for (const e of [c.el, c.head]) { e.style.display = ''; e.style.left = c.x + 'px'; e.style.width = w + 'px'; }
-      c.el.classList.toggle('strip', strip); c.head.classList.toggle('strip', strip);
+      c.el.classList.toggle('strip', strip); c.head.classList.toggle('strip', strip); c.head.classList.toggle('last', c === vis[vis.length - 1]);
       c.head.classList.toggle('narrow', w < 40);
       const mb = c.head.querySelector('[data-h=mode]'); if (mb) mb.textContent = c.mode === 'drive' ? 'D' : 'F';
     }
@@ -130,7 +132,7 @@ export class Timeline {
   save() {
     const L = {};
     for (const c of this.cols) L[c.id] = { w: c.w, hidden: c.hidden, collapsed: c.collapsed, mode: c.mode };
-    this.layout = L; prefs.set('layout', L); prefs.set('pxPerSec', this.pxPerSec); prefs.set('linear', this.linear); prefs.set('headerMode', this.headerMode);
+    this.layout = L; prefs.set('layout', L); prefs.set('pxPerSec', this.pxPerSec); prefs.set('linear', this.linear); prefs.set('headerMode', this.headerMode); prefs.set('fillSong', this.fill);
     prefs.set('colOrder', this.cols.map(c => c.id)); prefs.set('folds', [...this.folds]);
   }
 
@@ -157,8 +159,27 @@ export class Timeline {
     const inFold = (t) => folds.some(f => t >= f.t0 && t < f.t1);
     const cons = [];
     for (const c of drivers) for (const k of c.constraints) if (!folds.length || !inFold(k.t0)) cons.push(k);
-    this.warp = buildWarp({ duration: dur, pxPerSec: this.pxPerSec, anchorTimes: anchors, constraints: cons, linear: this.linear, folds });
-    // 3. place
+    const build = (pps) => buildWarp({ duration: dur, pxPerSec: pps, anchorTimes: anchors, constraints: cons, linear: this.linear, folds });
+    let pps = this.pxPerSec;
+    this.warp = build(pps);
+    // F7: a song shorter than the window fills its height (never the top 40 % of it and empty below): the time floor
+    // rises until the axis is the visible height (a few corrective steps: the warp is not linear in the floor). The
+    // stored zoom (pxPerSec) is the director's; the floor actually used is ppsEff. An explicit zoom (Ctrl+wheel, +/-) turns it
+    // off (the director's zoom wins, even when shorter than the window); Fit song (Ctrl+0) turns it back on
+    const vh = this.scroller.clientHeight - this.headH - 4;
+    this.filled = false;
+    if (this.fill && vh > 50 && dur > 0 && this.warp.total < vh - 2) {
+      for (let i = 0; i < 6; i++) {
+        const textH = Math.max(0, this.warp.total - pps * dur / 1000), want = Math.min(800, Math.max(pps, (vh - textH) / (dur / 1000)));
+        if (Math.abs(want - pps) < 0.01) break;
+        pps = want; this.warp = build(pps);
+        if (Math.abs(this.warp.total - vh) < 2) break;
+      }
+      this.filled = this.warp.total <= vh + 2;
+    }
+    else if (this.fill && Math.abs(this.warp.total - vh) <= 2) this.filled = true;   // already exactly the height (Fit song)
+    this.ppsEff = pps;
+    // 3. place (the room below the song stays: follow-scroll and the stages' Time views scroll in step with it)
     this.sheet.style.height = Math.ceil(this.warp.total + this.scroller.clientHeight * 0.7) + 'px';
     for (const c of vis) {
       if (c.def.kind !== 'text') continue;
@@ -402,9 +423,9 @@ export class Timeline {
   zoomAt(f, clientY) {
     if (!this.warp) return;
     const t = this.warp.t(clientY - this.sheet.getBoundingClientRect().top);
-    const pps = Math.max(2, Math.min(800, this.pxPerSec * f));
+    const pps = Math.max(2, Math.min(800, (this.ppsEff || this.pxPerSec) * f));   // from the floor in use (a filled song: above the stored one)
     if (pps === this.pxPerSec) return t;
-    this.pxPerSec = pps; this.save();
+    this.pxPerSec = pps; this.fill = false; this.save();
     this.relayout();
     this.scroller.scrollTop += (this.sheet.getBoundingClientRect().top + this.warp.y(t)) - clientY;
     this.drawLanes();
@@ -412,13 +433,14 @@ export class Timeline {
   }
   // fit [t0, t1] (default: the whole song) into the visible height, as far as the text allows
   fitRange(t0 = 0, t1 = store.song.duration_ms) {
+    this.fill = t0 <= 0 && t1 >= store.song.duration_ms;   // the whole song: fill the height from now on; a range: the zoom it gets
     const vh = Math.max(50, this.scroller.clientHeight - this.headH - 4);
     for (let i = 0; i < 5; i++) {           // the warp is not linear in the floor: a few corrective steps
       const h = this.warp.y(t1) - this.warp.y(t0);
       if (Math.abs(h - vh) < 2) break;
-      const textH = h - this.pxPerSec * (t1 - t0) / 1000;
+      const cur = this.ppsEff || this.pxPerSec, textH = h - cur * (t1 - t0) / 1000;
       const want = Math.max(2, Math.min(800, (vh - Math.max(0, textH)) / ((t1 - t0) / 1000)));
-      if (Math.abs(want - this.pxPerSec) < 0.01) break;
+      if (Math.abs(want - cur) < 0.01) break;
       this.pxPerSec = want; this.relayout();
     }
     this.save();
@@ -436,7 +458,7 @@ export class Timeline {
   }
   setHidden(id, hidden) { const c = this.byId[id]; c.hidden = hidden; this.save(); this.applyColumns(); this.relayout(); }
   toggleLinear() { this.linear = !this.linear; for (const c of this.cols) c.dirty = true; this.save(); this.relayout({ all: true }); }
-  zoom(f) { this.pxPerSec = Math.max(2, Math.min(800, this.pxPerSec * f)); this.save(); this.relayout(); }
+  zoom(f) { this.pxPerSec = Math.max(2, Math.min(800, (this.ppsEff || this.pxPerSec) * f)); this.fill = false; this.save(); this.relayout(); }
   cycleHeader() { this.headerMode = (this.headerMode + 1) % 3; this.applyHeaderMode(); this.save(); this.relayout(); }
   setHeaderMode(m) { this.headerMode = m; this.applyHeaderMode(); this.save(); this.relayout(); }
 

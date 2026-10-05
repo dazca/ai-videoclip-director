@@ -31,7 +31,7 @@ mcp.registerTool('scene_note_resolve', {
 }, wrap((a) => op('scene_note_resolve', a)));
 mcp.registerTool('intake_get', {
   title: 'The script intake questions',
-  description: 'The intake the script starts from: questions (mood, kind = story / performance / concept, who, where, era / look, references, must-haves, must-nots, budget) with the answers so far {answer, by, via (page = the director typed it), at, asked_in_chat}, which are unanswered, and the cost summary (for the budget question). Ask the unanswered ones in the conversation, or ask the director to fill them in the page.',
+  description: 'The intake the script starts from: questions (mood, kind = story / performance / concept, who, where, era / look, references, must-haves, must-nots, budget) with the answers so far {answer, by, via (page = the director typed it), at, asked_in_chat, interpretation (your reading: interpretation_set; its status proposed / accepted / edited by the director)}, which are unanswered, and the cost summary (for the budget question). Ask the unanswered ones in the conversation, or ask the director to fill them in the page.',
   inputSchema: { project },
 }, wrap((a) => op('intake_get', a)));
 mcp.registerTool('intake_answer', {

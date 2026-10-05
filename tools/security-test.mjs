@@ -1370,6 +1370,66 @@ try {
   }
   // ==================== E1 named events and the re-time: END ====================
 
+  // ==================== F9 Connect Claude + E10 interpretations: BEGIN (a separate section) ====================
+  // F9: Help › Connect Claude… names the agent token's FILE, never its value: not in /api/connect, not in the dialog's text,
+  // HTML or copy texts (screenshots, exports), and /api/connect is local only. E10: an interpretation is the agent's to write
+  // and only the director's to accept or edit (interpretation_act: page only; 403 to curl with the page token, the agent token,
+  // the Origin alone, Sec-Fetch-Site alone, cross-site, a forged Origin with the agent token, a claimed via "page" and offline);
+  // a save of scenes.json / notes.json never writes it; a hostile interpretation renders as text
+  {
+    const raw = (p, body, headers) => fetch(A.base + p, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) }).then(async r => ({ status: r.status, body: await r.json().catch(() => null) }));
+    const AGENT_TOKEN = fs.readFileSync(path.join(DATA, '.wb-agent-token'), 'utf8').trim();
+    const cj = await (await fetch(`${A.base}/api/connect`)).text();
+    const lan = L && lanIp ? await get(lanIp, L.port, '/api/connect', { host: `${lanIp}:${L.port}` }) : null;
+    check('F9 /api/connect names the agent token file and never carries a token (agent or page); local only',
+      cj.includes('.wb-agent-token') && !cj.includes(AGENT_TOKEN) && !cj.includes(A.token) && JSON.parse(cj).server?.endsWith('server.mjs') && (!lan || lan.status === 403), { lan: lan?.status, keys: Object.keys(JSON.parse(cj)) });
+
+    await op('intake_answer', { key: 'who', text: 'e10: just the two of them, never a crowd', by: 'director' });
+    const XI = 'e10 <img src=x onerror="window.__itp=1"><script>window.__itp2=1</script>';
+    const set = await op('interpretation_set', { key: 'who', text: XI });
+    const nt = await op('notes_add', { target: { stage: 'script', kind: 'stage' }, text: 'e10: the verse should feel colder' });
+    const nid = nt.body?.id || nt.body?.note?.id;
+    const setN = await op('interpretation_set', { note: nid, text: 'e10: blue grade in the verse, tungsten only in the chorus' });
+    const H = {
+      curl: { 'x-wb-token': A.token }, agentTok: { 'x-wb-agent-token': AGENT_TOKEN }, originOnly: { 'x-wb-token': A.token, origin: A.base },
+      sfsOnly: { 'x-wb-token': A.token, 'sec-fetch-site': 'same-origin' }, cross: { 'x-wb-token': A.token, origin: A.base, 'sec-fetch-site': 'cross-site' },
+      agentForged: { 'x-wb-agent-token': AGENT_TOKEN, 'x-wb-token': A.token, origin: A.base, 'sec-fetch-site': 'same-origin' },
+    };
+    const tries = {};
+    for (const [k, h] of Object.entries(H)) for (const ref of [{ key: 'who' }, { note: nid }]) tries[`${k}:${ref.key ? 'intake' : 'note'}`] = (await raw(`/api/op/interpretation_act?project=${P}`, { ...ref, act: 'accept', via: 'page' }, h)).status;
+    let offline; try { S.ops.interpretation_act(P, { key: 'who', act: 'accept' }); offline = 200; } catch (e) { offline = e.code; }
+    let offlineAgent; try { S.ops.interpretation_act(P, { note: nid, act: 'edit', text: 'x', via: 'agent' }); offlineAgent = 200; } catch (e) { offlineAgent = e.code; }
+    // a save cannot write one: an agent's (no page) and the page's own (the server keeps its copy)
+    const fa = await pageSave('scenes.json', (d) => { d.intake.who.interpretation = { text: 'forged', status: 'accepted', by: 'director', via: 'page' }; }, {});
+    const fp = await pageSave('notes.json', (d) => { const n = d.notes.find(x => x.id === nid); n.interpretation = { text: 'forged', status: 'accepted' }; d.notes.push({ id: 'e10x', target: { stage: 'script', kind: 'stage' }, text: 'e10x', status: 'open', interpretation: { text: 'forged new', status: 'accepted' } }); });
+    const who = readP('scenes.json').intake.who, note = readP('notes.json').notes.find(x => x.id === nid), nx = readP('notes.json').notes.find(x => x.id === 'e10x');
+    check('E10 an agent cannot accept or edit an interpretation (403 on every non-page request, a claimed via "page", offline); saves never write one (the server keeps its own); the verbatim answer and note text stay as written',
+      set.status === 200 && setN.status === 200 && Object.values(tries).every(s => s === 403) && offline === 403 && offlineAgent === 403
+      && fa.status === 200 && fp.status === 200 && who.interpretation?.status === 'proposed' && who.interpretation.text === XI && who.text === 'e10: just the two of them, never a crowd'
+      && note.interpretation?.status === 'proposed' && note.interpretation.via === 'agent' && note.text === 'e10: the verse should feel colder' && nx && !nx.interpretation, { tries, offline, offlineAgent, fa: fa.status, fp: fp.status, who: who.interpretation?.status, note: note?.interpretation?.status, nx: nx?.interpretation });
+
+    if (browser) {
+      const cpg = await browser.newPage(); await cpg.setViewport({ width: 1280, height: 800 });
+      await cpg.goto(`${A.base}/?project=${P}`, { waitUntil: 'domcontentloaded' });
+      await cpg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 });
+      await cpg.evaluate(() => window.WB.commands.run('help.connect'));
+      await cpg.waitForFunction(() => !!document.querySelector('.wbdlg[data-dlg=connect] .cnstep'), { timeout: 8000 });
+      // the copy buttons put their text on the clipboard: capture what they would copy
+      await cpg.evaluate(() => { window.__copied = []; try { Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (t) => { window.__copied.push(t); } }, configurable: true }); } catch (e) { /* read-only */ } });
+      for (const b of await cpg.$$('.wbdlg [data-copy]')) { await b.click(); await wait(80); }
+      const dlg = await cpg.evaluate(() => ({ html: document.querySelector('.wbdlg').outerHTML, text: document.body.innerText, copied: window.__copied, n: document.querySelectorAll('.wbdlg [data-copy]').length }));
+      const leak = [AGENT_TOKEN, A.token].some(t => dlg.html.includes(t) || dlg.text.includes(t) || dlg.copied.some(c => c.includes(t)));
+      check('F9 the Connect dialog never shows or copies a token (the agent token\'s value nor the page\'s): only the file path',
+        !leak && dlg.n === 3 && dlg.copied.length === 3 && dlg.copied.some(c => c.includes('.wb-agent-token')) && dlg.copied.some(c => /^claude mcp add workbench /.test(c)), { n: dlg.n, copied: dlg.copied.map(c => c.slice(0, 60)) });
+      await cpg.keyboard.press('Escape');
+      await cpg.evaluate(() => window.WB.stages.open('script')); await wait(900);
+      const r = await cpg.evaluate(() => ({ inert: window.__itp === undefined && window.__itp2 === undefined && !document.querySelector('.itp img, .itp script'), txt: document.querySelector('.scq[data-q=who] .itp .itpt')?.textContent || '' }));
+      check('F02 E10: a hostile interpretation renders as text under the answer and never runs', r.inert && /onerror/.test(r.txt), r);
+      await cpg.close();
+    }
+  }
+  // ==================== F9 Connect Claude + E10 interpretations: END ====================
+
   // ==================== review #2: S9 (page vs agent), N2-N9, I1 ====================
   {
     const raw = (p, body, headers) => fetch(A.base + p, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) }).then(async r => ({ status: r.status, client: r.headers.get('x-wb-client'), body: await r.json().catch(() => null) }));

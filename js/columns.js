@@ -1,6 +1,7 @@
 // Column definitions for the timeline. kind 'lane' = canvas drawn per pixel row; kind 'text' = DOM items placed by y(t).
 // A text column has build(c) -> c.items [{t0, t1?, el}], optional prepare/measure/tick/act/refresh/dblclick.
 // A lane column has draw(c, env). Adding a column = adding one object here.
+import { interpHtml } from '../core/interp.js';   // E10: the agent's reading under a note
 import { el, fmt, secColor, upperBound } from './timeline.js';
 import { mediaUrl, esc } from './store.js';
 import { currentScript, sceneStatus } from './scenes.js';
@@ -263,7 +264,7 @@ export function makeColumns(tl, store) {
       build(c) {
         const ctx = { song, scenes: currentScript(store.scenes)?.scenes || [], shots: store.boardShots() };
         const list = store.notes.notes.filter(n => n.status !== 'dismissed').map(n => ({ n, t0: noteTime(n, ctx) })).filter(x => x.t0 != null).sort((a, b) => a.t0 - b.t0);
-        addItems(c, list, ({ n }) => `<div class="note n-${esc(n.status)} ${n.via === 'agent' ? 'ag' : 'dr'}${n.target.stage !== 'timeline' ? ' other' : ''}${n.to === 'agent' ? ' ask' : ''}" data-sel="note:${esc(n.id)}" title="${esc(`${n.id} · ${n.via === 'agent' ? 'agent' : 'director'} · ${n.status}${n.target.stage !== 'timeline' ? ` · ${STAGE_TITLE[n.target.stage]} ${n.target.kind} ${n.target.id || ''}` : ''}`)}"><span class="nst" data-act="nt" data-id="${esc(n.id)}" title="${n.status === 'open' ? 'open (click: done)' : 'done (click: reopen)'}">●</span>${n.target.stage !== 'timeline' ? `<i class="nstg" data-act="ngo" data-stage="${esc(n.target.stage)}" title="a note in ${esc(STAGE_TITLE[n.target.stage])}: open the stage">${esc(STAGE_TITLE[n.target.stage].slice(0, 3).toLowerCase())}</i>` : ''}${n.to === 'agent' ? '<i class="nask">→ agent</i>' : ''}${esc(n.text)}${(n.replies || []).map(r => `<div class="nrep ${r.via === 'agent' ? 'ag' : 'dr'}">${esc(r.text)}</div>`).join('')}</div>`);
+        addItems(c, list, ({ n }) => `<div class="note n-${esc(n.status)} ${n.via === 'agent' ? 'ag' : 'dr'}${n.target.stage !== 'timeline' ? ' other' : ''}${n.to === 'agent' ? ' ask' : ''}" data-sel="note:${esc(n.id)}" title="${esc(`${n.id} · ${n.via === 'agent' ? 'agent' : 'director'} · ${n.status}${n.target.stage !== 'timeline' ? ` · ${STAGE_TITLE[n.target.stage]} ${n.target.kind} ${n.target.id || ''}` : ''}`)}"><span class="nst" data-act="nt" data-id="${esc(n.id)}" title="${n.status === 'open' ? 'open (click: done)' : 'done (click: reopen)'}">●</span>${n.target.stage !== 'timeline' ? `<i class="nstg" data-act="ngo" data-stage="${esc(n.target.stage)}" title="a note in ${esc(STAGE_TITLE[n.target.stage])}: open the stage">${esc(STAGE_TITLE[n.target.stage].slice(0, 3).toLowerCase())}</i>` : ''}${n.to === 'agent' ? '<i class="nask">→ agent</i>' : ''}${esc(n.text)}${interpHtml(n.interpretation, { note: n.id })}${(n.replies || []).map(r => `<div class="nrep ${r.via === 'agent' ? 'ag' : 'dr'}">${esc(r.text)}</div>`).join('')}</div>`);
       },
       act(c, a) { if (a.dataset.act === 'nt') store.toggleNote(a.dataset.id); if (a.dataset.act === 'ngo') window.WB?.stages?.open(a.dataset.stage); },
       refresh(c, what) { if (what !== 'notes' && what !== 'scenes' && what !== 'board') return false; this.build(c); return true; },
