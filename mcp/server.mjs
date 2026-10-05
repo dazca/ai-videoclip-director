@@ -32,6 +32,7 @@ import './tools/scenes.mjs';       // stage 2 script, intake, sketches
 import './tools/breakdown.mjs';    // stage 3 breakdown
 import './tools/requests.mjs';     // approvals, the generation queue, costs
 import './tools/final.mjs';        // stage 7: final_get (read only; approvals and the lock are the page's)
+import './tools/batches.mjs';      // D4: batches_get, waves_propose (approving / reviewing a batch is the page's)
 import './tools/media.mjs';        // D8: media_scan, media_import (uploads and "use as" are the page's)
 
 // ------------------------------------------------------------------ resources: docs + raw project files

@@ -794,6 +794,58 @@ try {
       { ok: ok.status, forged: forged.status, kept: vF.shots.find(s => s.id === 's2-wall').clip?.file, s3: vF.shots.find(s => s.id === 's3-grid').clip, agent: agentClip.status });
   }
 
+  // ---------------------------------------------------------------- D4 batches (waves): only the director approves, reviews (unlocks), sets the
+  // cap of or dismisses a batch (page only); a page save cannot forge batches or history; a locked batch never runs; the
+  // per-batch cap holds; the job-book import is the page's
+  {
+    const asPage = (name, body = {}) => post(`/api/op/${name}?project=${P}`, body, { origin: A.base });
+    const RQ = () => readP('requests.json'), s0 = FAL.stats.submits;
+    const pageSaveO = async (f, fn) => { const cur = await (await fetch(`${A.base}/data/${P}/${f}`)).json(); fn(cur); return post(`/api/save/${f}?project=${P}`, { base_rev: cur.rev, data: cur }, { origin: A.base }); };
+    const wv = await op('waves_plan', { shots: ['s1-intro', 's5-outro'], sizes: [1] });
+    const [b1, b2] = wv.body?.batches || [];
+    const rq1 = RQ().batches.find(b => b.id === b1)?.request_ids[0], rq2 = RQ().batches.find(b => b.id === b2)?.request_ids[0];
+    const tries = {};
+    for (const [act, extra] of [['approve', {}], ['review', {}], ['cap', { max_usd: 99 }], ['dismiss', {}], ['verdict', { request: rq1, verdict: 'kept' }]]) {
+      const body = { act, id: b1, ...extra };
+      tries[act] = [(await op('batch_act', body)).status, (await op('batch_act', { ...body, via: 'page' })).status, (await post(`/api/op/batch_act?project=${P}`, body, { origin: 'http://evil.example' })).status];
+      try { S.ops.batch_act(P, body); tries[act].push(200); } catch (e) { tries[act].push(e.code); }
+    }
+    const noTool = !fs.readFileSync(path.join(WB, 'mcp', 'tools', 'batches.mjs'), 'utf8').includes("registerTool('batch_act'") && !fs.readFileSync(path.join(WB, 'mcp', 'tools', 'batches.mjs'), 'utf8').includes("registerTool('jobbooks_import'");
+    const jb = [(await op('jobbooks_import', {})).status, (await op('jobbooks_import', { via: 'page' })).status];
+    check('D4 an agent cannot approve, review (unlock), re-cap, dismiss or judge a batch (batch_act over the agent surface, with a claimed via "page", from a foreign Origin, offline: 403; no MCP tool) nor import the job books (403); the batches stay drafts',
+      wv.status === 200 && b1 && b2 && Object.values(tries).every(t => t.every(s => s === 403)) && noTool && jb.every(s => s === 403) && RQ().batches.every(b => b.status === 'draft'), { tries, jb, wv: wv.body?.batches });
+    // a page save is the director's, but batches and history are the server's: forged ones are ignored
+    const forge = await pageSave('requests.json', (d) => {
+      const b = d.batches.find(x => x.id === b2); b.gate = { after: null, rule: 'review' }; b.status = 'approved'; d.batches.find(x => x.id === b1).status = 'reviewed';
+      d.batches.push({ id: 'b99', name: 'forged', request_ids: [rq2], gate: { after: null }, status: 'approved', max_usd: 999 });
+      d.items.push({ id: 'hist-forged', kind: 'image', status: 'done', prompt: 'x', refs: [], est_cost: 0, history: { book: 'jobs_x.json', job: 'X' } });
+      d.items.find(x => x.id === rq1).history = { book: 'forged' };
+    });
+    const F = RQ();
+    check('D4 a page save of requests.json cannot forge batches (status, gate, a new batch: the server\'s copy is kept) nor history (a forged history item or field is dropped)',
+      forge.status === 200 && F.batches.length === 2 && F.batches.every(b => b.status === 'draft') && F.batches.find(b => b.id === b2).gate.after === b1 && !F.items.find(x => x.id === 'hist-forged')?.history && !F.items.find(x => x.id === rq1).history,
+      { forge: forge.status, batches: F.batches.map(b => [b.id, b.status, b.gate.after]) });
+    // a locked batch never runs: its request approved by hand in the page is refused by the runner and by request_update queued
+    await pageSaveO('requests.json', (d) => { d.items.find(x => x.id === rq2).status = 'approved'; });
+    const lk = { run: (await op('request_run', { ids: [rq2] })).body, all: (await op('request_run', { all: true, dry_run: true })).body, queue: (await op('request_update', { id: rq2, status: 'queued' })).status,
+      batch: (await op('request_run', { batch: b2 })).body };
+    let offline; try { offline = await S.ops.request_run(P, { ids: [rq2], wait: true }); } catch (e) { offline = { error: e.code }; }
+    const pageApprove = await asPage('batch_act', { act: 'approve', id: b2 });
+    await wait(300);
+    check('D4 a locked batch never runs: a request of the locked wave approved in the page is refused by request_run (ids, all, batch, offline), request_update queued is 409, approving the locked batch is 409 even from the page; nothing reached fal',
+      lk.run?.started?.length === 0 && /locked until/.test(lk.run.refused[0].why) && !(lk.all?.items || []).some(x => x.id === rq2 && x.ok) && lk.queue === 409 && lk.batch?.started?.length === 0 && offline?.results?.length === 0 && /locked/.test(JSON.stringify(offline.refused))
+      && pageApprove.status === 409 && RQ().items.find(x => x.id === rq2).status === 'approved' && FAL.stats.submits === s0, { lk: { run: lk.run?.refused, queue: lk.queue }, offline: offline?.refused || offline, pageApprove: pageApprove.status });
+    // the per-batch cap: the director approves b01 with a cap below its estimate: the run is refused, nothing reached fal
+    const ap = await asPage('batch_act', { act: 'approve', id: b1, max_usd: 0.05 });
+    const capRun = await op('request_run', { batch: b1 }); await wait(300);
+    const capUp = await asPage('batch_act', { act: 'cap', id: b1, max_usd: -1 });
+    check('D4 the per-batch cap holds: b01 approved with max_usd $0.05 below its $0.12 estimate: request_run {batch} refuses it ("over the batch cap"), nothing reached fal; a negative cap is refused (400)',
+      ap.status === 200 && ap.body.max_usd === 0.05 && capRun.body?.started?.length === 0 && /over the batch cap/.test(capRun.body?.refused?.[0]?.why || '') && FAL.stats.submits === s0 && capUp.status === 400 && RQ().items.find(x => x.id === rq1).status === 'approved',
+      { ap: ap.body, cap: capRun.body?.refused, capUp: capUp.status });
+    // leave the demo as the later blocks expect it: the wave requests back to draft is not possible for approved ones; reject them
+    await pageSaveO('requests.json', (d) => { for (const x of d.items) if ([rq1, rq2].includes(x.id)) { x.status = 'rejected'; x.why = 'security test'; } });
+  }
+
   // ---------------------------------------------------------------- final approvals (stage 7): the director approves and locks; a locked
   // project refuses every agent write (409) over HTTP (op, save, restore) and offline, while the page and the reads still work
   {

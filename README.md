@@ -76,7 +76,8 @@ the costs against the cap, the lock); `takes_get` / `take_propose` (take selecti
 proposed take with in / out and why; the pick is the director's, in the page); `approvals_get` / `approve` / `request_changes`, `requests_list` /
 `request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`), `costs_get` (one total over costs.json and
 `media_add`, `notes_list` / `note_add` / `note_resolve`, `approvals_get` / `approve` / `request_changes`, `requests_list` /
-`request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`; `takes`), `request_run` (run approved requests: the runner) / `generators_get`, `costs_get` (one total over costs.json and
+`request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`; `takes`), `request_run` (run approved requests: the runner; `batch` = one wave) / `generators_get`, `batches_get` / `waves_propose` (D4: waves of
+shots with review gates, the take ratio; approving and reviewing a batch are the director's, in the page), `costs_get` (one total over costs.json and
 a falgen ledger), `cost_record` (spend made outside the queue, never an approval), `media_update`, `media_scan` / `media_import`
 (existing images and video under a media root: read a folder and its `job.json` jobs (prompt, model, refs, cost), register in
 place; uploads and "Use as…" are the director's, in the page), `wait_for` (block
@@ -391,7 +392,7 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `media.json` | `{generated, count, by_kind, items[{id, path, kind, label, entities[], shots[], uses[], take, job, group, size, w, h, duration_ms, private, status: used/picked/unused/private, cost_usd, thumb, strip?, strip_n?, packed_alpha?, request?, imported?{by, via, at, from: in place / upload, name?}, use_as?[{shot, as: take / start_frame} / {entity, tree, node, as: identity / look / base / variant}, by, via, at]}]}`; kinds: render, clip, still, avatar, body, motion, dancer, motion-ref, sheet, variation, contact, audio, ref |
 | `thumbs/m_*.jpg`, `s_*.jpg`, `priv_*.jpg` | media thumbnails (max 240 px, sheets 600 px), 8-frame hover-scrub strips of videos, thumbnails of PRIVATE files |
 | `_src/probe.json` | ffprobe cache (size/mtime keyed) |
-| `requests.json` | `{rev, items[{id, kind, target, prompt, refs[], est_cost, tool?, status: draft/approved/queued/running/done/failed/rejected/withdrawn, by, at, takes?, superseded_by?, outputs?[], generator?, linked?{type, id, tree, nodes[], proposals[]}, handoff?{generator, pack, results}, last_run?{at, status, why}, asset?{type: character/location/prop, id, tree, from, kind: identity/base/edit/look/variant, text?, sketch?, png?, mask?, pins[]}, warnings?[], recipe?{id, version, model, framing, fields, blocks[]}}]}`; kinds: regenerate, new-costume, new-variant, generate, duplicate, choose-take, set-in, edit-timing, swap-costume, section-variant, import, identity-sheet, character-edit, look-sheet, location-plate, location-edit, location-variant, prop-sheet, prop-edit, prop-variant. `asset` links a stage-4 / 5 generation to the asset tree it grows; older requests may carry it as `char` (still read; `request_create` accepts `char` with a deprecation warning and stores `asset` only) |
+| `requests.json` | `{rev, items[{id, kind, target, prompt, refs[], est_cost, tool?, status: draft/approved/queued/running/done/failed/rejected/withdrawn, by, at, takes?, superseded_by?, history?{source, book, job, dir, files, registered, cost}, outputs?[], generator?, linked?{type, id, tree, nodes[], proposals[]}, handoff?{generator, pack, results}, last_run?{at, status, why}, asset?{type: character/location/prop, id, tree, from, kind: identity/base/edit/look/variant, text?, sketch?, png?, mask?, pins[]}, warnings?[], recipe?{id, version, model, framing, fields, blocks[]}}]}`; kinds: regenerate, new-costume, new-variant, generate, duplicate, choose-take, set-in, edit-timing, swap-costume, section-variant, import, identity-sheet, character-edit, look-sheet, location-plate, location-edit, location-variant, prop-sheet, prop-edit, prop-variant. `asset` links a stage-4 / 5 generation to the asset tree it grows; older requests may carry it as `char` (still read; `request_create` accepts `char` with a deprecation warning and stores `asset` only). `batches[{id, name, wave, request_ids[], shots[], gate{after, rule: "review"}, status: draft/approved/reviewed, max_usd?, verdicts{<request>: {verdict: rejected/kept}}, approved_at?, reviewed_at?, stats?}]` (D4 waves; the server's: a page save keeps its copy) |
 | `refs/<id>/`, `private/refs/<id>/`, `private/{characters,locations,props}/<id>/` | stage-4 / 5 references: Openverse images (public, provenance in `media.json` `provenance{}`), the director's reference photos (always private), and iteration images made from private photos (private) |
 | `overrides.json` | `{rev, sections:{<id>:{label?, color?}}}`: the director's section renames / colours over `song.json` |
 | `settings.json` | `{rev, keybindings:{<command id>:[keys]}}` (not snapshotted) |
@@ -438,7 +439,7 @@ runner with one approval rule, one cap and one ledger:
 - **An agent**: `request_run {ids, dry_run: true}` (the plan: generator, model, endpoint, takes, estimate vs the
   approved `est_cost`, the cap, outputs already on disk; nothing called, written or spent), then `request_run {ids}`
   (background; `wait_for {request, until: ["done", "failed"]}`) or `{ids, wait: true}`.
-- **A shell**: `node tools/run.mjs --project <p> <ids…> | --all [--dry-run] [--parallel 2] [--video-parallel 1] [--retake] [--max-usd 2]` (a cap for the batch: `request_run max_usd`).
+- **A shell**: `node tools/run.mjs --project <p> <ids…> | --all | --batch <id> [--dry-run] [--parallel 2] [--video-parallel 1] [--retake] [--max-usd 2]` (a cap for the batch: `request_run max_usd`).
 
 What a run does: only a request with the director's approval on record runs (a draft, rejected or done one is
 refused; the runner never approves); the cap is re-checked when it is claimed (`queued`, 402 over it) and the
@@ -467,6 +468,20 @@ sends falgen's payloads (H3: `image_url`, integer `duration`, `768P`, `end_image
 `character_orientation`), waits up to 25 min per take, saves `gen/<id>/<id>_<take>.mp4` and probes it (fps, duration in
 `job.json` and `media.json`); with a `shot:` target the outputs are that shot's takes in take selection (D6). A
 reference clip longer than the approved seconds is refused (fal bills the output length).
+
+**Waves, pilot gates and job books** (D4; `js/batches.js`, `lib/ops/batches.mjs`, `tabs/waves.js`). Paid generation goes in
+waves (TREATMENT: "a pilot … to measure the take ratio … the rest only after that"; research: "waves with review gates (2, 4, 8, 10
+shots)"). **Plan waves…** in the Queue (or the agent's `waves_propose`) splits the storyboard gaps into a pilot (the shots you tick,
+else the first ones), then waves of 2 → 4 → 8 → the rest, with the takes per shot and the cap; **Create waves** writes draft requests
+and draft batches (`requests.json` `batches[]`), each gated on the one before. In the Queue each batch is a collapsible group with its
+gate (**locked** / **ready** / **running** / **review** / **done**), its totals and its cap: **Approve batch · $X** approves the whole
+batch after a confirm that shows the total and the cap impact; **Run batch** runs it within its cap (`max_usd`); once every request
+ran, pick a take of each shot (Storyboard › Shot › Takes, Review › Takes) or **Reject takes**, then **Mark reviewed**: the next batch
+unlocks. A locked batch never runs. After a wave the Queue shows the take ratio (takes per used shot, cost per used second) and
+re-estimates the remaining waves from it (their seconds x the cost per used second, next to the list price). **Import job books**
+reads the first film's falgen `jobs_*.json` (the falgen folder linked in Settings › costs / `project.json`) as history requests: done,
+linked to their outputs that are registered media, never run again, nothing added to the ledger (each job's money shows where the
+merged ledger has it). Approving, reviewing and the import are the director's (page only: `batch_act`, `jobbooks_import`).
 
 **A failed take inside a done request** (D3c): the request is done with the takes that finished (`takes_failed` lists
 the others; nothing is paid for them). **Retry take N · $x** in the Queue (`request_run {ids, retake: true}`, `--retake`)
