@@ -175,8 +175,12 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
 6. **Generation requests**: `request_create` drafts with a concrete prompt, refs, tool and an honest `est_cost` (list prices:
    `js/prices.js`; for photoreal stills and video pass `recipe {model, wardrobe, action, place, light, ...}`: the prompt is
    built from the photoreal blocks, the estimate from the price table; read the returned `warnings`). No base yet:
-   `base_propose`. An image that already exists (a legacy look, an output made outside the queue): `media_add` /
-   `media_update`, `cost_record {usd, via, job}` for its spend (never an approval), then `node_import_propose`.
+   `base_propose`. An image or video that already exists (a legacy look, an output made outside the queue, falgen's
+   `out/<id>/`): `media_scan {path}` (a folder under a media root: its files and each `job.json` job with prompt, model,
+   refs, takes and cost status), `media_import {paths}` (registers in place, job / take / cost share; private never
+   lowered), `cost_record` with the job's `cost.offer` when it says not_counted (never an approval), then
+   `node_import_propose` for a node; a take or a start frame for a shot: a note on the shot. "Use as…" and uploads are
+   the director's, in the page (File › Import media…).
    To wait for the director, use `wait_for {request, until: ["approved", "rejected"], timeout_s}` instead of polling.
    Several drafts: `wait_for {requests: [ids], until: ["approved", "rejected"]}` returns on the first. A draft of yours that is
    obsolete: `request_update {status: "withdrawn", why, superseded_by}` (rejected is the director's word). With no page open,

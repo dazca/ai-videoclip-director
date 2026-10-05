@@ -22,7 +22,7 @@ const parseSec = (v) => { const s = String(v || '').trim().replace(/\s*s$/, '');
 
 // the saved shot (the pick lives on the current storyboard version) and its takes, from the page's store
 export function savedShot(id) { return SB.boardShots(store.board).find(s => s.id === id) || null; }
-export function shotTakes(shot) { return shot ? T.takesForShot(shot, { media: store.media, requests: store.requests, uses: store.uses }) : []; }
+export function shotTakes(shot) { return shot ? T.takesForShot(shot, { media: store.media, requests: store.requests, uses: store.uses, links: T.shotLinks(store.media, shot.id) }) : []; }
 const info = (t) => ({ fps: INFO.get(t.media)?.fps || t.fps || T.DEFAULT_FPS, dur: t.duration_ms || INFO.get(t.media)?.duration_ms || null });
 // fps / probed durations come from the server (takes_get); asked once per shot and media set
 function askInfo(shotId, takes, rerender) {

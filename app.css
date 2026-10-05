@@ -1250,3 +1250,36 @@ button.on { color: var(--acc); }
 .tkmain .tkstrip0 { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
 .dock .cmp.ab .ct b { color: #ddd; }
 .tkview .tked .tkvid { max-height: 240px; } .tkview .tkmain { max-width: 480px; }
+/* File › Import media… (core/importmedia.js, D8) */
+.imback { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.55); display: flex; align-items: flex-start; justify-content: center; padding-top: 5vh; }
+.imdlg { width: min(1040px, 96vw); max-height: 88vh; display: flex; flex-direction: column; background: var(--bg2); border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(0,0,0,.6); font: 12px/16px "Segoe UI", Arial, sans-serif; color: var(--fg); }
+.imdlg .sp { flex: 1; }
+.imh { display: flex; gap: 8px; align-items: center; padding: 4px 8px; border-bottom: 1px solid var(--line); } .imh i { cursor: pointer; font-style: normal; font-size: 16px; color: var(--dim); }
+.imsrc { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--line2); }
+.imdrop { flex: 1 1 340px; border: 1px dashed var(--line); padding: 8px; text-align: center; cursor: pointer; color: var(--fg); } .imdrop.over { border-color: var(--acc); background: #2a2516; } .imdrop u { color: var(--acc); }
+.impath { flex: 1 1 340px; display: flex; gap: 4px; } .impath input { flex: 1; height: 22px; font: 12px Consolas, monospace; } .impath button { height: 24px; }
+.imroots { flex-basis: 100%; font-size: 10.5px; }
+.imjobs { max-height: 34vh; overflow-y: auto; border-bottom: 1px solid var(--line2); } .imjobs:empty { display: none; }
+.imjh { font-size: 10.5px; padding: 2px 8px; color: var(--fg); background: var(--bg3); }
+.imjob { padding: 3px 8px; border-top: 1px solid var(--line2); }
+.imjl { display: flex; gap: 6px; align-items: baseline; white-space: nowrap; } .imjl b { color: var(--acc); font-family: Consolas, monospace; }
+.imcost .ok { color: #7fd09a; } .imcost .warn { color: var(--acc); } .imrec { margin-left: 6px; }
+.imprompt { color: var(--dim); font-size: 11px; line-height: 14px; max-height: 28px; overflow: hidden; cursor: pointer; white-space: pre-wrap; } .imjob.open .imprompt { max-height: none; color: var(--fg); }
+.imlist { flex: 1; overflow-y: auto; min-height: 80px; }
+.imrow { display: grid; grid-template-columns: 18px 96px 1fr 104px 180px 70px 190px; gap: 6px; align-items: center; padding: 2px 8px; border-bottom: 1px solid var(--line2); }
+.imrow.bad { opacity: .6; } .imrow.done { background: #15201a; }
+.imth { position: relative; width: 96px; height: 54px; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.imth img, .imth video { width: 100%; height: 100%; object-fit: contain; display: block; } .imno { color: var(--dim); }
+.imnm { display: flex; flex-direction: column; min-width: 0; } .imnm b { font-weight: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .imnm .dim { font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.imnm .err { color: #ff8a80; font-size: 11px; }
+.improg { display: block; height: 3px; background: var(--line); margin-top: 2px; } .improg i { display: block; height: 100%; background: var(--acc); }
+.imrow select, .imrow input[data-f=label] { height: 20px; font-size: 11.5px; min-width: 0; }
+.impriv { white-space: nowrap; font-size: 11px; }
+.imst { font-size: 11px; white-space: nowrap; overflow: hidden; } .imst .ok { color: #7fd09a; } .imst button { height: 18px; font-size: 11px; padding: 0 4px; cursor: pointer; }
+.imempty { padding: 16px; text-align: center; }
+.imf { display: flex; gap: 8px; align-items: center; padding: 5px 8px; border-top: 1px solid var(--line); } .imf button { height: 24px; padding: 0 12px; cursor: pointer; } .imreq select { height: 20px; max-width: 220px; }
+/* the Assets › Media browser's extra filters (linked / unlinked, compact) */
+.media .mbar button { height: 16px; font-size: 11px; padding: 0 4px; line-height: 14px; cursor: pointer; }
+.media.compact .mgrid, .media.compact .mgrid:has(.wide), .media.compact .mgrid:has(.tall) { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
+.media.compact .mc .ml { font-size: 8.5px; line-height: 10px; }
+.mc .mlk { position: absolute; left: 0; top: 0; font: 9px/10px Consolas, monospace; background: rgba(20,60,110,.85); color: #dbe9ff; padding: 0 2px; z-index: 2; pointer-events: none; }

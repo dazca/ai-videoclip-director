@@ -132,7 +132,7 @@ fs.watch(DATA_ROOT, { recursive: true }, (_ev, name) => {
   if (!name) { clearTimeout(watchTimer.get('*')); watchTimer.set('*', setTimeout(() => notify('*', ['*']), 80)); return; }   // Windows drops names when its event buffer overflows
   const f = name.replace(/\\/g, '/');
   // (gen/: the runner's outputs, job.json and lock: the page follows requests.json and media.json instead; .history: the git mirror)
-  if (f.endsWith('.tmp') || f.endsWith('.lock') || f.includes('/.snapshots') || f.includes('/.history') || f.includes('/thumbs/') || /\/gen(\/|$)/.test(f)) return;
+  if (f.endsWith('.tmp') || f.endsWith('.lock') || f.includes('/.snapshots') || f.includes('/.history') || f.includes('/.uploads') || f.includes('/thumbs/') || /\/gen(\/|$)/.test(f)) return;
   const i = f.indexOf('/'); if (i < 0) return;
   clearTimeout(watchTimer.get(f));
   watchTimer.set(f, setTimeout(() => notify(f.slice(0, i), [f.slice(i + 1)]), 80));
@@ -170,7 +170,7 @@ function pushUi(project, cmd) {
 
 // request bodies: 5 MB, except a sketch save (two base64 PNGs + the stroke JSON): 25 MB. Over the limit: 413 at once
 // (by Content-Length when sent, else while reading); the rest of the upload is discarded and the connection closed.
-const bodyLimit = (p) => p === '/api/op/sketch_save' || p === '/api/op/ref_upload' ? 25e6 : 5e6;
+const bodyLimit = (p) => p === '/api/op/sketch_save' || p === '/api/op/ref_upload' ? 25e6 : p === '/api/op/media_upload' ? 9e6 : 5e6;
 function readBody(req, limit) {
   return new Promise((ok, bad) => {
     const too = () => new S.WbError(413, `body too big (${limit / 1e6} MB max)`);
@@ -390,6 +390,8 @@ http.createServer(async (req, res) => {
         if (name === 'final_lock' || name === 'final_unlock') body.via = fromPage ? 'page' : 'agent';
         // take selection (D6): picking a take, its in / out and alternatives are the director's (page only)
         if (name === 'take_act') body.via = fromPage ? 'page' : 'agent';
+        // D8: uploading files and "use as" (a node, a shot's take / start frame) are the director's (page only); an import's provenance
+        if (name === 'media_upload' || name === 'media_use' || name === 'media_import') body.via = fromPage ? 'page' : 'agent';
         if (!fromPage) S.lockGate(project, name, body);   // a locked project refuses every agent write, proposals included
         delete body.import_ok;   // only a local script calling lib/store.mjs directly may import approved looks
         return json(res, 200, await S.ops[name](project, body));

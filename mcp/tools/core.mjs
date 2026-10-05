@@ -72,16 +72,17 @@ mcp.registerTool('timeline_query', {
 
 // ------------------------------------------------------------------ media
 mcp.registerTool('media_list', {
-  title: 'List media', description: 'The media index (every generated or imported file): {id, path, kind, label, entities, shots, take, job, status used/picked/unused/private, private, duration_ms, w, h, thumb, cost_usd}. Filters: kind (render, clip, still, avatar, sheet, variation, motion, dancer, contact, audio, ref…), entity id, status, shot id, q (text in id/label/path/job). Paged (limit, offset).',
-  inputSchema: { project, kind: z.string().optional(), entity: z.string().optional(), status: z.string().optional(), shot: z.string().optional(), q: z.string().optional(),
+  title: 'List media', description: 'The media index (every generated or imported file): {id, path, kind, label, entities, shots, take, job, status used/picked/unused/private, private, duration_ms, w, h, thumb, cost_usd}. Filters: kind (render, clip, still, avatar, sheet, variation, motion, dancer, contact, audio, ref…), entity id, status, shot id, linked ("linked": used by an entity / node / shot / clip use / request / "use as"; "unlinked": not), private, q (text in id/label/path/job). Imported files carry `imported` {by, via, at, from}, a request link `request`, and the director’s "use as" `use_as` [{shot, as: take | start_frame} | {entity, tree, node, as}]. Paged (limit, offset).',
+  inputSchema: { project, kind: z.string().optional(), entity: z.string().optional(), status: z.string().optional(), shot: z.string().optional(), q: z.string().optional(), linked: z.enum(['linked', 'unlinked']).optional(), private: z.boolean().optional(),
     limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).optional() },
 }, wrap((a) => op('media_list', a)));
 mcp.registerTool('media_add', {
   title: 'Register a generated file',
-  description: 'Add a new file to the media index so it appears in Assets > Media, the preview dock and context menus; makes its thumbnail (and an 8-frame scrub strip for videos) with ffmpeg. path: absolute, relative to the project folder, or under a media root; files outside both are copied into data/<project>/media/<kind>/ (copy:false refuses instead). Link it with entities, shots, uses, job (the request or clip id) and take. Files whose path matches the PRIVATE rule (or private:true) stay local and are never exported.',
+  description: 'Add a new file to the media index so it appears in Assets > Media, the preview dock and context menus; makes its thumbnail (and an 8-frame scrub strip for videos) with ffmpeg. path: absolute, relative to the project folder, or under a media root; files outside both are copied into data/<project>/media/<kind>/ (copy:false refuses instead). Link it with entities, shots, uses, job (the request or clip id), take and request (the request it is an output of); the fps of a video is recorded. Files whose path matches the PRIVATE rule (or private:true) stay local and are never exported.',
   inputSchema: { project, path: z.string(), kind: z.string().regex(/^[a-z0-9_-]{1,32}$/).optional().describe('render, clip, still, sheet, variation, audio, ref… (default still).'), label: z.string().optional(),
     entities: z.array(z.string()).optional(), shots: z.array(z.string()).optional(), uses: z.array(z.string()).optional(), job: z.string().optional(), take: z.number().int().optional(),
-    status: z.enum(['used', 'picked', 'unused']).optional(), cost_usd: z.number().optional(), private: z.boolean().optional(), copy: z.boolean().optional() },
+    status: z.enum(['used', 'picked', 'unused']).optional(), cost_usd: z.number().optional(), private: z.boolean().optional(), copy: z.boolean().optional(),
+    request: z.string().regex(/^[\w@.:-]{1,80}$/).optional().describe('the request id this file is an output of (its take in takes_get); the fps of a video is probed and recorded') },
 }, wrap((a) => op('media_add', a)));
 mcp.registerTool('media_update', {
   title: 'Relabel / re-link a registered file',

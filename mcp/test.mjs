@@ -129,7 +129,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve', 'character_get', 'character_iteration_add', 'character_note_add', 'look_create',
     'asset_get', 'asset_iteration_add', 'asset_note_add', 'variant_create',
     'storyboard_get', 'shots_update', 'shot_note_add', 'shot_note_resolve', 'gaps_get', 'notes_get', 'notes_add', 'notes_status', 'request_run', 'generators_get',
-    'round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get', 'proposals_add', 'proposals_get', 'final_get', 'takes_get', 'take_propose'];
+    'round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get', 'proposals_add', 'proposals_get', 'final_get', 'takes_get', 'take_propose', 'media_scan', 'media_import'];
   check('tools/list has every tool', EXPECT.every(t => tools.includes(t)), { count: tools.length, missing: EXPECT.filter(t => !tools.includes(t)) });
   const schemaOk = (await mcp.listTools()).tools.every(t => t.description?.length > 40 && t.inputSchema?.type === 'object');
   check('every tool has a description and a JSON schema', schemaOk);
@@ -1373,7 +1373,7 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
   check('S5: four processes recording costs and creating requests at once (cross-process file lock): every cost row and every request is kept (the cap cannot undercount); no lock file is left',
     outs.every(o => o.code === 0) && costs === N * K && reqs === N * K && !fs.readdirSync(RD).some(f => f.endsWith('.lock')), { outs, costs, reqs, want: N * K });
 }
-// 19. take selection (ROADMAP_v4 D6): takes_get (read only: the takes of a shot / a request, fps, duration, the pick, the
+// 20. take selection (ROADMAP_v4 D6): takes_get (read only: the takes of a shot / a request, fps, duration, the pick, the
 // proposals), take_propose (checked like a pick: a take of that shot, in / out inside its duration); the pick is the page's
 // (take_act: no tool, 403 to the agent); it lands on the storyboard shot as clip{request, take, file, in_ms, out_ms, alt[]}
 // through a new version; the agent's shots_update carries it forward; Final counts it
@@ -1410,6 +1410,71 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
     && sg.scenes.flatMap(s => s.shots).concat(sg.outside_script || []).find(s => s.id === 's2-wall')?.clip?.take === 1
     && cur2.text === 'mcp: agent text' && cur2.clip?.file === clip.file && (up.warnings || []).some(w => /clip ignored/.test(w)) && tk && /^1 of \d+ shots picked/.test(tk.detail),
     { clip, version: sbj.current, picked: tg2.picked?.media, warnings: up.warnings, tk: tk?.detail });
+}
+// 21. (D8) import of existing images and video: a fake falgen tree under a media root (tools/fake-falgen.mjs; never fal)
+{
+  const D8 = 'mcp-d8', DD = path.join(DATA, D8);
+  fs.cpSync(ORIG, DD, { recursive: true, filter: (f) => !f.includes(`${path.sep}.snapshots`) });
+  const { makeFakeFalgen } = await import('../tools/fake-falgen.mjs');
+  makeFakeFalgen(path.join(MB, 'roots', 'ff'));
+  fs.writeFileSync(path.join(MB, 'refs', 'p.png'), Buffer.from(tinyPngB64(8, 8, [9, 9, 9]), 'base64'));
+  const OUTR = 'roots/ff/project/gen/out';
+  const tools = (await mcp.listTools()).tools.map(t => t.name);
+  check('D8: media_scan and media_import are tools; uploads (media_upload) and "use as" (media_use) are not (page only)',
+    tools.includes('media_scan') && tools.includes('media_import') && !tools.includes('media_upload') && !tools.includes('media_use'));
+  const sc = await call(mcp, 'media_scan', { project: D8, path: OUTR });
+  const a1 = sc.jobs?.find(j => j.id === 'A1'), g01 = sc.jobs?.find(j => j.id === 'G01');
+  check('D8: media_scan reads a falgen output tree: the media files (sniffed; a text file named .png and notes.txt skipped), each job\'s prompt, model, endpoint, refs (names only) and takes; the cost from the ledger next to the tree (A1 $0.24, not counted) or an estimate from js/prices.js (G01)',
+    sc.files?.length === 4 && sc.files.every(f => !f.registered) && sc.skipped?.some(s => /fake\.png$/.test(s.path)) && a1?.model === 'nb2' && a1.endpoint === 'fal-ai/nano-banana-2/edit' && /HOODIE HACKER/.test(a1.prompt) && a1.refs.length === 2 && a1.files.length === 2
+    && a1.cost?.status === 'not_counted' && a1.cost.source === 'ledger' && a1.cost.usd === 0.24 && a1.cost.offer?.job === 'A1' && a1.cost.offer.takes === 2 && g01?.cost?.source === 'estimate' && g01.cost.usd > 0 && sc.files.find(f => f.name === 'A1_0_1.png')?.take === 1,
+    { files: sc.files?.length, skipped: sc.skipped, a1: a1?.cost, g01: g01?.cost, err: sc.error });
+  const out1 = await call(mcp, 'media_scan', { project: D8, path: 'secret' });
+  const out2 = await call(mcp, 'media_scan', { project: D8, path: 'roots/../secret' });
+  const out3 = await call(mcp, 'media_import', { project: D8, paths: [path.join(MB, 'secret', 's.txt')] });
+  const fake = await call(mcp, 'media_import', { project: D8, paths: [`${OUTR}/A1/fake.png`] });
+  const down = await call(mcp, 'media_import', { project: D8, paths: ['refs/p.png'], private: false });
+  check('D8: media_scan / media_import refuse a path outside the media roots (403), a ".." path (400), an absolute path outside (403) and a non-media file (415), and never lower a private flag (403)',
+    /error 403/.test(out1.error || '') && /error 400/.test(out2.error || '') && /error 403/.test(out3.error || '') && /error 415/.test(fake.error || '') && /error 403/.test(down.error || ''),
+    { out1: out1.error?.slice(0, 80), out2: out2.error?.slice(0, 80), out3: out3.error?.slice(0, 80), fake: fake.error?.slice(0, 80), down: down.error?.slice(0, 80) });
+  const imp = await call(mcp, 'media_import', { project: D8, paths: [`${OUTR}/A1`, `${OUTR}/G01`, 'refs/p.png'] });
+  const M = JSON.parse(fs.readFileSync(path.join(DD, 'media.json'), 'utf8')).items;
+  const m0 = M.find(m => m.path === `${OUTR}/A1/A1_0_0.png`), pv = M.find(m => m.path === 'refs/p.png');
+  check('D8: media_import registers in place (never copied): job / take / label from job.json, cost_usd = the job\'s share per take, thumbnails; a PRIVATE path stays private; costs_not_counted lists the cost_record args',
+    imp.imported?.length === 4 && m0?.job === 'A1' && m0.take === 0 && m0.cost_usd === 0.12 && /^A1\.0 · HOODIE/.test(m0.label) && m0.imported?.via === 'agent' && pv?.private === true && /priv_/.test(pv.thumb || '')
+    && !fs.existsSync(path.join(DD, 'media', 'still', 'A1_0_0.png')) && imp.costs_not_counted?.some(o => o.job === 'A1' && o.usd === 0.24),
+    { imp: imp.error || imp.imported?.map(x => x.id), m0: m0 && { job: m0.job, take: m0.take, cost: m0.cost_usd, label: m0.label }, pv: pv && { private: pv.private, thumb: pv.thumb } });
+  const again = await call(mcp, 'media_import', { project: D8, paths: [`${OUTR}/A1/A1_0_0.png`] });
+  const rec = await call(mcp, 'cost_record', { project: D8, ...a1.cost.offer });
+  const rec2 = await call(mcp, 'cost_record', { project: D8, ...a1.cost.offer });
+  const sc2 = await call(mcp, 'media_scan', { project: D8, path: `${OUTR}/A1` });
+  check('D8: importing twice changes nothing (already); the recovered cost is recorded once (cost_record dedups by job) and the scan then says "recorded"',
+    again.already?.length === 1 && !again.imported?.length && rec.recorded === true && rec2.recorded === false && sc2.jobs?.[0]?.cost?.status === 'recorded' && sc2.files.every(f => f.registered),
+    { again: again.already?.length, rec: rec.recorded, rec2: rec2.reason, st: sc2.jobs?.[0]?.cost?.status });
+  // "use as" is the director's: the agent gets 403 on the HTTP surface; it proposes with node_import_propose
+  const ag = await post(`/api/op/media_use?project=${D8}`, { media: m0.id, as: 'identity', id: 'ada', via: 'page' });
+  const agUp = await post(`/api/op/media_upload?project=${D8}`, { upload: 'abcdefgh99', name: 'x.png', size: 10, offset: 0, data: tinyPngB64(2, 2), via: 'page' });
+  const prop = await call(mcp, 'node_import_propose', { project: D8, id: 'ada', tree: 'identity', media: m0.id, why: 'A1 take 0, made by falgen before the queue' });
+  const pg = await post(`/api/op/media_use?project=${D8}`, { media: m0.id, as: 'identity', id: 'bo' }, { origin: URL_ });
+  const bo = JSON.parse(fs.readFileSync(path.join(DD, 'entities', 'characters', 'bo.json'), 'utf8'));
+  check('D8: "use as" and uploads are page only (the agent surface gets 403 even claiming via "page"); the agent proposes a node with node_import_propose; the page\'s "use as identity" makes an imported node (no request, provenance with the job and its recorded cost)',
+    ag.status === 403 && agUp.status === 403 && !prop.error && pg.status === 200 && bo.iter.nodes.some(n => n.origin === 'imported' && n.image === m0.path && n.provenance?.job === 'A1' && n.provenance.cost?.source === 'workbench'),
+    { ag: ag.status, agUp: agUp.status, prop: prop.error, pg: pg.status, nodes: bo.iter.nodes.map(n => n.image) });
+  // D6 x D8: media the director marks "use as shot take" (use_as[] on the media item, shotMediaLinks) are takes of that shot in
+  // takes_get (why "use_as"), so they can be proposed and picked; the start frame is listed and flagged
+  const m1 = M.find(m => m.path === `${OUTR}/A1/A1_0_1.png`);
+  const ut = await post(`/api/op/media_use?project=${D8}`, { media: m1.id, as: 'take', shot: 's2-wall' }, { origin: URL_ });
+  const us = await post(`/api/op/media_use?project=${D8}`, { media: m0.id, as: 'start_frame', shot: 's2-wall' }, { origin: URL_ });
+  const tku = await call(mcp, 'takes_get', { project: D8, shot: 's2-wall' }), tu = tku.takes?.find(t => t.media === m1.id), ts = tku.takes?.find(t => t.media === m0.id);
+  const tpu = await call(mcp, 'take_propose', { project: D8, shot: 's2-wall', media: m1.id, why: 'the imported falgen still, used as a take by the director' });
+  check('D6 x D8: a medium marked "use as shot take" is a take of that shot in takes_get (why use_as, its file absolute) and can be proposed; the start frame is takes_get.start_frame and flagged on its take',
+    ut.status === 200 && us.status === 200 && tu?.why?.includes('use_as') && tu.file === m1.path && !!tu.abs && tku.start_frame?.media === m0.id && ts?.why?.includes('start_frame') && !tpu.error && tpu.proposal?.media === m1.id,
+    { ut: ut.status, us: us.status, tu: tu && { why: tu.why, abs: !!tu.abs }, sf: tku.start_frame?.media, tpu: tpu.error?.slice(0, 100) });
+  // media_add records the fps of a video and accepts request (the MCP schema keeps it): the take's fps comes from the index
+  fs.copyFileSync(path.join(DD, 'media', 'clip', 'C1_0.mp4'), path.join(DD, 'media', 'clip', 'fps_probe.mp4'));
+  const ma = await call(mcp, 'media_add', { project: D8, path: 'media/clip/fps_probe.mp4', kind: 'clip', request: 'rq-fps', take: 0 });
+  const mf = JSON.parse(fs.readFileSync(path.join(DD, 'media.json'), 'utf8')).items.find(m => m.path === 'media/clip/fps_probe.mp4');
+  check('media_add records fps for a video and the request it is an output of (request is in the MCP schema)',
+    ma.added === true && mf?.fps > 0 && mf.request === 'rq-fps' && ma.media?.fps === mf.fps, { err: ma.error, fps: mf?.fps, request: mf?.request });
 }
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {

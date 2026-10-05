@@ -251,7 +251,7 @@ menus.contribute('menubar:File', [
   'file.new', 'file.newEmpty', 'file.newFromTemplate', { label: 'Open', submenu: projectItems }, { label: 'Recent projects', submenu: () => { const r = projects.recent(); return r.length ? r.map(id => ({ label: id, run: () => projects.open(id) })) : [{ label: '(none yet)', disabled: true }]; } },
   '-', 'file.snapshot', { label: 'Revert to snapshot', submenu: () => projects.snaps.length ? projects.snaps.slice(0, 30).map(s => ({ label: s.message || s.id, detail: s.at.replace('T', ' ').slice(0, 16) + (s.auto ? ' auto' : ''), run: () => projects.restore(s.id) })).concat(projects.snaps.length > 30 ? ['-', 'file.revert'] : []) : [{ label: '(no snapshots yet: Ctrl+S)', disabled: true }] },
   '-', 'file.saveAs', 'file.duplicate',
-  '-', { label: 'Import', submenu: ['song', 'stems', 'lyrics', 'images'].map(w => ({ cmd: 'file.import', args: { what: w }, label: `${w}…` })) },
+  '-', 'file.importMedia', { label: 'Import', submenu: ['song', 'stems', 'lyrics', 'images'].map(w => ({ cmd: 'file.import', args: { what: w }, label: `${w}…` })) },
   { label: 'Export', submenu: ['file.exportBundle', 'file.exportCsv', 'file.exportBoard'] },
   '-', 'file.delete',
 ]);

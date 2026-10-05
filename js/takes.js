@@ -34,8 +34,11 @@ export const takeNo = (m) => isInt(m?.take) ? m.take : null;
 // every take of a shot: media linked to it, to its clip uses (or their clip's job), or to a request that targets it.
 // uses = shots.json uses (EDL), requests = requests.json. -> [{media, file, kind, take, request, job, label, duration_ms,
 // w, h, thumb, strip, private, source: runner | import, why[]}], sorted by request then take
-export function takesForShot(shot, { media = [], requests = [], uses = [] } = {}) {
+// links = the director's "use as" of D8 for this shot (shotLinks below; lib/ops/media.mjs shotMediaLinks): media marked
+// "use as shot take" are takes of it (why "use_as"), the start frame is flagged (why "start_frame")
+export function takesForShot(shot, { media = [], requests = [], uses = [], links = null } = {}) {
   if (!shot) return [];
+  const L = links || shotLinks(media, shot.id), useAs = new Set((L.takes || []).map(x => x.media)), sf = L.start_frame?.media ?? null;
   const R = requests?.items || requests || [], mine = new Set(R.filter(r => r.target === `shot:${shot.id}`).map(r => r.id));
   const useIds = new Set(shot.clips || []), clipJobs = new Set((uses || []).filter(u => useIds.has(u.id)).map(u => u.clip).filter(Boolean));
   const out = [];
@@ -46,9 +49,22 @@ export function takesForShot(shot, { media = [], requests = [], uses = [] } = {}
     const rq = requestOf(m, R);
     if (rq && mine.has(rq)) why.push('request');
     if ((m.uses || []).some(u => useIds.has(u)) || (m.job && clipJobs.has(m.job))) why.push('clip');
+    if (useAs.has(m.id)) why.push('use_as');
+    if (sf != null && sf === m.id) why.push('start_frame');
     if (why.length) out.push(takeView(m, R, why));
   }
   return sortTakes(out);
+}
+// D8: the director's "use as" links of a shot, from media.json items' use_as[] {shot, as: take | start_frame, by, at}
+// -> {shot, takes: [{media, path, kind, private, at, by}], start_frame: {...} | null}
+export function shotLinks(media, shotId) {
+  const out = { shot: shotId, takes: [], start_frame: null };
+  for (const m of media || []) for (const u of m.use_as || []) {
+    if (u.shot !== shotId) continue;
+    const x = { media: m.id, path: m.path, kind: m.kind, private: !!m.private, at: u.at, by: u.by };
+    if (u.as === 'take') out.takes.push(x); else if (u.as === 'start_frame') out.start_frame = x;
+  }
+  return out;
 }
 // every take of one request (its registered outputs)
 export function takesForRequest(reqId, { media = [], requests = [] } = {}) {

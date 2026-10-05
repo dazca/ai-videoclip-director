@@ -14,6 +14,7 @@ import { dock, sourceFromKey } from './core/dock.js';
 import { projects, exporter } from './core/projects.js';
 import { sectionAt, shotAt, lineIndexAt } from './core/defaults.js';
 import './core/partb.js';
+import './core/importmedia.js';   // File › Import media…, drop files on the page, "Use as…" (D8)
 import { mountRail } from './core/rail.js';
 import { wizard } from './core/wizard.js';
 import { watchCode } from './core/stale.js';

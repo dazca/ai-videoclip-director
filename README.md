@@ -77,7 +77,9 @@ proposed take with in / out and why; the pick is the director's, in the page); `
 `request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`), `costs_get` (one total over costs.json and
 `media_add`, `notes_list` / `note_add` / `note_resolve`, `approvals_get` / `approve` / `request_changes`, `requests_list` /
 `request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`; `takes`), `request_run` (run approved requests: the runner) / `generators_get`, `costs_get` (one total over costs.json and
-a falgen ledger), `cost_record` (spend made outside the queue, never an approval), `media_update`, `wait_for` (block
+a falgen ledger), `cost_record` (spend made outside the queue, never an approval), `media_update`, `media_scan` / `media_import`
+(existing images and video under a media root: read a folder and its `job.json` jobs (prompt, model, refs, cost), register in
+place; uploads and "Use as…" are the director's, in the page), `wait_for` (block
 until a request / stage / note changes), `ui_focus`; the guided flow: `stages_get` / `stage_update` (the per-stage note tools below
 are aliases that write the same notes.json v2 and answer in their old shapes),
 `lyrics_get` / `lyrics_update` / `lyrics_versions` / `lyrics_note_add` / `lyrics_note_resolve`, `song_attach`; stage 2:
@@ -386,7 +388,7 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `peaks/<id>.json` | `{bin_ms:5, n, scale, min, max}`: min/max per 5 ms bin, int8 (value/127*scale), base64; ~140 KB each |
 | `thumbs/*.jpg` | small frames: `shot_<id>` (render), `use_<clip>_<take>_<in_ms>` (clip at the in-point), `ent_<id>` |
 | `_src/edl.json` | raw `WORLD.clip` calls from the render page (input to the importer) |
-| `media.json` | `{generated, count, by_kind, items[{id, path, kind, label, entities[], shots[], uses[], take, job, group, size, w, h, duration_ms, private, status: used/picked/unused/private, cost_usd, thumb, strip?, strip_n?, packed_alpha?}]}`; kinds: render, clip, still, avatar, body, motion, dancer, motion-ref, sheet, variation, contact, audio, ref |
+| `media.json` | `{generated, count, by_kind, items[{id, path, kind, label, entities[], shots[], uses[], take, job, group, size, w, h, duration_ms, private, status: used/picked/unused/private, cost_usd, thumb, strip?, strip_n?, packed_alpha?, request?, imported?{by, via, at, from: in place / upload, name?}, use_as?[{shot, as: take / start_frame} / {entity, tree, node, as: identity / look / base / variant}, by, via, at]}]}`; kinds: render, clip, still, avatar, body, motion, dancer, motion-ref, sheet, variation, contact, audio, ref |
 | `thumbs/m_*.jpg`, `s_*.jpg`, `priv_*.jpg` | media thumbnails (max 240 px, sheets 600 px), 8-frame hover-scrub strips of videos, thumbnails of PRIVATE files |
 | `_src/probe.json` | ffprobe cache (size/mtime keyed) |
 | `requests.json` | `{rev, items[{id, kind, target, prompt, refs[], est_cost, tool?, status: draft/approved/queued/running/done/failed/rejected/withdrawn, by, at, takes?, superseded_by?, outputs?[], generator?, linked?{type, id, tree, nodes[], proposals[]}, handoff?{generator, pack, results}, last_run?{at, status, why}, asset?{type: character/location/prop, id, tree, from, kind: identity/base/edit/look/variant, text?, sketch?, png?, mask?, pins[]}, warnings?[], recipe?{id, version, model, framing, fields, blocks[]}}]}`; kinds: regenerate, new-costume, new-variant, generate, duplicate, choose-take, set-in, edit-timing, swap-costume, section-variant, import, identity-sheet, character-edit, look-sheet, location-plate, location-edit, location-variant, prop-sheet, prop-edit, prop-variant. `asset` links a stage-4 / 5 generation to the asset tree it grows; older requests may carry it as `char` (still read; `request_create` accepts `char` with a deprecation warning and stores `asset` only) |
@@ -619,6 +621,20 @@ small files are served in one read so no handle stays open.
   cannot rewrite a saved version or a note's author; new versions, notes and replies are stamped director / page; a
   malformed file is refused (400). Nothing in the stage generates or spends: requests are drafts the director approves.
 - Entity thumbnails and copies made from private media stay private (`thumbs/priv_*`, `private/<kind>/`).
+- Imports (D8, `lib/ops/media.mjs`): `media_scan` (read only) and `media_import` take a file or folder under a configured media
+  root only: a path with `..`, `.` or a backslash is 400; anything outside the media roots (an absolute path elsewhere, a
+  junction / symlink under a root that points outside it: the real path is checked) is 403. Files are judged by their bytes
+  (PNG / JPEG / WebP / GIF / MP4 / MOV / WebM; an audio-only MP4 brand, a script or text named `.png`: 415), never by the
+  name; a scan opens only `job.json` and the first bytes of each media file (a job's refs are listed by name, never opened).
+  The private flag only moves toward private: `private: false` on a path the PRIVATE rule matches or on a file flagged
+  private is 403. Imports register in place (never copied). `media_upload` (the page's drag and drop) and `media_use`
+  ("use as" a node, a shot's take or start frame) are page only (via "page" from this server's Origin; no MCP tool; 403 to
+  the agent surface, a claimed via "page" and offline): an upload is chunked (4 MB; the op's body limit 9 MB), at most
+  200 MB a file (declared size checked first; more bytes than declared: 413 and the partial file removed), its first chunk
+  must sniff as media (415), and it lands in `media/<kind>/` or, ticked private, `private/<kind>/` (name sanitised, the
+  extension from the bytes) via `.uploads/` (a dot-folder: never served, ignored by the watcher, parts older than a day
+  removed). A recovered cost is recorded only through `cost_record` (once per job; a job the linked falgen ledger counts is
+  not offered).
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.
 
@@ -692,9 +708,20 @@ line (30 % of the view).
   change, rate-nudged within a frame while playing), **hover** (after 220 ms over a shot, clip, cast chip, media cell
   or card; leaving returns to film), **pin** (click a media cell / Preview / Compare pins it; `film` unpins).
   Sources: `{kind: film|shot|use|compare|media|entity|look|image|video, id}`.
-- **Media** (Assets > Media): dense grid grouped by kind; filters kind / entity / status / private; hover scrubs the 8-frame strip;
-  click = dock; right-click = `media` context (show, compare takes, show on timeline, use as reference for…, copy
-  path, open file location); drag a cell onto the look form as a reference.
+- **Media** (Assets > Media): dense grid grouped by kind; filters kind / entity / status / linked or unlinked / private, a
+  search, "compact" cells, and **Import media…**; a badge on a cell the director used ("identity", "frame", "take"); hover
+  scrubs the 8-frame strip; click = dock; right-click = `media` context (**Use as…**, show, compare takes, show on timeline,
+  use as reference for…, copy path, open file location); drag a cell onto the look form as a reference.
+- **Import media** (File › Import media…, or drop files anywhere on the page; `core/importmedia.js`, D8): dropped files are
+  uploaded into the project (up to 200 MB each, judged by their bytes: images and video only); or type a path / folder under
+  a media root to read it in place. A generation output folder (falgen's `out/<id>/job.json`, the runner's `gen/<request>/`)
+  lists its jobs with the prompt, model, refs (🔒 = private) and the cost: recorded, counted from the linked falgen ledger,
+  or "not counted yet" (a ledger row next to the tree, or an estimate from `js/prices.js`) with a "record" tick
+  (`cost_record`, once per job; an estimate is offered, not ticked). Each row: thumbnail, kind, label, private (forced on
+  for a PRIVATE path: never less private); "link to request" ties the files to a request. After Import each row has
+  **Use as…**: identity / look of a character, base / variant of a location or prop (an imported node: no request, nothing
+  paid), a shot's start frame (its thumb, a new storyboard version) or take (`use_as` on the media item; the take picker
+  reads it). An agent imports with `media_import` and proposes a "use as" (`node_import_propose`, a note on the shot).
 - **Characters**: leads (big face, full body, head-angle and expression cells cropped from the 3x3 sheets), lives of
   Dani, dancers; click = character page (identity sheet, private refs, LOOKS as cards with garments, colours, where
   used, status, cost, a big **+ New look** card, expressions, head angles, motion clips, lives). Right-click a look:

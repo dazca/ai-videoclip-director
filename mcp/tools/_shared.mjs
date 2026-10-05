@@ -58,7 +58,7 @@ export async function op(name, args = {}) {
   const { project: _p, ...a } = args; const p = await projectOf(args);
   // ops that may run ffprobe/ffmpeg (thumbnails) get a long timeout, so a slow video does not look like a failure
   if (await server()) {
-    try { return await http('POST', '/api/op/' + name, p, a, ['media_add', 'media_update', 'request_update', 'entity_upsert', 'song_attach', 'sketch_save', 'character_iteration_add', 'asset_iteration_add', 'look_create', 'variant_create'].includes(name) ? 180000 : 15000); }
+    try { return await http('POST', '/api/op/' + name, p, a, ['media_add', 'media_update', 'media_import', 'media_scan', 'request_update', 'entity_upsert', 'song_attach', 'sketch_save', 'character_iteration_add', 'asset_iteration_add', 'look_create', 'variant_create'].includes(name) ? 180000 : 15000); }
     catch (e) {
       // the server runs older code that does not know this op: do it on the files directly (its file watcher still
       // reloads the open pages) and say so
