@@ -8,7 +8,9 @@
 // landing, in the Characters Notes column -> the agent writes check_add per output (a bad target, an unknown constant and
 // "ok" with a failed constant are refused) -> the asks are absorbed -> badges on the nodes ("✗ clip side", "identity ok")
 // and on the take cards ("drift"), hover shows the items -> approvals.json, requests.json and storyboard.json are untouched;
-// with the switch off, nothing is asked. Screenshots v21_*.png.
+// with the switch off, nothing is asked. Review #2: a "drift" with a failed item reads "drift · likeness" on the card (the
+// popover's word), the constants editor has a ✓ / label / detail header, a label ≤ 120 px and a detail ≤ 600 px, and says
+// "changed by the agent" once the agent rewrote the list (entity_upsert constants, I1). Screenshots v21_*.png.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -19,7 +21,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const WB = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
-const freePort = () => new Promise(ok => { const s = net.createServer().listen(0, () => { const p = s.address().port; s.close(() => ok(p)); }); });
+const freePort = () => new Promise(ok => { const s = net.createServer().listen(process.env.WB_VERIFY_PORT ? Number(process.env.WB_VERIFY_PORT) + ((globalThis.__wbVerifyPortN = (globalThis.__wbVerifyPortN ?? -1) + 1) % 10) : 0, () => { const p = s.address().port; s.close(() => ok(p)); }); });
 const sdk = (p) => import(pathToFileURL(path.join(WB, 'node_modules', '@modelcontextprotocol', 'sdk', 'dist', 'esm', ...p.split('/'))).href);
 const sha = (f) => { try { return crypto.createHash('sha1').update(fs.readFileSync(f)).digest('hex'); } catch (e) { return null; } };
 export const BASE_TEXT = 'Ada, late twenties, wiry. Copper-tipped curls; cyan jaw seam + hazel-green eyes. Orange starburst clip above the LEFT ear';
@@ -191,6 +193,25 @@ export async function verifyChecks({ browser, OUT }) {
     const imp3 = await tool('media_import', { paths: ['mroot/v21/later.jpg'], entities: ['ada'] });
     check('a later import of an Ada image asks again (one open ask, shown in the Characters Notes column); with the switch off, an import asks nothing',
       !imp2.error && A3.length === 4 && A3.filter(n => n.status === 'open').length === 1 && !!askShown && !imp3.error && asks().length === 4, { asks: A3.length, askShown, after: asks().length });
+
+    // 7. review #2: the badge says the verdict's word; the constants editor's layout; "changed by the agent" (I1)
+    const c5 = await tool('check_add', { target: { kind: 'take', id: `s2-wall/${mids[1]}` }, against: { entity: 'ada' }, verdict: 'drift', note: 'the face softens', items: [{ constant: 'likeness', ok: false }] });
+    await pg.evaluate(() => window.WB.stages.open('storyboard')); await wait(400);
+    await pg.evaluate(() => window.WB.storyboard.focus('s2-wall')); await wait(400);
+    await until((m) => /drift/.test(document.querySelector(`.sbins .tkc[data-tk="${m}"] .ckb`)?.textContent || ''), mids[1]);
+    const dw = await pg.evaluate((m) => document.querySelector(`.sbins .tkc[data-tk="${m}"] .ckb`)?.firstChild?.textContent, mids[1]);
+    check('a "drift" verdict with a failed item reads "drift · likeness" on the take card (the verdict word of its popover), not "✗ likeness"', !c5.error && dw === 'drift · likeness', { dw, c5: c5.error ? c5.text : 'ok' });
+    const cur = J('entities/characters/ada.json').constants || [];
+    const up = await tool('entity_upsert', { kind: 'character', id: 'ada', fields: { constants: [...cur, { text: 'a silver ring on the right hand', check: false }] } });
+    await pg.evaluate(() => window.WB.stages.open('characters')); await wait(400);
+    await pg.evaluate(() => { window.WB.characters.open('ada'); window.WB.characters.ws.setTab('identity'); }); await wait(400);
+    await until(() => /changed by the agent/.test(document.querySelector('.chconst .ccby')?.textContent || ''), null, 6000);
+    const ce = await pg.evaluate(() => ({ by: document.querySelector('.chconst .ccby')?.textContent || '', head: [...document.querySelectorAll('.chconst .cchead span')].map(s => s.textContent),
+      label: Math.round(document.querySelector('.chconst .ccrow .cclabel').getBoundingClientRect().width), text: Math.round(document.querySelector('.chconst .ccrow .cctext').getBoundingClientRect().width),
+      ph: [...document.querySelectorAll('.chconst .ccrow .cclabel')].map(i => i.placeholder) }));
+    await shot('v21_constants_by_agent', '.chconst');
+    check('the constants editor: a ✓ / label / detail header, label ≤ 120 px, detail ≤ 600 px, the label placeholder never repeats the text; after the agent\'s entity_upsert constants it says "changed by the agent"',
+      !up.error && /changed by the agent/.test(ce.by) && ce.head[0] === '✓' && ce.label <= 120 && ce.text <= 600 && ce.ph.every(p => p === 'label'), ce);
   } catch (e) { console.error('v21 aborted:', e.stack || e); checks.aborted = { pass: false, detail: String(e.message || e) }; }
   finally {
     await client?.close().catch(() => {});

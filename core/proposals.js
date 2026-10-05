@@ -54,7 +54,7 @@ export function stripHtml(target, { compact = false, quiet = false, local = LOCA
   const waiting = asks.length ? `<span class="ppwait" title="${esc(asks[0].text)}">3 more asked · waiting for the agent</span>` : '';
   if (!items.length) {
     if (quiet && !asks.length) return '';
-    return `<div class="pps none" ${tAttr(target)}><span class="ppl">◇ proposals</span>${waiting}<span class="sp"></span>${asks.length ? '' : `<a data-pp="more" title="ask the agent for 3 proposals (a note to the agent on this ${esc(target.kind)}; free)">ask for 3</a>`}${local ? `<a data-pp="local" title="3 free layouts made here from the script (wide / medium / close, thirds, a camera arrow): no agent, no cost">3 free layouts</a>` : ''}</div>`;
+    return `<div class="pps none" ${tAttr(target)}><span class="ppl">◇ proposals</span>${waiting}<span class="sp"></span>${asks.length ? '' : `<a data-pp="more" title="ask the agent for 3 proposals (a note to the agent on this ${esc(target.kind)}; free)">ask the agent for 3</a>`}${local ? `<a data-pp="local" title="3 free layouts made here from the script (wide / medium / close, thirds, a camera arrow): no agent, no cost">3 free layouts</a>` : ''}</div>`;
   }
   const key = P.keyOf(target), fold = folded.has(key), n = items.length, sids = [...new Set(items.map(([s]) => s.id))];
   const src = [...new Set(sets.filter(s => sids.includes(s.id)).map(s => s.source === 'local' ? 'local' : s.via === 'page' ? 'page' : 'agent'))].join(' + ');
@@ -168,7 +168,7 @@ store.on((w) => {
 
 // ------------------------------------------------------------------ commands, menus; the wizard's pending offer
 commands.register([
-  { id: 'proposals.prepare', group: 'Generate', title: 'Prepare proposals: ask the agent for starting choices (scenes, shots, lines, looks)…', run: () => prepare() },
+  { id: 'proposals.prepare', group: 'Generate', title: 'Ask the agent for starting proposals (3 choices per scene, shot, line, look)…', run: () => prepare() },
   { id: 'proposals.local', group: 'Generate', title: 'Make free layouts: 3 SVG layouts per scene and shot (no agent, no cost)', run: () => local({ scope: 'all' }) },
 ]);
 menus.contribute('menubar:Generate', ['-', 'proposals.prepare', 'proposals.local']);

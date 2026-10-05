@@ -27,8 +27,8 @@ import { takesChecklist } from './takes.js';
 
 export const GROUPS = [
   { id: 'lyrics', title: 'Lyrics', n: 1 }, { id: 'script', title: 'Script', n: 2 }, { id: 'breakdown', title: 'Breakdown', n: 3 },
-  { id: 'characters', title: 'Characters', n: 4 }, { id: 'scenery', title: 'Scenery', n: 5 }, { id: 'storyboard', title: 'Shots & clips', n: 6 },
-  { id: 'requests', title: 'Generation requests', n: 7 },
+  { id: 'characters', title: 'Characters', n: 4 }, { id: 'scenery', title: 'Scenery', n: 5 }, { id: 'storyboard', title: 'Storyboard', n: 6 },
+  { id: 'requests', title: 'Requests', n: null },   // the generation queue: not a stage, so no number
 ];
 export const ST = ['draft', 'review', 'changes'];
 const DONE = ['approved', 'locked'];

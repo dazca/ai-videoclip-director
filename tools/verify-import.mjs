@@ -19,7 +19,7 @@ import { tinyPng } from './tiny-png.mjs';
 
 const WB = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
-const freePort = () => new Promise(ok => { const s = net.createServer().listen(0, () => { const p = s.address().port; s.close(() => ok(p)); }); });
+const freePort = () => new Promise(ok => { const s = net.createServer().listen(process.env.WB_VERIFY_PORT ? Number(process.env.WB_VERIFY_PORT) + ((globalThis.__wbVerifyPortN = (globalThis.__wbVerifyPortN ?? -1) + 1) % 10) : 0, () => { const p = s.address().port; s.close(() => ok(p)); }); });
 const sdk = (p) => import(pathToFileURL(path.join(WB, 'node_modules', '@modelcontextprotocol', 'sdk', 'dist', 'esm', ...p.split('/'))).href);
 
 export async function verifyImport({ browser, OUT }) {
@@ -65,11 +65,13 @@ export async function verifyImport({ browser, OUT }) {
       document.querySelector('#panes').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
     }, png1, png2);
     await until(() => document.querySelectorAll('.imrow').length >= 3);
-    await pg.evaluate(() => { const r = [...document.querySelectorAll('.imrow')].find(x => x.textContent.includes('my_photo')); r.querySelector('[data-f=private]').click(); });
+    // dropped files start PRIVATE (review #2 N7): my_photo stays ticked, the desk test is unticked to go public
+    const privDefault = await pg.evaluate(() => [...document.querySelectorAll('.imrow:not(.bad) [data-f=private]')].map(i => i.checked));
+    await pg.evaluate(() => { const r = [...document.querySelectorAll('.imrow')].find(x => x.textContent.includes('desk test')); r.querySelector('[data-f=private]').click(); });
     const drop = await pg.evaluate(() => ({ rows: document.querySelectorAll('.imrow').length, bad: [...document.querySelectorAll('.imrow.bad')].map(r => r.textContent.trim().slice(0, 80)), thumbs: [...document.querySelectorAll('.imrow .imth img')].filter(i => i.src.startsWith('blob:')).length, sum: document.querySelector('.imsum')?.textContent }));
     await shot('v17_import_dialog', await box('.imdlg', 4));
-    check('File › Import media… is in the File menu; files dropped on the page open the dialog: a row each with its thumbnail, kind, label and private; a text file named .png is refused by its bytes',
-      inMenu && drop.rows === 3 && drop.bad.length === 1 && /notes\.png/.test(drop.bad[0]) && /not an image/.test(drop.bad[0]) && drop.thumbs === 2, drop);
+    check('File › Import media… is in the File menu; files dropped on the page open the dialog: a row each with its thumbnail, kind, label and private (ticked by default: a dropped file is private until unticked); a text file named .png is refused by its bytes',
+      inMenu && privDefault.length === 2 && privDefault.every(Boolean) && drop.rows === 3 && drop.bad.length === 1 && /notes\.png/.test(drop.bad[0]) && /not an image/.test(drop.bad[0]) && drop.thumbs === 2, drop);
 
     // 2. a folder under a media root, read in place: the jobs with what job.json recovers, the PRIVATE folder forced private
     await pg.evaluate(() => { const i = document.querySelector('.impath input'); i.value = 'project/gen/out'; document.querySelector('.impath').requestSubmit(); });

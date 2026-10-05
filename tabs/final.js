@@ -77,7 +77,7 @@ export class FinalList {
     const selRows = [...this.sel].map(k => this.byKey.get(k)).filter(Boolean);
     this.$('.fnbar').innerHTML = `<b title="everything not approved yet, across the stages">${v.counts.total} to approve</b>`
       + `<span class="dim">${FN.ST.filter(s => v.counts[s]).map(s => `${v.counts[s]} ${s}`).join(' · ') || 'nothing pending'}</span>`
-      + `<select data-f="group" title="stage">${opt('', this.f.group, 'all stages')}${FN.GROUPS.map(g => opt(g.id, this.f.group, `${g.n} ${g.title} (${v.counts.by_group[g.id] || 0})`)).join('')}</select>`
+      + `<select data-f="group" title="stage">${opt('', this.f.group, 'all stages')}${FN.GROUPS.map(g => opt(g.id, this.f.group, `${g.n ? g.n + ' ' : ''}${g.title} (${v.counts.by_group[g.id] || 0})`)).join('')}</select>`
       + `<select data-f="st" title="status">${opt('', this.f.st, 'any status')}${FN.ST.map(s => opt(s, this.f.st, `${s} (${v.counts[s]})`)).join('')}</select>`
       + `<label class="fnchk" title="only rows with open notes"><input type="checkbox" data-f="notes"${this.f.notes ? ' checked' : ''}>has open notes (${v.counts.notes})</label>`
       + `<span class="sp"></span>`
@@ -99,7 +99,7 @@ export class FinalList {
     }).join('') : `<div class="scempty">${v.counts.total ? 'Nothing matches the filters.' : 'Nothing left to approve.'}</div>`;
     else this.$('.fnlist').innerHTML = gs.length ? gs.map(({ g, rs }) => {
       const all = rs.every(r => this.sel.has(r.key));
-      return `<div class="fngh" data-g="${g.id}"><input type="checkbox" data-gsel="${g.id}"${all ? ' checked' : ''} title="select the ${esc(g.title.toLowerCase())} rows"><b>${g.n} · ${esc(g.title)}</b><span class="dim">${rs.length}</span>${g.id !== 'requests' && g.id !== 'storyboard' ? `<a data-gostage="${g.id}" title="open the stage">open ›</a>` : g.id === 'storyboard' ? '<a data-gostage="storyboard" title="open the stage">open ›</a>' : '<a data-goview="queue" title="Review › Queue">queue ›</a>'}</div>`
+      return `<div class="fngh" data-g="${g.id}"><input type="checkbox" data-gsel="${g.id}"${all ? ' checked' : ''} title="select the ${esc(g.title.toLowerCase())} rows"><b>${g.n ? g.n + ' · ' : ''}${esc(g.title)}</b><span class="dim">${rs.length}</span>${g.id !== 'requests' && g.id !== 'storyboard' ? `<a data-gostage="${g.id}" title="open the stage">open ›</a>` : g.id === 'storyboard' ? '<a data-gostage="storyboard" title="open the stage">open ›</a>' : '<a data-goview="queue" title="Review › Queue">queue ›</a>'}</div>`
         + rs.map(r => this.rowHtml(r, r.key === on)).join('');
     }).join('') : `<div class="scempty">${v.counts.total ? 'Nothing matches the filters.' : 'Nothing left to approve.'}</div>`;
     if (this.chg) { const i = this.$('.fnchg input'); if (i) { i.value = this.chg.text || ''; if (document.activeElement !== i) i.focus({ preventScroll: true }); } }

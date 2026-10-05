@@ -245,6 +245,25 @@ body.notop .tl .picker { right: 24px; }
 .settings button.cap { border-color: var(--acc); color: var(--acc); }
 .bad, .settings .kc.bad { color: #e08a8a; border-color: #8a3030; }
 .queue textarea { width: 340px; height: auto; min-height: 50px; resize: vertical; font-size: 11.5px; line-height: 15px; padding: 1px 3px; }
+/* ONE table for the waves, the history and the rest (tabs/queue.js): the same columns all the way down, a group a header row */
+.queue .qtbl { width: 100%; table-layout: fixed; }
+.queue .qtbl col.qc-tick { width: 28px; } .queue .qtbl col.qc-st { width: 72px; } .queue .qtbl col.qc-kind { width: 118px; } .queue .qtbl col.qc-tgt { width: 120px; }
+.queue .qtbl col.qc-est { width: 108px; } .queue .qtbl col.qc-refs { width: 190px; } .queue .qtbl col.qc-at { width: 78px; } .queue .qtbl col.qc-act { width: 300px; }
+.queue .qtbl th:first-child, .queue .qtbl td:first-child { padding-left: 6px; }
+@media (max-width: 1450px) { .queue .qtbl col.qc-kind { width: 96px; } .queue .qtbl col.qc-tgt { width: 104px; } .queue .qtbl col.qc-refs { width: 150px; } .queue .qtbl col.qc-act { width: 230px; } .queue .qtbl col.qc-at { width: 70px; } }
+.queue .qtbl td { overflow: hidden; }
+.queue .qtbl td.qbtns { white-space: normal; }
+.queue .qtbl tr.qgh > td { padding: 0; border-bottom: 1px solid var(--line2); overflow: visible; }
+.queue .qtbl tbody.qbatch:not(:first-of-type) tr.qgh > td, .queue .qtbl tbody.qloose tr.qgh > td { border-top: 1px solid var(--line); }
+.queue .qtbl tbody.qbatch > tr > td:first-child { box-shadow: inset 3px 0 0 var(--qc, #4a4f57); }
+.queue .qtbl tbody.qbatch.st-ready { --qc: var(--acc); } .queue .qtbl tbody.qbatch.st-running { --qc: #4f86c6; } .queue .qtbl tbody.qbatch.st-review { --qc: #c9a227; }
+.queue .qtbl tbody.qbatch.st-done { --qc: #3fae6a; } .queue .qtbl tbody.qbatch.st-locked { --qc: #5a5f68; } .queue .qtbl tbody.qbatch.qhist { --qc: #6f5aa8; }
+.queue .qtbl tbody.qbatch.st-locked .qbh { opacity: .8; }
+.queue .qtbl tr.qgh .qgrp { border-bottom: 0; }
+/* a prompt is one line; it opens on focus (to read or edit it) */
+.queue .qtbl td.qp textarea { display: block; width: 100%; box-sizing: border-box; min-height: 0; height: 19px; resize: none; overflow: hidden; white-space: nowrap; }
+.queue .qtbl td.qp textarea:focus { height: 96px; white-space: pre-wrap; overflow: auto; resize: vertical; position: relative; z-index: 2; }
+.queue .qdone.est { color: #c8b06a; }
 .queue textarea[readonly] { color: var(--dim); }
 /* F3 + D3a: explicit Approve / Reject / Run per row, Run all approved, the selection, ref / output thumbnails, live progress */
 .queue .qacts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 3px 6px; border-bottom: 1px solid var(--line); font-size: 11.5px; }
@@ -273,7 +292,7 @@ body.notop .tl .picker { right: 24px; }
 .queue .qwaveshead { padding: 3px 6px; border-bottom: 1px solid var(--line); font-size: 11.5px; }
 .queue .qstats { font-size: 11px; color: var(--fg); padding: 1px 6px; } .queue .qstats b { color: #e8c88a; font-weight: 600; }
 .queue .qrest { font-size: 11px; color: var(--dim); padding: 0 6px 2px; } .queue .qrest b { color: #9ad09a; font-weight: 600; }
-.queue .qbatch { border-bottom: 1px solid var(--line); border-left: 3px solid #4a4f57; }
+.queue div.qbatch { border-bottom: 1px solid var(--line); border-left: 3px solid #4a4f57; }
 .queue .qbatch.st-ready { border-left-color: var(--acc); } .queue .qbatch.st-running { border-left-color: #4f86c6; } .queue .qbatch.st-review { border-left-color: #c9a227; }
 .queue .qbatch.st-done { border-left-color: #3fae6a; } .queue .qbatch.st-locked { border-left-color: #5a5f68; } .queue .qbatch.st-locked .qbh { opacity: .8; }
 .queue .qbatch.qhist { border-left-color: #6f5aa8; }
@@ -481,6 +500,8 @@ body.notop #rail, body.norail #rail { display: none; }
 button.pri { background: #3a3220; border-color: var(--acc); color: #f3d9a6; }
 button.on { color: var(--acc); }
 .sgst { display: inline-flex; align-items: center; gap: 4px; color: var(--fg); }
+.sgbar button.sgb2.on { background: #4a2420; border-color: #e0503a; color: #f0b4b0; }   /* the "needs you" flag is set */
+.sgbar button.sgask { color: #9cc4f0; }
 .sgbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .sgnote { color: #c3b2e8; overflow: hidden; text-overflow: ellipsis; }
 .sgnav { margin-left: auto; display: flex; gap: 8px; }
@@ -1153,6 +1174,9 @@ button.on { color: var(--acc); }
 .cmpr0 .rst:hover { color: var(--acc); }
 .cmps { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cmpl p { padding: 4px 8px; margin: 0; }
+/* no revision yet: the explanation takes the pane (no empty right half; U10) */
+.cmp.none .cmpr { display: none; } .cmp.none .cmpl { flex: 1; width: auto; background: var(--bg); font-size: 12px; }
+.cmp.none .cmpl p, .cmp.none .cmpl ol { max-width: 680px; line-height: 18px; } .cmp.none .cmpl ol { margin: 2px 0 6px; padding-left: 28px; color: var(--dim); }
 .cmpr { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .cmph { flex: none; display: flex; align-items: center; gap: 5px; padding: 2px 8px; border-bottom: 1px solid var(--line); font-size: 11px; white-space: nowrap; overflow: hidden; }
 .cmph select { height: 17px; font-size: 11px; max-width: 260px; }
@@ -1283,7 +1307,13 @@ button.on { color: var(--acc); }
 .tkmain { flex: 1; min-width: 0; overflow: auto; padding: 6px 10px; max-width: 560px; } .tkmh { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; font-size: 12px; } .tkmh a { cursor: pointer; font-size: 11px; }
 .tkmain .tkstrip0 { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
 .dock .cmp.ab .ct b { color: #ddd; }
-.tkview .tked .tkvid { max-height: 240px; } .tkview .tkmain { max-width: 480px; }
+/* Review › Takes uses the width: the card grid on the left, the editor beside it (U10) */
+.tkview .tkmain { max-width: none; }
+.tkview .tkw { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(360px, 1.5fr); column-gap: 12px; align-items: start; }
+.tkview .tkw > .tkcol { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.tkview .tkw > .tked { margin-top: 0; position: sticky; top: 0; min-width: 0; }
+.tkview .tked .tkvid { max-height: calc(100vh - 230px); }
+.tkcol { display: flex; flex-direction: column; gap: 3px; }
 /* File › Import media… (core/importmedia.js, D8) */
 .imback { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.55); display: flex; align-items: flex-start; justify-content: center; padding-top: 5vh; }
 .imdlg { width: min(1040px, 96vw); max-height: 88vh; display: flex; flex-direction: column; background: var(--bg2); border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(0,0,0,.6); font: 12px/16px "Segoe UI", Arial, sans-serif; color: var(--fg); }
@@ -1348,11 +1378,25 @@ button.on { color: var(--acc); }
 .sclist.tmode .sccard { padding: 1px 6px; line-height: 14px; position: relative; }
 .sclist.tmode .sccard:not(.open) > :not(.scbeats) { margin-right: 58%; }   /* title, text, sketches left; the beats at their times right */
 .sclist.tmode .sccard:not(.open) > .scbeats { position: absolute; top: 0; bottom: 0; left: 42%; right: 0; margin: 0; }
+/* the scene's header on one line: the title keeps at least 120 px, the time and status give way first */
+.sclist.tmode .sccard:not(.open) .sch { min-height: 14px; height: 14px; gap: 4px; }
+.sclist.tmode .sccard:not(.open) .sct { flex: 0 0 auto; min-width: min(120px, calc(100% - 36px)); max-width: calc(100% - 36px); }
+.sclist.tmode .sccard:not(.open) .sctime, .sclist.tmode .sccard:not(.open) .scst { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sclist.tmode .sccard:not(.open) .sch { overflow: hidden; }
+.sclist.tmode .sccard:not(.open) .scst { font-size: 0; flex: none; }   /* the status dot only (its word is the tooltip) */
+.sclist.tmode .scrow.tmshort .sctx { -webkit-line-clamp: 1; }
+.sclist.tmode .scrow.tmshort .scsks, .sclist.tmode .scrow.tmshort .sccard > :not(.sch):not(.sctx):not(.scbeats) { display: none; }
 .sclist.tmode .scbeats > .tmsub { line-height: 14px; padding-left: 4px; box-shadow: inset 1px 0 0 var(--line2), inset 0 1px 0 var(--line2); }
 .sclist.tmode .scgap { padding: 1px 6px; }
 /* storyboard: the scene header a band on the left, its shots stacked down the scene at their times (frame | text) */
-.sblist.tmode .sbscene.tmrow { border-bottom: 0; box-shadow: inset 0 1px 0 var(--line); }
-.sblist.tmode .sbscene.tmrow > .sbsh { position: absolute; left: 0; top: 0; bottom: 0; width: 148px; height: auto; flex-direction: column; align-items: flex-start; gap: 0; padding: 1px 4px; white-space: normal; overflow: hidden; line-height: 13px; font-size: 11px; box-shadow: inset 2px 0 0 #c3b2e8; }
+.sblist.tmode .sbscene.tmrow { border-bottom: 0; box-shadow: inset 0 1px 0 var(--line), inset 2px 0 0 #c3b2e8; background: linear-gradient(to right, var(--bg2) 148px, transparent 148px); }
+/* the scene header: whole lines only (as many as the slot holds: title, then time, then counts), each one line with an
+   ellipsis; the tooltip / hover has the rest */
+.sblist.tmode .sbscene.tmrow > .sbsh { position: absolute; left: 0; top: 0; width: 148px; height: auto; max-height: max(13px, round(down, calc(var(--tmh) - 1px), 13px)); box-sizing: border-box;
+  flex-flow: row wrap; align-content: flex-start; align-items: baseline; gap: 0 4px; padding: 0 4px; white-space: nowrap; overflow: hidden; line-height: 13px; font-size: 11px; background: none; }
+.sblist.tmode .sbscene.tmrow > .sbsh > * { line-height: 13px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.sblist.tmode .sbscene.tmrow > .sbsh .sct { flex: 1 1 0; min-width: 0; }
+.sblist.tmode .sbscene.tmrow > .sbsh .sctime { flex: 0 0 100%; }
 .sblist.tmode .sbscene.tmrow > .sbsh .sp { display: none; }
 .sblist.tmode .sbscene.tmrow > .sbrail { display: none; }
 .sblist.tmode .sbscene.tmrow > .sbstrip { position: absolute; left: 150px; right: 0; top: 0; bottom: 0; display: block; padding: 0; background: none; }
@@ -1360,6 +1404,20 @@ button.on { color: var(--acc); }
 .sblist.tmode .sbcard.tmsub > .sbfr { grid-column: 1; grid-row: 1 / span 6; width: 92px; height: auto; aspect-ratio: 16 / 9; }
 .sblist.tmode .sbcard.tmsub > :not(.sbfr) { grid-column: 2; }
 .sblist.tmode .sbcard.tmsub .sbtx { min-height: 0; }
+.sblist.tmode .sbcard.tmsub > .sbfr { width: min(92px, calc((var(--tmh) - 1px) * 16 / 9)); }   /* the frame whole, as tall as the slot allows */
+.sblist.tmode .sbcard.tmsub .sbnofr { padding: 0 3px; font-size: 10px; line-height: 12px; white-space: nowrap; overflow: hidden; max-width: 100%; box-sizing: border-box; }
+.sblist.tmode .sbcard.tmsub > .sbcam, .sblist.tmode .sbcard.tmsub > .sbchips, .sblist.tmode .sbcard.tmsub > .sbft { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* a shot under two lines: one line (a small frame, id · time · length, the action), the rest in the tooltip / on hover */
+.sblist.tmode .sbcard.tmsub.tmshort { display: flex; align-items: flex-start; gap: 4px; white-space: nowrap; }
+.sblist.tmode .sbcard.tmshort > .sbfr { flex: none; height: max(8px, calc(var(--tmh) - 2px)); }
+.sblist.tmode .sbcard.tmshort > .sbfr .sbnofr { font-size: 0; padding: 0; border: 0; width: 100%; height: 100%; background: repeating-linear-gradient(135deg, transparent 0 3px, #2a2e35 3px 5px); }
+.sblist.tmode .sbcard.tmshort > .sbfr > :not(img):not(.sbnofr) { display: none; }
+.sblist.tmode .sbcard.tmshort > .sbc1 { flex: none; padding: 0; height: 13px; line-height: 13px; }
+.sblist.tmode .sbcard.tmshort > .sbc1 .sbk { margin-left: 0; }
+.sblist.tmode .sbcard.tmshort > .sbtx { flex: 1 1 0; min-width: 0; display: block; white-space: nowrap; text-overflow: ellipsis; padding: 0; line-height: 13px; }
+.sblist.tmode .sbcard.tmshort > .sbcam, .sblist.tmode .sbcard.tmshort > .sbchips, .sblist.tmode .sbcard.tmshort > .sbft { display: none; }
+.sblist.tmode .sbcard.tmtiny > .sbc1, .sblist.tmode .sbcard.tmtiny > .sbtx { font-size: 9.5px; line-height: var(--tmh); height: var(--tmh); }
+.sblist.tmode .tmover.tmshort:hover { display: grid; }   /* hover: the card whole again */
 .sblist.tmode .sbgaprow.tmrow { align-items: flex-start; border-bottom: 0; }
 .sblist.tmode .tmrow:has(.sbskslot:not(:empty)) { overflow: visible; z-index: 6; content-visibility: visible; }
 .sblist.tmode .tmrow .sbskslot:not(:empty) { position: absolute; top: 100%; left: 150px; right: 0; z-index: 7; background: var(--bg); box-shadow: 0 3px 12px rgba(0,0,0,.6); }
@@ -1379,7 +1437,7 @@ button.on { color: var(--acc); }
 .bdtmt { text-align: center; color: var(--dim); font-size: 10px; line-height: 14px; }
 /* final: rows grouped by song section, in time order, each tagged with its stage */
 .fnlist.fntime .fntg b { color: #c3b2e8; } .fnlist.fntime .fntg a { font-variant-numeric: tabular-nums; }
-.fnsg { flex: none; width: 66px; font-style: normal; font-size: 10px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+.fnsg { flex: none; width: 72px; font-style: normal; font-size: 10px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
 .sclist.tmode .scrow.open { height: auto; min-height: var(--tmh); z-index: 5; overflow: visible; content-visibility: visible; box-shadow: 0 3px 12px rgba(0,0,0,.6); background: var(--bg); }
 
 /* ---------------- D7 identity checks (core/checkbadge.js) and D2 character constants (tabs/assetws.js) */
@@ -1398,7 +1456,9 @@ button.on { color: var(--acc); }
 .chconst { border-bottom: 1px solid var(--line); }
 .chconst .ccon { display: flex; align-items: center; gap: 4px; color: var(--dim); cursor: pointer; } .chconst .ccon input { margin: 0; }
 .cclist { padding: 2px 6px; display: flex; flex-direction: column; gap: 1px; }
-.ccrow { display: grid; grid-template-columns: 16px 110px 1fr 14px; gap: 4px; align-items: center; height: 19px; }
+.ccrow, .cchead { display: grid; grid-template-columns: 16px 120px minmax(0, 600px) 14px; gap: 4px; align-items: center; height: 19px; }
+.cchead { height: 14px !important; font-size: 10px; color: var(--dim); } .cchead > span:first-child { text-align: center; }
+.chconst .ccby { color: #e8c88a; font-size: 11px; margin-left: 6px; cursor: help; }
 .ccrow input[type=checkbox] { margin: 0; } .ccrow input:not([type=checkbox]) { height: 17px; font-size: 11px; min-width: 0; }
 .ccrow .cclabel { color: #c8b06a; } .ccrow b { cursor: pointer; color: var(--dim); text-align: center; } .ccrow b:hover { color: var(--fg); }
 .chconst .chbf a { font-size: 11px; }

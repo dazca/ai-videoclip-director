@@ -17,7 +17,7 @@ import { startMockFal } from './mock-fal.mjs';
 
 const WB = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
-const freePort = () => new Promise(ok => { const s = net.createServer().listen(0, () => { const p = s.address().port; s.close(() => ok(p)); }); });
+const freePort = () => new Promise(ok => { const s = net.createServer().listen(process.env.WB_VERIFY_PORT ? Number(process.env.WB_VERIFY_PORT) + ((globalThis.__wbVerifyPortN = (globalThis.__wbVerifyPortN ?? -1) + 1) % 10) : 0, () => { const p = s.address().port; s.close(() => ok(p)); }); });
 
 export async function verifyRunner({ browser, OUT }) {
   const checks = {};
@@ -69,8 +69,8 @@ export async function verifyRunner({ browser, OUT }) {
     await until(() => /2 selected/.test(document.querySelector('.queue .qselt')?.textContent || ''));
     const selTxt = await pg.evaluate(() => document.querySelector('.queue .qselt')?.textContent);
     await shot('v12_queue_drafts');
-    check('F3 the Queue: each draft has Approve / Reject buttons (no hidden chip), a readable prompt (3 rows), ref thumbnails; "Run all approved (0)" disabled; ticking two drafts shows "2 selected · $0.24"',
-      q0.btns.every(b => b.join(',') === 'Approve,Reject') && q0.cycle === 0 && q0.ta === 3 && q0.thumbs >= 3 && /Run all approved \(0\)/.test(q0.runAll) && q0.dis && /2 selected · \$0\.24/.test(selTxt), { q0, selTxt });
+    check('F3 the Queue: each draft has Approve / Reject buttons (no hidden chip), a one-line prompt (review #2 U14: it opens on focus; its full text is the tooltip), ref thumbnails; "Run all approved (0)" disabled; ticking two drafts shows "2 selected · $0.24"',
+      q0.btns.every(b => b.join(',') === 'Approve,Reject') && q0.cycle === 0 && q0.ta === 1 && q0.thumbs >= 3 && /Run all approved \(0\)/.test(q0.runAll) && q0.dis && /2 selected · \$0\.24/.test(selTxt), { q0, selTxt });
 
     // 3. approve: one by its button, two by the selection; reject one
     await click(`${row(A.id)} [data-x=approve]`);

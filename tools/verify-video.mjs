@@ -19,7 +19,7 @@ import { startMockFal } from './mock-fal.mjs';
 
 const WB = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
-const freePort = async () => { for (;;) { const p = await new Promise(ok => { const s = net.createServer().listen(0, () => { const x = s.address().port; s.close(() => ok(x)); }); }); if (p !== 8140) return p; } };
+const freePort = async () => { for (;;) { const p = await new Promise(ok => { const s = net.createServer().listen(process.env.WB_VERIFY_PORT ? Number(process.env.WB_VERIFY_PORT) + ((globalThis.__wbVerifyPortN = (globalThis.__wbVerifyPortN ?? -1) + 1) % 10) : 0, () => { const x = s.address().port; s.close(() => ok(x)); }); }); if (p !== 8140) return p; } };
 
 export async function verifyVideo({ browser, OUT }) {
   const checks = {};

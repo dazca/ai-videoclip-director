@@ -206,6 +206,7 @@ class Workspace {
     const s = id && this.scene(id); if (!s) return this.nc.edit({ stage: 'script', kind: 'stage', id: null });
     this.nc.edit(beat ? { stage: 'script', kind: 'beat', id: `${s.id}/${beat}` } : { stage: 'script', kind: 'scene', id: s.id });
   }
+  askDraft() { return this.addAsk({ text: 'Draft the scenes from the intake answers: cover the whole song, each scene bound to its lines, with beats and a short visual description.' }).then(() => toast('asked the agent for a draft (Notes column, top row)')); }
   // "Ask the agent": an ask typed in the Notes column (on the open scene, else the whole script)
   ask() { const s = this.open && this.cur?.scenes.some(x => x.id === this.open) ? this.open : null; this.nc.edit(s ? { stage: 'script', kind: 'scene', id: s } : { stage: 'script', kind: 'stage', id: null }, { to: true }); }
   fillGaps() {
@@ -295,13 +296,13 @@ class Workspace {
     const ver = v ? `<b>${esc(v.id)}</b> <span class="dim">${esc(v.message || '')}${v.created ? ' · ' + when(v.created) : ''} · ${v.via === 'agent' ? 'agent' : esc(v.by || '')}</span>` : '<span class="dim">no version yet</span>';
     this.$('.scbar').innerHTML = `${ver}<span class="dim">· ${this.draft.length} scenes · <span class="${cov >= 0.999 ? 'okc' : 'gapc'}">${Math.round(cov * 100)}% scripted</span>${g.length ? ` · ${g.length} gap${g.length > 1 ? 's' : ''}` : ''}</span><span class="sp"></span>`
       + (this.dirty ? `<span class="unsaved">unsaved edits</span><input class="lymsg" placeholder="what changed (optional)" spellcheck="false" value="${esc(msg)}"><button data-a="save" class="pri" title="Ctrl+Enter: a new version">Save version</button><button data-a="drdiff" title="compare the current version with your edits">diff</button><button data-a="discard">Discard</button>` : '')
-      + `<label class="dim" title="new times snap to the nearest lyric line, downbeat or section bound">snap <select class="scsnap">${SC.SNAPS.map(x => `<option${x === this.snap ? ' selected' : ''}>${x}</option>`).join('')}</select></label><button data-a="addscene" title="a new scene in the first gap">+ scene</button><button data-a="fill" title="ask the agent to script every unscripted range">Fill the gaps</button><button data-a="compare" title="side-by-side diff of two versions">Compare…</button>`;
+      + `<label class="dim" title="new times snap to the nearest lyric line, downbeat or section bound">snap <select class="scsnap">${SC.SNAPS.map(x => `<option${x === this.snap ? ' selected' : ''}>${x}</option>`).join('')}</select></label><button data-a="addscene" title="a new scene in the first gap">+ scene</button><button data-a="compare" title="side-by-side diff of two versions">Compare…</button>`;
   }
   renderList() {
     const list = this.$('.sclist'), song = this.song, dur = song.duration_ms;
     const rows = [...this.draft.map(s => ({ t0: s.t0, t1: s.t1, s })), ...SC.gaps(this.draft, dur, 1).map(([a, b]) => ({ t0: a, t1: b, gap: true }))].sort((a, b) => a.t0 - b.t0 || (a.gap ? -1 : 1));
     if (!rows.length || (!this.draft.length && rows.length === 1)) {
-      list.innerHTML = `<div class="scempty"><b>No scenes yet.</b> Answer the intake (right), then draft the scenes here (<a data-a="addscene">+ scene</a>) or ask the agent to draft them (<a data-a="fill">Fill the gaps</a>): every scene is bound to a stretch of the song.</div>`
+      list.innerHTML = `<div class="scempty"><b>No scenes yet.</b> Answer the intake (right), then draft the scenes here (<a data-a="addscene">+ scene</a>) or <a data-a="fill">ask the agent to fill the gaps</a>: every scene is bound to a stretch of the song.</div>`
         + (rows[0] ? this.rowHtml(rows[0]) : '');
       return this.placeSketch();
     }
@@ -366,7 +367,7 @@ class Workspace {
     }
     const list = this.$('.lylist');
     if (this.side === 'intake') {
-      list.innerHTML = `<div class="lyvh"><span class="dim">${unanswered ? `${unanswered} of ${SC.INTAKE.length} open · answer here or in a chat with the agent` : 'all answered'}</span><button data-a="askdraft" title="ask the agent to draft the scenes from these answers">Ask for a draft</button></div>`
+      list.innerHTML = `<div class="lyvh"><span class="dim">${unanswered ? `${unanswered} of ${SC.INTAKE.length} open · answer here or in a chat with the agent` : 'all answered'}</span><button data-a="askdraft" title="a note asking the agent to draft the scenes from these answers (also: the stage bar's Ask the agent…)">Ask the agent to draft</button></div>`
         + SC.INTAKE.map(q => { const a = this.doc.intake[q.id] || {};
           return `<div class="scq${a.text ? ' done' : ''}" data-q="${q.id}"><div class="scqh"><b>${esc(q.q)}</b>${a.asked ? `<span class="to" title="${esc(`asked by ${a.asked.via === 'agent' ? 'the agent' : 'the director'} ${a.asked.at || ''}`)}">asked in chat</span>` : ''}<span class="sp"></span>${a.text ? who(a) : ''}</div><textarea rows="2" placeholder="${esc(q.hint)}" spellcheck="false">${esc(a.text || '')}</textarea></div>`; }).join('');
       return;
@@ -397,7 +398,7 @@ class Workspace {
       if (act === 'addscene') return this.addScene();
       if (act === 'addgap') { const [a, b] = row.dataset.gap.split(',').map(Number); return this.addScene(a, b); }
       if (act === 'fill') return this.fillGaps();
-      if (act === 'askdraft') return this.addAsk({ text: 'Draft the scenes from the intake answers: cover the whole song, each scene bound to its lines, with beats and a short visual description.' }).then(() => toast('asked the agent for a draft (Notes column, top row)'));
+      if (act === 'askdraft') return this.askDraft();
       if (act === 'skclose') return this.closeSketch().then(ok => ok && this.render());
       if (act === 'skwin' && !skId && this.sk) { const { id, scene } = this.sk; if (this.sk.api.dirty) await this.sk.api.save().catch(() => {}); await this.closeSketch(true); this.render(); return this.openSketchFor(scene, id, { window: true }); }
       if (act === 'open' && sid) { this.setOpen(sid); return this.render(); }
@@ -483,7 +484,8 @@ commands.register([
   { id: 'script.save', group: 'Script', title: 'Save script version', when: () => V() && S.dirty, run: () => S.save() },
   { id: 'script.discard', group: 'Script', title: 'Discard unsaved script edits', when: () => V() && S.dirty, run: () => S.discard() },
   { id: 'script.addScene', group: 'Script', title: 'Add a scene (first gap)', run: async () => (await ensure())?.addScene() },
-  { id: 'script.fillGaps', group: 'Script', title: 'Fill the gaps: ask the agent to script the unscripted ranges', run: async () => (await ensure())?.fillGaps() },
+  { id: 'script.fillGaps', group: 'Script', title: 'Ask the agent to fill the gaps (script the unscripted ranges)', run: async () => (await ensure())?.fillGaps() },
+  { id: 'script.askDraft', group: 'Script', title: 'Ask the agent to draft the scenes (from the intake answers)', run: async () => (await ensure())?.askDraft() },
   { id: 'script.compare', group: 'Script', title: 'Compare script versions…', when: () => !!store.scenes?.versions?.length, run: async () => {
     await ensure();
     const vs = [...store.scenes.versions].reverse().map(v => ({ label: v.id, detail: `${v.message || ''} ${v.created ? v.created.replace('T', ' ') : ''}`, value: v.id }));
@@ -492,7 +494,7 @@ commands.register([
     S.compare = { a, b }; S.render();
   } },
   { id: 'script.intake', group: 'Script', title: 'Script intake questions', run: async () => { (await ensure())?.setSide('intake'); S?.$('.scq:not(.done) textarea')?.focus(); } },
-  { id: 'script.ask', group: 'Script', title: 'Ask the agent about the script…', run: async () => (await ensure())?.ask() },
+  { id: 'script.ask', group: 'Script', title: 'Ask the agent anything about the script… (a note)', run: async () => (await ensure())?.ask() },
   { id: 'script.note', group: 'Script', title: 'Note on the open scene (Notes column)', when: (c) => V() && !!sceneOf(c), run: (c) => S.noteOnScene(sceneOf(c)) },
   // "+ Add" (right-click in the script): a scene at the clicked time (a gap: from there; a scene: split there), a beat
   { id: 'script.addSceneHere', group: 'Script', title: 'Add a scene here (at this time)', when: () => V(), run: (c) => { const t = timeOf(c); return c?.gap && t == null ? S.addScene(c.gap[0], c.gap[1]) : S.addSceneHere(t ?? (c?.gap ? c.gap[0] : undefined)); } },

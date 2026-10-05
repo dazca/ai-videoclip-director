@@ -126,7 +126,7 @@ class ImportDialog {
   hide() { for (const r of this.rows) if (r.url) URL.revokeObjectURL(r.url); this.rows = []; this.jobs = []; this.el.remove(); }
   async addFiles(files) {
     for (const f of files) {
-      const row = { src: 'upload', file: f, name: f.name, size: f.size, kind: '', label: f.name.replace(/\.[^.]*$/, ''), private: false, forced: false, include: true };
+      const row = { src: 'upload', file: f, name: f.name, size: f.size, kind: '', label: f.name.replace(/\.[^.]*$/, ''), private: true, forced: false, include: true };   // review #2 N7: a dropped file is often a real photo: private (local only) until the director unticks it
       if (f.size > MAX) Object.assign(row, { include: false, bad: `${mb(f.size)}: over the 200 MB a file` });
       else { const t = await sniffBlob(f); if (!t) Object.assign(row, { include: false, bad: 'not an image or a video (by its bytes)' }); else Object.assign(row, { type: t, kind: t === 'video' ? 'clip' : 'still', url: URL.createObjectURL(f) }); }
       this.rows.push(row);

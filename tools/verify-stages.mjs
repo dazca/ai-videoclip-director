@@ -7,6 +7,9 @@
 // 2. headless, on a scratch copy of the demo (its own serve.mjs on a free port, never 8140): the rail on an empty
 //    project, on the demo as it ships (made before the flow), after the director marks stages done, and after a
 //    regression; the Assets chip and the Characters stage agree on Ada ("approved (legacy) · no identity node").
+//    Review #2 U6 / U8: every stage bar shows ONE status (no "(marked …)"), the SAME buttons (Mark done | Reopen, Needs you,
+//    Ask the agent…), and "Ask the agent…" opens that stage's asks, every one worded "Ask the agent …"; the rail's next
+//    hint names the next stage with its own status.
 //    Screenshots f1_*.png.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -112,7 +115,7 @@ let proc, browser;
 const cleanup = () => { try { proc?.kill(); } catch (e) {} try { browser?.process()?.kill(); } catch (e) {} try { fs.rmSync(DATA, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch (e) {} };
 process.on('exit', cleanup); for (const s of ['SIGINT', 'SIGTERM']) process.on(s, () => process.exit(130));
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
-const freePort = () => new Promise((ok, bad) => { const s = net.createServer(); s.on('error', bad); s.listen(0, () => { const { port } = s.address(); s.close(() => ok(port)); }); });
+const freePort = () => new Promise((ok, bad) => { const s = net.createServer(); s.on('error', bad); s.listen(process.env.WB_VERIFY_PORT ? Number(process.env.WB_VERIFY_PORT) + ((globalThis.__wbVerifyPortN = (globalThis.__wbVerifyPortN ?? -1) + 1) % 10) : 0, () => { const { port } = s.address(); s.close(() => ok(port)); }); });
 let port = await freePort(); while (port === 8140) port = await freePort();
 proc = spawn(process.execPath, [path.join(WB, 'serve.mjs'), String(port)], { stdio: 'pipe', env: { ...process.env, WORKBENCH_DATA: DATA, WB_PROJECT: 'demo' } });
 proc.stderr.on('data', d => process.stderr.write('server: ' + d));
@@ -166,6 +169,25 @@ try {
   const picker = await pg.evaluate(() => document.body.innerText.includes('Import an image as a node of identity'));
   await pg.keyboard.press('Escape'); await wait(200);
   check('"Import as identity" opens the import picker on Ada\'s identity tree', picker);
+
+  // U6 / U8: one status, the same buttons and one ask menu on every stage bar
+  const bars = {};
+  for (const id of ['lyrics', 'script', 'breakdown', 'characters', 'scenery', 'storyboard', 'final']) {
+    await pg.evaluate((s) => window.WB.stages.open(s), id); await until((s) => window.WB.stages.current() === s && !!document.querySelector('.sgbar .sgst'), id); await wait(200);
+    const b = await pg.evaluate(() => ({ st: document.querySelector('.sgbar .sgst')?.textContent.trim(), btns: [...document.querySelectorAll('.sgbar button')].map(x => x.textContent.trim()),
+      askX: Math.round(document.querySelector('.sgbar [data-ask]')?.getBoundingClientRect().left - document.querySelector('.sgbar .sgst').getBoundingClientRect().right) }));
+    await pg.evaluate(() => document.querySelector('.sgbar [data-ask]')?.click()); await wait(200);
+    b.asks = await pg.evaluate(() => [...document.querySelectorAll('.pop .pi .lb')].map(e => e.textContent));
+    await pg.keyboard.press('Escape'); await wait(100);
+    bars[id] = b;
+  }
+  if (bars.script) await pg.evaluate(() => window.WB.stages.open('script'));
+  await wait(200); await pg.screenshot({ path: path.join(OUT, 'f1_stage_bar_script.png'), clip: { x: 0, y: 0, width: 1500, height: 80 } });
+  const nextHint = await pg.evaluate(() => document.querySelector('#rail .next')?.textContent || '');
+  const sameBtns = Object.values(bars).every(b => b.btns.length === 3 && /^(Mark done|Reopen)$/.test(b.btns[0]) && b.btns[1] === 'Needs you' && b.btns[2] === 'Ask the agent…');
+  check('U6 / U8: every stage bar shows one status (no "(marked …)"), the same three buttons (Mark done | Reopen · Needs you · Ask the agent…) in the same place; "Ask the agent…" lists the stage\'s asks, each worded "Ask the agent …"; the rail\'s next hint is "next: <stage> · <its status>"',
+    sameBtns && Object.values(bars).every(b => !/marked/.test(b.st) && b.asks.length >= 1 && b.asks.every(a => /^Ask the agent/.test(a))) && new Set(Object.values(bars).map(b => b.askX)).size <= 2
+    && /^next: \S+ · (empty|in progress|needs you|ready to mark done|done ⚠ changed since)$/.test(nextHint.trim()), { bars, nextHint });
 
   // done: the director marks lyrics done (content ready); Ada and Bo get an approved identity; Characters marked done
   await pg.evaluate(() => window.WB.stages.setStatus('lyrics', 'done'));

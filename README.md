@@ -559,9 +559,28 @@ small files are served in one read so no handle stays open.
   still cannot write unless `allow_remote_ops` is set, and never get files flagged private.
 - Requests must use an allowed **Host** (localhost / 127.0.0.1 / [::1] on the server's port) and, when sent by a
   browser, no foreign **Origin** (blocks CSRF and DNS rebinding).
-- Every write (POST) must be `application/json` and carry the per-run token in the **`x-wb-token`** header. The server
-  injects it into `index.html` / `dock.html` as `<meta name="wb-token">` (read by `core/token.js`); the page and the
-  MCP server pick it up automatically. Set `WB_TOKEN` to fix it for scripts.
+- Every write (POST) must be `application/json` and carry a token. There are two (S9):
+  - the **page token** (`x-wb-token`): per run, injected into `index.html` / `dock.html` as `<meta name="wb-token">` (read
+    by `core/token.js`); `WB_TOKEN` fixes it;
+  - the **agent token** (`x-wb-agent-token`): kept in `<data folder>/.wb-agent-token` (a dot-file outside every project:
+    never served; made once and kept across restarts), or `WB_AGENT_TOKEN`. The MCP server (and so `mcp/client.mjs`)
+    reads it from the data folder the server reports and never reads the page. `tools/run.mjs` works on the files (no
+    HTTP) and needs no token.
+- **Page or agent (S9).** A request is the page (the director) only when it carries the page token, no agent token, this
+  server's **Origin** and **`Sec-Fetch-Site: same-origin`** (a browser sends both on a same-origin fetch; curl, Node's
+  fetch and the MCP server send neither). Everything else is an agent: a request without the page's Origin is never the
+  director. Every page act needs the page: a save that approves (a request draft -> approved, an item approved / locked),
+  marks a stage done, sets a scene or breakdown item `ok`, dismisses the director's note or ticks "allow uploading
+  private refs", and the ops `take_act`, `media_use`, `media_upload`, `batch_act`, `jobbooks_import`, `asset_act` /
+  `character_act` (base / import accept, approvals, constants), `ref_upload`, `breakdown_promote`, `round_send`,
+  `revision_close`, `revision_restore`, `final_lock` / `final_unlock`, `proposal_act`. An agent gets 403 on each
+  ("agents use the MCP tools"), whatever `via` its body claims; an agent's save is stamped `by: "agent", via:
+  "agent"`, and `/api/restore` without the page is an agent's restore. Every `/api` write answers `x-wb-client: page |
+  agent`. Offline mode is unchanged: the MCP server's file ops run with `via` absent (an agent) and never approve.
+  Limit: a browser on plain `http://` to a LAN address may not send `Sec-Fetch-Site`, so page acts work from
+  localhost; and a local process running as the same user can read either token and forge headers, or edit the JSON
+  by hand: the rules are enforced on the MCP and HTTP surfaces, and an agent with a shell is on its honour unless it
+  runs sandboxed.
 - Only the page's own files are served from the workbench folder (an allow-list: `index.html`, `dock.html`, `app.js`,
   `app.css`, `README.md`, `core/`, `core/sketch/`, `js/`, `tabs/`, and the free starter catalogue `catalog/` (images,
   `catalog.json`, `LICENSES.md`); case-insensitive). The page shell carries a Content-Security-Policy
@@ -599,13 +618,28 @@ small files are served in one read so no handle stays open.
 - Private references and fal: fal takes refs as URLs, so a run uploads each ref to fal storage (a public URL). A request
   with a private ref (the PRIVATE rule or media flagged private) runs on fal only once the director ticks **allow
   uploading private refs** on it in Review › Queue (off by default; lock badges on the refs). The tick is recorded by the
-  server in the request's log from a page save with this server's Origin; an edit of the request unticks it; an agent
+  server in the request's log from a page save with the page (S9: this server's Origin + Sec-Fetch-Site); an edit of the request unticks it; an agent
   cannot set it (`request_create` drops it, the runner refuses without it).
 - Look colours are hex only (`look_create`, `entity_upsert`: 400 otherwise) and the page renders swatches through
   `hexColor()`, so a colour cannot carry CSS (a `url()` beacon).
-- The agent rules hold on the tool surface (MCP, `/api/op` without the page's Origin). An agent with a shell can forge the
-  page's Origin with the token from `index.html`: it is on its honour there, like any local process. `/api/restore`
-  without the page's Origin is always an agent's restore.
+- The agent rules hold on the tool surface (MCP, `/api/op` and `/api/save` without the page, see "Page or agent").
+  An agent with a shell can read the page token from `index.html` and forge the Origin and `Sec-Fetch-Site`: it is on
+  its honour there, like any local process. `/api/restore` without the page is always an agent's restore.
+- Requests in `requests.json` (review #2 N3): a save never removes or renames a request (400: withdraw or reject it), a
+  new one is a draft (400 otherwise), a request in a batch is approved only with its batch (`batch_act`; a save that
+  approves it alone: 409) and a save moves a request only to draft / approved / rejected / withdrawn (the runner does
+  the rest). A save that edits an approved request's prompt, refs, estimate, tool, video or takes sends it back to draft
+  and unticks "allow uploading private refs" (as `request_update` does).
+- Ref paths (N2): every ref is stored in one spelling (`request_create`, `request_update`, `video.*`, a page save):
+  `./`, `//` and `x/..` are normalised, an absolute path becomes project- or media-base-relative, a ref outside the
+  project and the media roots is 400. The PRIVATE rule, the `media.json` private flag, the runner (`refPrivate`: the
+  resolved file, relative to the project and to the media base) and the Queue's lock badge all read that spelling, so
+  a flagged file cannot be uploaded to fal under another name; outputs of a private-ref request go to `private/gen/`.
+- The runner's locks (N4): the heartbeat runs on a timer while a run holds its lock (uploads and downloads included); a
+  lock is taken over only when its process is gone, or alive but silent for 30 min; before a take is submitted the
+  runner re-reads `job.json` and polls a handle another run saved instead of paying again. fal sees ref names as
+  `<request>_<i><ext>` (never the file's own name), a ref is PUT only to a fal storage host, and an output is streamed
+  to disk with a 500 MB cap (N8). Uploads check the free disk space first (1 GB spare, 507 otherwise; N7).
 - Guided flow: `stage_update` refuses `done` and refuses moving a done stage; a page save of `stages.json` is stamped
   (`done_by: "director", via: "page"`). A page save of `lyrics.json` cannot rewrite a saved version nor a note's author;
   the tools stamp `via: "agent"`.

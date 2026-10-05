@@ -73,7 +73,9 @@ await new Promise((ok, bad) => { srv.stdout.once('data', ok); srv.once('exit', (
 // the per-run write token, read the way the page and the MCP server get it: from the served page
 const TOKEN = /<meta name="wb-token" content="([^"]+)">/.exec(await (await fetch(`${URL_}/?project=${PROJECT}`)).text())?.[1];
 check('the page carries the per-run write token', /^[0-9a-f]{48}$/.test(TOKEN || ''), TOKEN?.length);
-const post = (p, body, headers = {}) => fetch(URL_ + p, { method: 'POST', headers: { 'content-type': 'application/json', 'x-wb-token': TOKEN, ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) })
+// the page's own requests carry its Origin and Sec-Fetch-Site: same-origin (S9): a test's { origin: URL_ } stands for the page
+const pageH = (h) => (h.origin === URL_ && !('sec-fetch-site' in h) ? { ...h, 'sec-fetch-site': 'same-origin' } : h);
+const post = (p, body, headers = {}) => fetch(URL_ + p, { method: 'POST', headers: pageH({ 'content-type': 'application/json', 'x-wb-token': TOKEN, ...headers }), body: typeof body === 'string' ? body : JSON.stringify(body) })
   .then(async r => ({ status: r.status, body: await r.json().catch(() => null) }));
 // the director approves a request in the page (Review > Queue): a save of requests.json with this server's Origin
 const pageApprove = (rid, proj = PROJECT) => { const cur = JSON.parse(fs.readFileSync(path.join(DATA, proj, 'requests.json'), 'utf8')); cur.items.find(r => r.id === rid).status = 'approved'; return post(`/api/save/requests.json?project=${proj}`, { base_rev: cur.rev, data: cur }, { origin: URL_ }); };
@@ -386,7 +388,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const nb = await call(mcp, 'scene_note_add', { scene: 'nope', text: 'x' });
   const cur = JSON.parse(fs.readFileSync(path.join(D, 'scenes.json'), 'utf8'));
   cur.notes.push({ id: 'sn90', scene: null, text: 'fill the gaps please', to: 'agent', kind: 'fill_gaps', gaps: [[0, 1000]], status: 'open', replies: [] });
-  const ps = await post(`/api/save/scenes.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur });
+  const ps = await post(`/api/save/scenes.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur }, { origin: URL_ });
   const asks = (await call(mcp, 'script_get')).asks_for_agent;
   const rv = await call(mcp, 'scene_note_resolve', { id: 'sn90', reply: 'mcp: done' });
   check('scene notes: via agent, thread reply, unknown scene refused; a page ask (via page) is in asks_for_agent; resolve with a reply',
@@ -459,7 +461,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const ns = await call(mcp, 'breakdown_note_add', { scene: 'sc77', text: 'x' });
   const cur = JSON.parse(fs.readFileSync(path.join(D, 'breakdown.json'), 'utf8'));
   cur.notes.push({ id: 'bn90', item: null, text: 'extract it please', to: 'agent', kind: 'extract', status: 'open', replies: [] });
-  const ps = await post(`/api/save/breakdown.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur });
+  const ps = await post(`/api/save/breakdown.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur }, { origin: URL_ });
   const asks = (await call(mcp, 'breakdown_get', { with_script: false })).asks_for_agent;
   const rv = await call(mcp, 'breakdown_note_resolve', { id: 'bn90', reply: 'mcp: extracted' });
   check('breakdown notes: via agent, thread reply, unknown item / scene refused; a page ask (kind extract, via page) is in asks_for_agent; resolve with a reply',
@@ -989,14 +991,14 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     // a director's own draft (the page): the agent cannot withdraw it; the page withdraws its own, and cannot withdraw the agent's
     const cur = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8'));
     cur.items.push({ id: 'rdirector1', kind: 'generate', target: null, prompt: 'the director\'s idea', refs: [], est_cost: 0.12, status: 'draft', by: 'director', at: new Date().toISOString().slice(0, 19) });
-    const sv = await post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur });
+    const sv = await post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur }, { origin: URL_ });
     const agW = await call(mcp, 'request_update', { id: 'rdirector1', status: 'withdrawn' });
     const c2 = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8'));
     c2.items.find(r => r.id === m1.r.id).status = 'withdrawn';
-    const pgBad = await post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: c2.rev, data: c2 });
+    const pgBad = await post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: c2.rev, data: c2 }, { origin: URL_ });
     const c3 = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8'));
     c3.items.find(r => r.id === 'rdirector1').status = 'withdrawn';
-    const pgOk = await post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: c3.rev, data: c3 });
+    const pgOk = await post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: c3.rev, data: c3 }, { origin: URL_ });
     const ql = await call(mcp, 'requests_list', { status: 'withdrawn' });
     check('looks: withdrawn: the agent withdraws its own draft (why + superseded_by), distinct from rejected; superseded_by needs withdrawn (400); the agent cannot withdraw the director\'s draft (403); the page withdraws the director\'s own (stamped page) but not an agent\'s (400); wait_for {requests} returns on the first change (changed_ids)',
       wd.request?.status === 'withdrawn' && wd.request.superseded_by?.[0] === m1.r.id && wd.request.log.at(-1).status === 'withdrawn' && /400/.test(wdBad.error || '') && sv.status === 200 && /403/.test(agW.error || '')
@@ -1568,10 +1570,10 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
   // the agent cannot approve or review a batch; a request approved alone (in the page) does not run
   const a1 = await post(`/api/op/batch_act?project=${P4}`, { act: 'approve', id: 'b01' }), a2 = await post(`/api/op/batch_act?project=${P4}`, { act: 'approve', id: 'b01', via: 'page' });
   const ruA = await call(mcp, 'request_update', { project: P4, id: b1.request_ids[0], status: 'approved', director_approved: true });
-  await pageApprove(b1.request_ids[0], P4); const ru = { request: RJ().items.find(r => r.id === b1.request_ids[0]) };
+  const paB = await pageApprove(b1.request_ids[0], P4); const ru = { request: RJ().items.find(r => r.id === b1.request_ids[0]) };
   const rd = await call(mcp, 'request_run', { project: P4, batch: 'b01', dry_run: true });
-  check('the agent cannot approve a batch (batch_act 403, also claiming via "page"); a request of the batch approved on its own (the agent: 403; the page: approved) is still refused by the runner: the batch is not approved',
-    a1.status === 403 && a2.status === 403 && /403/.test(ruA.error || '') && ru.request?.status === 'approved' && rd.runnable === 0 && rd.refused.length === 2 && rd.refused.every(x => /not approved/.test(x.why)), { a: [a1.status, a2.status], refused: rd.refused });
+  check('the agent cannot approve a batch (batch_act 403, also claiming via "page"); a request of the batch is never approved on its own (the agent: 403; a page save: 403, approved with its batch) and the runner refuses it: the batch is not approved',
+    a1.status === 403 && a2.status === 403 && /403/.test(ruA.error || '') && paB.status === 403 && ru.request?.status === 'draft' && rd.runnable === 0 && rd.refused.length === 2 && rd.refused.every(x => /not approved/.test(x.why)), { a: [a1.status, a2.status], refused: rd.refused });
   // the director approves b01 (page), the runner runs it as a batch within its cap
   const pa = await post(`/api/op/batch_act?project=${P4}`, { act: 'approve', id: 'b01' }, { origin: URL_ });
   const run = await call(mcp, 'request_run', { project: P4, batch: 'b01', wait: true });
@@ -1591,6 +1593,9 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
   const jb = await post(`/api/op/jobbooks_import?project=${P4}`, {}), jd = await post(`/api/op/jobbooks_import?project=${P4}`, { dry_run: true });
   const costs0 = fs.readFileSync(path.join(DD, 'costs.json'), 'utf8');
   const jp = await post(`/api/op/jobbooks_import?project=${P4}`, {}, { origin: URL_ }), again = await post(`/api/op/jobbooks_import?project=${P4}`, { dry_run: true });
+  const hist5 = RJ().items.filter(r => r.history);
+  check('N5 history: spent (actual_cost_usd) only from a ledger row (recorded / counted); an estimate or a cost not counted stays in history.cost only',
+    hist5.length === 2 && hist5.some(r => !r.history.cost.counted) && hist5.every(r => (r.history.cost.counted ? r.actual_cost_usd != null : r.actual_cost_usd === undefined)), hist5.map(r => [r.id, r.history.cost, r.actual_cost_usd]));
   const hr = await call(mcp, 'request_run', { project: P4, ids: ['A1'] }), hu = await call(mcp, 'request_update', { project: P4, id: 'A1', prompt: 'x' });
   check('job books: the agent cannot import (403) but may dry-run it (A1, G01; N9 never ran); the page imports them as done history with their job book, not again on a second run; history never runs and cannot be edited; costs.json unchanged',
     jb.status === 403 && jd.body?.imported?.map(x => x.id).join() === 'A1,G01' && jp.status === 200 && jp.body.imported.length === 2 && again.body?.imported?.length === 0 && again.body.skipped.some(s => /imported already/.test(s.why))

@@ -179,8 +179,9 @@ export async function verifyStoryboard({ browser, BASE, DATA, OUT, post, writeHe
   check('a gap\'s jump link opens the asset in its stage (Mara in the characters stage)', jumped.stage === 'characters' && jumped.cur === 'mara', jumped);
 
   // 7. the asks: "Fill the gaps" and "Ask the agent to storyboard" write notes for the agent
-  await click('.sbbar [data-a=fill]'); await wait(300);
-  await click('.sbbar [data-a=askboard]'); await wait(300);
+  const askAgent = async (label) => { await click('.sgbar [data-ask]'); await wait(200); return pg.evaluate((l) => { const it = [...document.querySelectorAll('.pop .pi')].find(e => (e.querySelector('.lb')?.textContent || '').startsWith(l)); it?.click(); return !!it; }, label); };   // the stage bar's one "Ask the agent…" menu
+  await askAgent('Ask the agent to fill the gaps'); await wait(300);
+  await askAgent('Ask the agent to storyboard'); await wait(300);
   const N = await fileUntil('notes.json', (j) => j.notes?.filter(n => n.to === 'agent' && n.target?.stage === 'storyboard').length >= 2);
   const fillN = N?.notes.find(n => n.ask === 'fill_gaps'), boardN = N?.notes.find(n => n.ask === 'storyboard');
   check('"Fill the gaps" writes an ask (kind fill_gaps: the shots, the assets, the estimate) and "Ask the agent to storyboard" another (kind storyboard), both by the director via page',
@@ -231,14 +232,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const OUT = path.resolve(process.argv[2] || path.join(WB, 'shots')); fs.mkdirSync(OUT, { recursive: true });
   const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-v9-'));
   fs.cpSync(path.join(WB, 'data', '_template'), path.join(DATA, '_template'), { recursive: true });
-  const port = await new Promise(ok => { const s = net.createServer().listen(0, () => { const p = s.address().port; s.close(() => ok(p)); }); });
+  const port = await new Promise(ok => { const s = net.createServer().listen(process.env.WB_VERIFY_PORT ? Number(process.env.WB_VERIFY_PORT) + ((globalThis.__wbVerifyPortN = (globalThis.__wbVerifyPortN ?? -1) + 1) % 10) : 0, () => { const p = s.address().port; s.close(() => ok(p)); }); });
   const srv = spawn(process.execPath, [path.join(WB, 'serve.mjs'), String(port)], { stdio: 'pipe', env: { ...process.env, WORKBENCH_DATA: DATA, WB_PROJECT: '_template', WORKBENCH_CONFIG: path.join(DATA, 'none.json') } });
   srv.stderr.on('data', d => process.stderr.write('server: ' + d));
   let browser, res = { pass: false };
   try {
     await new Promise((ok, bad) => { srv.stdout.once('data', ok); srv.once('exit', (c) => bad(new Error('server exited ' + c))); });
     const BASE = `http://localhost:${port}`;
-    const writeHeaders = async (base, project) => { const html = await (await fetch(`${base}/?project=${project}`)).text(); return { 'content-type': 'application/json', origin: base, 'x-wb-token': /<meta name="wb-token" content="([^"]+)">/.exec(html)?.[1] }; };
+    const writeHeaders = async (base, project) => { const html = await (await fetch(`${base}/?project=${project}`)).text(); return { 'content-type': 'application/json', origin: base, 'sec-fetch-site': 'same-origin', 'x-wb-token': /<meta name="wb-token" content="([^"]+)">/.exec(html)?.[1] }; };
     const HDR = await writeHeaders(BASE, '_template');
     const post = async (p, body, base = BASE, headers = HDR) => { const r = await fetch(base + p, { method: 'POST', headers, body: JSON.stringify(body) }); return { status: r.status, body: await r.json().catch(() => null) }; };
     browser = await puppeteer.launch({ executablePath: findChrome(), headless: true });

@@ -399,7 +399,7 @@ commands.register([
     const b = await ui.pick({ title: `Compare ${a} with (B)`, items: [{ label: 'your unsaved edits', detail: 'draft', value: 'draft' }, ...vs.filter(v => v.value !== a)] }); if (!b) return;
     S.compare = { a, b }; S.textMode = false; S.render();
   } },
-  { id: 'lyrics.ask', group: 'Lyrics', title: 'Ask the agent about the lyrics…', run: async () => { if (!visible()) await WB().stages.open('lyrics'); S?.ask(); } },
+  { id: 'lyrics.ask', group: 'Lyrics', title: 'Ask the agent anything about the lyrics… (a note)', run: async () => { if (!visible()) await WB().stages.open('lyrics'); S?.ask(); } },
   { id: 'lyrics.versions', group: 'Lyrics', title: 'Lyrics versions panel', checked: () => S?.side === 'versions', when: () => L(), run: () => S.setSide(S.side === 'versions' ? null : 'versions') },
   { id: 'lyrics.addSong', group: 'Lyrics', title: () => store.song?.audio?.mix ? 'Replace the song file…' : 'Add the song file…', run: async () => { if (!visible()) await WB().stages.open('lyrics'); S?.songDialog(); } },
 ]);

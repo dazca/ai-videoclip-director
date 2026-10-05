@@ -8,7 +8,7 @@
 // ledger), Approve per kind (a scene, a breakdown item, an identity tree via asset_act, the lyrics stage), Request changes
 // + a note (a shot: state changes), multi-select -> the confirm with the count and the cost impact -> approved (requests
 // stamped via page), Review › Approvals (C3: the same rows), "Lock for render" (a revision marked final; the agent gets
-// 409 over MCP while final_get reads), Unlock. Screenshots v15_*.png.
+// 409 over MCP while final_get reads), Unlock; the group names are the stage names (review #2 U15). Screenshots v15_*.png.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -18,7 +18,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const WB = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
-const freePort = () => new Promise(ok => { const s = net.createServer().listen(0, () => { const p = s.address().port; s.close(() => ok(p)); }); });
+const freePort = () => new Promise(ok => { const s = net.createServer().listen(process.env.WB_VERIFY_PORT ? Number(process.env.WB_VERIFY_PORT) + ((globalThis.__wbVerifyPortN = (globalThis.__wbVerifyPortN ?? -1) + 1) % 10) : 0, () => { const p = s.address().port; s.close(() => ok(p)); }); });
 const sdk = (p) => import(pathToFileURL(path.join(WB, 'node_modules', '@modelcontextprotocol', 'sdk', 'dist', 'esm', ...p.split('/'))).href);
 
 export async function verifyFinal({ browser, OUT }) {
@@ -37,7 +37,7 @@ export async function verifyFinal({ browser, OUT }) {
   try {
     await new Promise((ok, bad) => { srv.stdout.once('data', ok); srv.once('exit', (c) => bad(new Error('server exited ' + c))); });
     const TOKEN = /<meta name="wb-token" content="([^"]+)">/.exec(await (await fetch(`${BASE}/?project=${P}`)).text())?.[1];
-    const call = async (name, body, page = false) => { const r = await fetch(`${BASE}/api/op/${name}?project=${P}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-wb-token': TOKEN, ...(page ? { origin: BASE } : {}) }, body: JSON.stringify(body) }); return { status: r.status, body: await r.json().catch(() => null) }; };
+    const call = async (name, body, page = false) => { const r = await fetch(`${BASE}/api/op/${name}?project=${P}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-wb-token': TOKEN, ...(page ? { origin: BASE, 'sec-fetch-site': 'same-origin' } : {}) }, body: JSON.stringify(body) }); return { status: r.status, body: await r.json().catch(() => null) }; };
     const { Client } = await sdk('client/index.js'), { StdioClientTransport } = await sdk('client/stdio.js');
     client = new Client({ name: 'verify-final', version: '1' });
     await client.connect(new StdioClientTransport({ command: process.execPath, args: [path.join(WB, 'mcp', 'server.mjs')], env: { ...env, WORKBENCH_URL: BASE, WORKBENCH_PROJECT: P }, stderr: 'pipe' }));
@@ -170,6 +170,14 @@ export async function verifyFinal({ browser, OUT }) {
     await until(() => !window.WB.store.revisions?.lock);
     const ag3 = await tool('notes_add', { target: { stage: 'final', kind: 'stage', id: null }, text: 'agent: after unlock' });
     check('Unlock (the director): the lock is gone (kept in locks[] with unlocked_at) and the agent writes again', !J('revisions.json').lock && J('revisions.json').locks?.[0]?.unlocked_at && !ag3.error, { ag3: ag3.text.slice(0, 80) });
+    // review #2 U15: the groups carry the stage names ("6 · Storyboard"), the queue is "Requests" (not a stage: no number); in
+    // Time each row's stage tag is whole
+    const gl = await pg.evaluate(() => [...document.querySelectorAll('.fnlist .fngh[data-g] b')].map(b => b.textContent));
+    await pg.evaluate(() => window.WB.timeMode.setMode('final', 'time')); await until(() => !!document.querySelector('.fnlist.fntime .fnsg'));
+    const tags = await pg.evaluate(() => [...document.querySelectorAll('.fnlist.fntime .fnsg')].map(e => ({ t: e.textContent, clipped: e.scrollWidth > e.clientWidth + 1 })));
+    await pg.evaluate(() => window.WB.timeMode.setMode('final', 'list'));
+    check('U15 Final: the groups use the stage names ("6 · Storyboard"; "Requests" unnumbered, never "Shots & clips" / "7 · Generation requests"); in Time no stage tag is clipped',
+      gl.includes('6 · Storyboard') && gl.every(g => g === 'Requests' || /^[1-7] · /.test(g)) && !gl.some(g => /Shots & clips|Generation requests|^7 · /.test(g)) && tags.length > 0 && !tags.some(x => x.clipped), { gl, tags: [...new Set(tags.map(x => x.t + (x.clipped ? ' (clipped)' : '')))] });
   } catch (e) { console.error('v15 aborted:', e.stack || e); checks.aborted = { pass: false, detail: String(e.message || e) }; }
   finally {
     await client?.close().catch(() => {});

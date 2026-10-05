@@ -8,7 +8,9 @@
 // $X" confirms with the total and the cap impact; "Run batch" runs it within its cap on the mock; the take is picked for
 // one shot and the other's takes rejected, then "Mark reviewed" unlocks wave 2; the take-ratio stats (takes per used shot,
 // cost per used second) and the remaining waves re-estimated; "Import job books" brings the falgen jobs in as history
-// (done, outputs linked, never run, no new cost). Screenshots v20_*.png.
+// (done, outputs linked, never run, no new cost). Review #2 U14 / N5: ONE queue table (the waves, the history and the rest
+// share its columns), a draft in a batch says "approve with the batch ↑", prompts one line until focused, the gate said
+// once, a history estimate labelled "est. (not counted)" (never "spent"). Screenshots v20_*.png.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -20,7 +22,7 @@ import { makeFakeFalgen } from './fake-falgen.mjs';
 
 const WB = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
-const freePort = async () => { for (;;) { const p = await new Promise(ok => { const s = net.createServer().listen(0, () => { const x = s.address().port; s.close(() => ok(x)); }); }); if (p !== 8140) return p; } };
+const freePort = async () => { for (;;) { const p = await new Promise(ok => { const s = net.createServer().listen(process.env.WB_VERIFY_PORT ? Number(process.env.WB_VERIFY_PORT) + ((globalThis.__wbVerifyPortN = (globalThis.__wbVerifyPortN ?? -1) + 1) % 10) : 0, () => { const x = s.address().port; s.close(() => ok(x)); }); }); if (p !== 8140) return p; } };
 
 // a 10-shot storyboard (2 s each, no clips: every shot is a gap) and the job book of a first film
 export function batchFixture(ND, base) {
@@ -110,6 +112,24 @@ export async function verifyBatches({ browser, OUT }) {
       h1?.state === 'ready' && h1.btns.some(b => /Approve batch · \$0\.48/.test(b.t)) && h2?.state === 'locked' && /waits for Wave 1/.test(h2.text) && !h2.btns.length && h3?.state === 'locked' && h1.rows === 2 && h2.rows === 4 && /2 requests · 2 shots · est \$0\.48/.test(h1.text)
       && h3c.rows === 0 && ag1.status === 403 && ag2.status === 403 && ag3.status === 403 && ag4.status === 403 && ar.body?.started?.length === 0 && /not approved/.test(ar.body?.refused?.[0]?.why || ''), { h1, h2, h3c: h3c?.rows, ag: [ag1.status, ag2.status, ag3.status, ag4.status], ar: ar.body?.refused });
 
+    // 2b. U14: one table (the batch groups are its header rows), the same column x everywhere; a draft in a batch says
+    // "approve with the batch ↑" (it is not approved); a prompt is one line, opened on focus; the gate is said once
+    const u14 = await pg.evaluate((b1id) => {
+      const tbls = document.querySelectorAll('.queue .qlist table'), t = document.querySelector('.queue table.qtbl');
+      const xs = [...document.querySelectorAll('.queue .qtbl tr[data-id] td.qp')].map(td => Math.round(td.getBoundingClientRect().left));
+      const ws = [...document.querySelectorAll('.queue .qtbl tr[data-id] td.qp')].map(td => Math.round(td.getBoundingClientRect().width));
+      const drafts = [...document.querySelectorAll(`.queue .qbatch[data-b="${b1id}"] tr[data-id] td.qbtns`)].map(td => td.textContent.trim());
+      const heads = [...document.querySelectorAll('.queue .qbatch[data-b] .qbh')].map(h => h.textContent.replace(/\s+/g, ' ').trim());
+      const ta = document.querySelector('.queue .qtbl tr[data-id] td.qp textarea');
+      return { tables: tbls.length, inTable: document.querySelectorAll('.queue .qtbl tbody.qbatch[data-b]').length, xs: [...new Set(xs)], ws: [...new Set(ws)], drafts, heads, h0: Math.round(ta.getBoundingClientRect().height) };
+    }, b1.id);
+    await pg.focus('.queue .qtbl tr[data-id] td.qp textarea'); await wait(150);
+    const hFocus = await pg.evaluate(() => Math.round(document.activeElement.getBoundingClientRect().height));
+    await pg.evaluate(() => document.activeElement.blur()); await wait(150);
+    check('U14 the Queue is ONE table (the batch groups are header rows of it: the same prompt column x and width in every group); a draft in a READY batch says "approve with the batch ↑" (not "approved"); a prompt is one line (≤ 22 px) and opens on focus; the gate is said once ("waits for … to be reviewed", no "gate: after")',
+      u14.tables === 1 && u14.inTable === 3 && u14.xs.length === 1 && u14.ws.length === 1 && u14.drafts.length === 2 && u14.drafts.every(d => /^approve with the batch ↑/.test(d)) && !u14.drafts.some(d => /approved with/.test(d))
+      && u14.h0 <= 22 && hFocus >= 60 && u14.heads.every(h => !/gate: after/.test(h)) && u14.heads.filter(h => /waits for .* to be reviewed/.test(h)).length === 2, { ...u14, hFocus });
+
     // 3. "Approve batch · $0.48": the confirm shows the total and the cap impact; approving moves both drafts at once
     await click(`.queue .qbatch[data-b="${b1.id}"] [data-q=bapprove]`);
     const conf = await pg.evaluate((b) => document.querySelector(`.queue .qbatch[data-b="${b}"] .qconfirm`)?.textContent.replace(/\s+/g, ' ').trim(), b1.id);
@@ -197,11 +217,13 @@ export async function verifyBatches({ browser, OUT }) {
     const tk = await agent('takes_get', { request: 'A1' });
     const chh = await clipOf('.queue .qhist');
     await shot('v20_history', chh ? { ...chh, height: Math.min(900 - chh.y, 320) } : undefined);
-    check('Import job books: the agent cannot import (403; a dry run is fine: A1, G01, N9 skipped as never run); the page imports jobs_test.json as history: A1 (2 registered outputs, $0.24 counted in the falgen ledger) and G01 (1 output, an estimate, not counted), status done, never run (request_run and a retake refuse "history"), no new cost in costs.json; A1\'s outputs are its takes; a "History · job books" group with its stats',
+    check('Import job books: the agent cannot import (403; a dry run is fine: A1, G01, N9 skipped as never run); the page imports jobs_test.json as history: A1 (2 registered outputs, $0.24 counted in the falgen ledger) and G01 (1 output, an estimate, not counted), status done, never run (request_run and a retake refuse "history"), no new cost in costs.json; A1\'s outputs are its takes; a "History · job books" group with its stats; N5: A1 "$0.24 spent (in the ledger)", G01 "est. (not counted)" (never "spent"), the stats split the same way',
       ajb.status === 403 && adry.body?.imported?.length === 2 && adry.body.skipped.some(s => s.job === 'N9' && /never ran/.test(s.why))
       && A1?.status === 'done' && A1.outputs.length === 2 && A1.history.cost.counted === true && Math.abs(A1.actual_cost_usd - 0.24) < 1e-9 && G01?.status === 'done' && G01.outputs.length === 1 && G01.history.cost.counted === false && G01.kind === 'shot-video'
       && JSON.stringify(readJ('costs.json').items) === costs0 && hrun.body?.started?.length === 0 && /history/.test(hrun.body?.refused?.[0]?.why || '') && hrt.body?.started?.length === 0
-      && (tk.body?.takes || []).length === 2 && /History · job books/.test(hh.text || '') && /jobs_test\.json/.test(hh.text || '') && /3 takes/.test(hh.stats || '') && hh.rows.length === 2, { adry: adry.body?.skipped, hh, A1: A1 && { out: A1.outputs, cost: A1.history.cost }, G01: G01 && { out: G01.outputs, cost: G01.history.cost }, hrun: hrun.body?.refused });
+      && (tk.body?.takes || []).length === 2 && /History · job books/.test(hh.text || '') && /jobs_test\.json/.test(hh.text || '') && /3 takes/.test(hh.stats || '') && hh.rows.length === 2
+      // N5: money is "spent" only when the ledger counts it; the estimate is "est. (not counted)"
+      && hh.rows.some(r => /\$0\.24 spent \(in the ledger\)/.test(r)) && hh.rows.some(r => /est\. \(not counted\)/.test(r) && !/spent/.test(r)) && /est\. \(not counted\)/.test(hh.stats || ''), { adry: adry.body?.skipped, hh, A1: A1 && { out: A1.outputs, cost: A1.history.cost }, G01: G01 && { out: G01.outputs, cost: G01.history.cost }, hrun: hrun.body?.refused });
 
     check('nothing left the page; the fal key is in no project file and not in the server log', !outside.length && !log.includes(KEY) && !fs.readdirSync(ND, { recursive: true }).some(f => { try { return fs.statSync(path.join(ND, f)).isFile() && fs.readFileSync(path.join(ND, f)).includes(KEY); } catch (e) { return false; } }), { outside });
   } catch (e) { console.error('v20 aborted:', e.stack || e); checks.aborted = { pass: false, detail: String(e.message || e) }; }
