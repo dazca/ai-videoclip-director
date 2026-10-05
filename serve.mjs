@@ -18,7 +18,8 @@
 //                                        (every /api response carries the header x-wb-code: the hash of the code it runs)
 // POST /api/save/<file>                  body {base_rev, data}; <file> in WRITABLE; 409 + current file when base_rev is stale
 // GET  /api/events                       Server-Sent Events {"project", "file"} whenever a data file changes on disk,
-//                                        and {"project", "ui": {...}} for the live UI channel
+//                                        and {"project", "ui": {...}} for the live UI channel, and {"project", "run": {id, phase, ...}}
+//                                        for the request runner's progress (POST /api/op/request_run starts it)
 // POST /api/op/<name>                    body = the op's arguments -> lib/store.mjs ops[name](project, args)   (local only;
 //                                        bodies up to 5 MB, sketch_save up to 25 MB: two base64 PNGs + the strokes)
 // POST /api/ui                           {t?, view?, preview?, select?, message?, open_project?, wait_ms?} -> pushed to
@@ -128,13 +129,16 @@ const watchTimer = new Map();
 fs.watch(DATA_ROOT, { recursive: true }, (_ev, name) => {
   if (!name) { clearTimeout(watchTimer.get('*')); watchTimer.set('*', setTimeout(() => notify('*', ['*']), 80)); return; }   // Windows drops names when its event buffer overflows
   const f = name.replace(/\\/g, '/');
-  if (f.endsWith('.tmp') || f.includes('/.snapshots') || f.includes('/thumbs/')) return;
+  // (gen/: the runner's outputs, job.json and lock: the page follows requests.json and media.json instead)
+  if (f.endsWith('.tmp') || f.includes('/.snapshots') || f.includes('/thumbs/') || /\/gen(\/|$)/.test(f)) return;
   const i = f.indexOf('/'); if (i < 0) return;
   clearTimeout(watchTimer.get(f));
   watchTimer.set(f, setTimeout(() => notify(f.slice(0, i), [f.slice(i + 1)]), 80));
 });
 function send(msg, project) { let n = 0; for (const c of clients) if (!project || !c.project || c.project === project) { c.res.write(`data: ${JSON.stringify(msg)}\n\n`); n++; } return n; }
 function notify(project, files) { for (const file of files) send({ project, file }); }
+// the request runner's progress (lib/run.mjs: claim, upload, submit, polling, take done, done / failed / handed off): live in the Queue
+S.runEvents.on('run', (m) => send(m, m.project));
 
 // ------------------------------------------------------------------ live UI channel: an agent asks the open page to show something
 const acks = new Map();   // ui id -> {n, done}

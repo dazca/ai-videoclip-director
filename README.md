@@ -69,6 +69,8 @@ Tools: `status`, `projects` (list/create/duplicate/open), `snapshot_save` / `sna
 scene or beat, an item, an asset / tree / node + image pin, a shot, a time) / `notes_status` (absorbed with a reply; the director's
 notes are dismissed only by the director), and the old `notes_list` / `note_add` / `note_resolve` (the timeline), `approvals_get` / `approve` / `request_changes`, `requests_list` /
 `request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`), `costs_get` (one total over costs.json and
+`media_add`, `notes_list` / `note_add` / `note_resolve`, `approvals_get` / `approve` / `request_changes`, `requests_list` /
+`request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`; `takes`), `request_run` (run approved requests: the runner) / `generators_get`, `costs_get` (one total over costs.json and
 a falgen ledger), `cost_record` (spend made outside the queue, never an approval), `media_update`, `wait_for` (block
 until a request / stage / note changes), `ui_focus`; the guided flow: `stages_get` / `stage_update` (the per-stage note tools below
 are aliases that write the same notes.json v2 and answer in their old shapes),
@@ -330,7 +332,7 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `media.json` | `{generated, count, by_kind, items[{id, path, kind, label, entities[], shots[], uses[], take, job, group, size, w, h, duration_ms, private, status: used/picked/unused/private, cost_usd, thumb, strip?, strip_n?, packed_alpha?}]}`; kinds: render, clip, still, avatar, body, motion, dancer, motion-ref, sheet, variation, contact, audio, ref |
 | `thumbs/m_*.jpg`, `s_*.jpg`, `priv_*.jpg` | media thumbnails (max 240 px, sheets 600 px), 8-frame hover-scrub strips of videos, thumbnails of PRIVATE files |
 | `_src/probe.json` | ffprobe cache (size/mtime keyed) |
-| `requests.json` | `{rev, items[{id, kind, target, prompt, refs[], est_cost, tool?, status: draft/approved/queued/running/done/rejected, by, at, outputs?[], asset?{type: character/location/prop, id, tree, from, kind: identity/base/edit/look/variant, text?, sketch?, png?, mask?, pins[]}, warnings?[], recipe?{id, version, model, framing, fields, blocks[]}}]}`; kinds: regenerate, new-costume, new-variant, generate, duplicate, choose-take, set-in, edit-timing, swap-costume, section-variant, import, identity-sheet, character-edit, look-sheet, location-plate, location-edit, location-variant, prop-sheet, prop-edit, prop-variant. `asset` links a stage-4 / 5 generation to the asset tree it grows; older requests may carry it as `char` (still read; `request_create` accepts `char` with a deprecation warning and stores `asset` only) |
+| `requests.json` | `{rev, items[{id, kind, target, prompt, refs[], est_cost, tool?, status: draft/approved/queued/running/done/failed/rejected, by, at, takes?, outputs?[], generator?, linked?{type, id, tree, nodes[], proposals[]}, handoff?{generator, pack, results}, last_run?{at, status, why}, asset?{type: character/location/prop, id, tree, from, kind: identity/base/edit/look/variant, text?, sketch?, png?, mask?, pins[]}, warnings?[], recipe?{id, version, model, framing, fields, blocks[]}}]}`; kinds: regenerate, new-costume, new-variant, generate, duplicate, choose-take, set-in, edit-timing, swap-costume, section-variant, import, identity-sheet, character-edit, look-sheet, location-plate, location-edit, location-variant, prop-sheet, prop-edit, prop-variant. `asset` links a stage-4 / 5 generation to the asset tree it grows; older requests may carry it as `char` (still read; `request_create` accepts `char` with a deprecation warning and stores `asset` only) |
 | `refs/<id>/`, `private/refs/<id>/`, `private/{characters,locations,props}/<id>/` | stage-4 / 5 references: Openverse images (public, provenance in `media.json` `provenance{}`), the director's reference photos (always private), and iteration images made from private photos (private) |
 | `overrides.json` | `{rev, sections:{<id>:{label?, color?}}}`: the director's section renames / colours over `song.json` |
 | `settings.json` | `{rev, keybindings:{<command id>:[keys]}}` (not snapshotted) |
@@ -357,8 +359,47 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
   when you did what it asks, `notes_status {id, status: "absorbed", reply}`. Only the director dismisses the director's
   notes. To ask for a review: set an item to `state: "review"`.
 - Generation queue: read `requests.json`; run only `status: "approved"` items that the director approved in the page
-  (a `log` entry `via: "page"`); move them with `request_update` (MCP / `/api/op`): queued / running, then `done` with
-  `outputs: [paths]` (or `rejected` + `why`). The Queue tab shows it live.
+  (a `log` entry `via: "page"`). The workbench runs them itself (see "Running approved requests" below): `request_run`
+  (MCP / `/api/op`), `node tools/run.mjs`, or the page's Run buttons. A run made outside it is reported with
+  `request_update` (MCP / `/api/op`): queued / running, then `done` with `outputs: [paths]` (or `failed` / `rejected` +
+  `why`). The Queue tab shows it live.
+
+## Running approved requests (the runner: `lib/run.mjs`, `generators/`)
+
+Nothing is generated or paid until the director approves a request in **Review › Queue** (each draft has **Approve** /
+**Reject**; tick several for **Approve selected · $X**). An approved request then runs from either side, through one
+runner with one approval rule, one cap and one ledger:
+
+- **The page**: **Run · $X** on a row, or **Run all approved (N) · $X**. Progress (uploading refs, in the provider
+  queue, generating, take 1/2, done) comes live from the server (SSE).
+- **An agent**: `request_run {ids, dry_run: true}` (the plan: generator, model, endpoint, takes, estimate vs the
+  approved `est_cost`, the cap, outputs already on disk; nothing called, written or spent), then `request_run {ids}`
+  (background; `wait_for {request, until: ["done", "failed"]}`) or `{ids, wait: true}`.
+- **A shell**: `node tools/run.mjs --project <p> <ids…> | --all [--dry-run] [--parallel 2]`.
+
+What a run does: only a request with the director's approval on record runs (a draft, rejected or done one is
+refused; the runner never approves); the cap is re-checked when it is claimed (`queued`, 402 over it) and the
+generator's estimate (`js/prices.js`) may not exceed the approved `est_cost`; `queued -> running -> done` (or `failed`
+with `why`; a failed request keeps its approval and can be run again). Up to 2 at once. Outputs go to
+`data/<p>/gen/<request>/<id>_<take>.png` (`private/gen/…` when a ref is private) with `job.json` (the provider's job
+ids, per-take status and cost; never the key); a take whose file exists is skipped and a submitted job is polled again,
+not paid twice. At done the actual cost (list price × completed takes) is recorded once in `costs.json` (item id = the
+request, `via: "runner"`; `costs_get` and `cost_record` dedupe by it), the outputs are registered as media (linked to
+the shot for a `shot:` target) and, for an asset request, added to its tree as nodes the director keeps or picks
+(`asset_iteration_add`; a tree that refuses gets a `node_import_propose` proposal); the request records `linked`.
+
+**Generators** (Settings › Generator, per kind: image / video / motion; `settings.json` `generators`; tool
+`generators_get`): `fal` (default: Nano Banana 2 edit / text-to-image and Seedream 5 edit through fal's queue API, refs
+uploaded to fal storage, 25 min timeout; video is D3b), `openwith` ("Open in another app": exports
+`gen/<request>/pack/` with `prompt.txt`, `refs/`, `README.md`; the request waits, handed off, until you put the images
+in `gen/<request>/results/` and press **Collect results**: they become its outputs at $0; **Copy prompt** puts the
+prompt on the clipboard), `comfyui` (a stub: "not configured").
+
+**The fal key** comes from the environment of the server / runner (`FAL_KEY`) or from `fal_key_file` in
+`workbench.config.json`: a file outside the workbench and the data folder (`FAL_KEY=…` or the bare key); anything
+inside the project is refused. It is sent only to fal's queue and storage origins, never logged, returned, or written
+(Settings shows only where it was found). Tests use a mock fal (`tools/mock-fal.mjs`, `WB_TEST=1` + `WB_FAL_BASE`);
+`WB_FAL_BASE` is ignored without `WB_TEST=1`.
 - New columns: one object in `js/columns.js`. New views: one module in `tabs/` plus one line in `tabs/registry.js`,
   as a sub-view under its page (`{ id, title, load, count?(store) }` in the page's `subs`) or, rarely, a new page
   (a module exports `{ mount(el, ctx), show?(ctx) }`; `ctx.store`, `ctx.timeline`, `ctx.goto(ms)`). At runtime:
@@ -400,6 +441,8 @@ small files are served in one read so no handle stays open.
   `media.json`, a character's base and iteration nodes, requests built on private photos list nothing private).
 - Paths with `..`, `.`, backslashes, NUL, `:` (NTFS streams) or `~<digit>` (8.3 short names) are rejected; dot-folders are never served; private files (by rule or
   `private: true` in `media.json`) live under `private/<kind>/` and are never exported or packaged.
+- The request runner runs only requests with a recorded director approval, re-checks the cap, records each cost
+  once, and keeps the fal key out of every response, file and log (README "Running approved requests").
 - Approvals are the director's, and by default **only the page approves**: a click in the page (POST `/api/save`) is
   stamped `via: "page"` (in a request's `log`, on an `approvals.json` item). The agent surface (`/api/op`, the MCP
   tools, offline mode) refuses `approve`, `shot_update` approved/locked and a request's draft -> approved even with

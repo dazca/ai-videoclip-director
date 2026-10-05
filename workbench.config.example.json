@@ -1,10 +1,11 @@
 {
- "_note": "Copy to workbench.config.json (gitignored) to change the defaults. Every key is optional; env vars win (WB_PROJECT, WORKBENCH_DATA, WORKBENCH_MEDIA_BASE).",
+ "_note": "Copy to workbench.config.json (gitignored) to change the defaults. Every key is optional; env vars win (WB_PROJECT, WORKBENCH_DATA, WORKBENCH_MEDIA_BASE, FAL_KEY). fal_key_file: the request runner's fal key (a file OUTSIDE the workbench and data folders, with FAL_KEY=... or the bare key); never put the key itself here.",
  "default_project": "demo",
  "data_dir": "data",
  "media_base": "..",
  "media_roots": ["my-renders/", "generated/clips/"],
  "private_media": "^(refs/real-photos/|faces/)",
  "allow_remote_ops": false,
- "agent_approvals": false
+ "agent_approvals": false,
+ "fal_key_file": "C:/Users/me/.secrets/fal.env"
 }

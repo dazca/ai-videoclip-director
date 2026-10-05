@@ -154,7 +154,7 @@ export class AssetWorkspace {
     const base = this.ent()?.base || { text: d.text, refs: d.refs }, est = A.estimate(T.gen.root, { type: e.kind });
     const r = await store.addRequest({ kind: T.req.root, target: `${e.kind}:${e.id}`, prompt: A.rootPrompt(e.kind, e, base), refs: base.refs.map(x => x.path), est_cost: est.usd,
       extra: { tool: est.tool, est_why: est.why, ...this.link(e, { id: e.id, tree: T.root, from: null, kind: T.gen.root, text: base.text || '', pins: [] }) } });
-    toast(`draft request ${r.id}: ${T.sheetWord} of ${e.name} · est ${usd(est.usd)} · approve it here, then the agent runs it`);
+    toast(`draft request ${r.id}: ${T.sheetWord} of ${e.name} · est ${usd(est.usd)} · approve it here, then Run it (Review › Queue) or let the agent run it`);
   }
   requestIdentity() { return this.requestRoot(); }
   approveReq(id) { return store.setRequest(id, { status: 'approved' }).then(() => toast(`request ${id} approved: the agent may run it now (MCP)`)); }
@@ -426,13 +426,13 @@ export class AssetWorkspace {
       const i = r.status === 'rejected' ? -1 : r.status === 'queued' ? 1 : STEPS.indexOf(r.status), nodes = it.nodes.filter(n => n.request === r.id);
       const steps = STEPS.map((s, k) => `<span class="chstep${k <= i ? ' done' : ''}${k === i ? ' cur' : ''}">${s}</span>`).join('<i>›</i>');
       const act = r.status === 'draft' ? `<button data-a="reqok" data-r="${esc(r.id)}" class="pri" title="approve: the agent may run it and spend up to the estimate (page only)">Approve ${usd(r.est_cost)}</button><button data-a="reqno" data-r="${esc(r.id)}">Reject</button>`
-        : ['approved', 'queued'].includes(r.status) ? '<span class="dim">waiting for the agent to run it (MCP)</span>' : r.status === 'running' ? '<span class="dim">running…</span>'
+        : ['approved', 'queued'].includes(r.status) ? '<span class="dim">approved: Run it in Review › Queue (or the agent: request_run)</span>' : r.status === 'running' ? '<span class="dim">running…</span>'
         : r.status === 'done' ? (nodes.length ? `<span>→ ${nodes.map(n => `<a data-node="${esc(n.id)}">${esc(n.id)}</a>`).join(' ')}</span>` : '<span class="dim">done · the agent registers the output</span>') : `<span class="dim">${esc(r.why || '')}</span>`;
       const vid = A.treeVariant(r.char.tree), vname = r.look?.name || r.variant?.name || vid;
       const warns = (r.warnings || []).length ? `<div class="chreqw">${r.warnings.map(w => `<span>⚠ ${esc(w)}</span>`).join('')}</div>` : '';
       return `<div class="chreq s-${esc(r.status)}${warns ? ' warn' : ''}" data-r="${esc(r.id)}"><b>${esc(r.kind)}</b><span class="dim">${esc(r.id)}${r.char.from ? ' · from ' + esc(r.char.from) : ''}</span><span class="chsteps">${r.status === 'rejected' ? '<span class="chstep cur rej">rejected</span>' : steps}</span><span class="chreqt" title="${esc(r.prompt)}">${esc(r.char.text || (vid && r.char.kind !== 'edit' ? `${T.vWord} sheet “${vname}” from ${r.char.from}` : r.prompt))}</span>${r.char.pins?.length ? `<span class="dim">${r.char.pins.length} pin${r.char.pins.length > 1 ? 's' : ''}</span>` : ''}${r.char.mask ? '<span class="dim">mask</span>' : ''}<span class="dim">${usd(r.est_cost)}${r.actual_cost_usd != null ? ' / ' + usd(r.actual_cost_usd) : ''}</span>${act}${warns}</div>`;
     });
-    return `<div class="chreqs"><div class="chsh">requests <span class="dim">request → approve (you) → the agent runs it → a new node</span></div>${rows.join('')}</div>`;
+    return `<div class="chreqs"><div class="chsh">requests <span class="dim">request → approve (you) → Run (Review › Queue, or the agent) → a new node</span></div>${rows.join('')}</div>`;
   }
   nodeWord(n) { return { identity: 'identity sheet', sheet: 'identity sheet', base: this.T.sheetWord, look: 'look sheet', variant: 'variant sheet' }[n.kind] || ''; }
   treeHtml(it, tree) {
