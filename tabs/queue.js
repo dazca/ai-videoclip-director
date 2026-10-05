@@ -35,6 +35,7 @@ import * as B from '../js/batches.js';
 import * as SB from '../js/storyboard.js';
 import { openWaves } from './waves.js';
 import { ui } from '../core/palette.js';
+import { renderActions } from '../core/renders.js';
 const CLS = { draft: '', approved: 's-approved', queued: 's-review', running: 's-review', done: 's-locked', failed: 's-changes', rejected: 's-changes', withdrawn: 's-archived' };
 // who wrote a request (lib/ops/requests.mjs requestAuthor): the page's own drafts are the director's; withdrawn = its author took it back
 const author = (r) => { const v = r.log?.[0]?.via; return v === 'page' ? 'director' : v === 'agent' ? 'agent' : r.by === 'director' ? 'director' : 'agent'; };
@@ -98,7 +99,7 @@ export default {
         <div class="qfrow qest"><span>est <b>$${Number(e?.usd || 0).toFixed(2)}</b> <span class="dim">${esc(e?.why || '')}</span></span><span class="sp"></span><button data-q="add" class="pri">Add draft request</button></div>`;
     };
     // the generator per kind (Settings > Generator; settings.json generators, default fal) and the runner's live progress
-    const genOf = (r) => (['draft', 'approved', 'failed'].includes(r.status) ? null : r.generator || r.handoff?.generator) || store.settings?.generators?.[genKindOf(r)] || 'fal';
+    const genOf = (r) => r.kind === 'render' ? 'local render' : (['draft', 'approved', 'failed'].includes(r.status) ? null : r.generator || r.handoff?.generator) || store.settings?.generators?.[genKindOf(r)] || 'fal';
     const sel = new Set();   // ticked draft rows (Approve / Reject selected)
     const money = (x) => `$${(Number(x) || 0).toFixed(2)}`;
     const privRef = (p) => isPrivatePath(p) || !!store.mediaByPath?.[p]?.private;
@@ -122,6 +123,7 @@ export default {
     const counted = (c) => c?.counted === true || ['recorded', 'counted'].includes(c?.status);
     const costLbl = (r) => { if (!B.isHistory(r)) return `${money(r.actual_cost_usd)} spent`; const c = r.history.cost || {}; return counted(c) ? `${money(c.usd ?? r.actual_cost_usd)} spent` : c.usd != null ? `${money(c.usd)} est. (not counted)` : 'cost unknown'; };
     const actions = (r) => {
+      if (r.kind === 'render') return renderActions(r);   // E4: Render… (a confirm), Cancel, Log, the sheets: core/renders.js
       const gen = genOf(r), runLbl = gen === 'openwith' ? 'Export prompt pack' : `Run · ${money(r.est_cost)}`;
       if (r.status === 'draft') return `<button data-x="approve" class="pri" title="approve: it may then run and spend up to its estimate">Approve</button>${author(r) === 'director' ? '<button data-x="withdraw" title="your own draft: take it back (not a rejection)">Withdraw</button>' : '<button data-x="reject">Reject</button>'}`;
       if (r.status === 'approved') return `${r.last_run?.status === 'refused' ? `<span class="qwhy" title="${esc(r.last_run.why)}">last run refused: ${esc(r.last_run.why.slice(0, 120))}</span>` : ''}<button data-x="run" class="pri run" title="run it now with ${esc(gen)} (Settings › Generator); the cap is checked again">${runLbl}</button><button data-x="unapprove" title="back to draft">Unapprove</button><button data-x="reject">Reject</button>`;
@@ -129,7 +131,7 @@ export default {
       if (r.status === 'running' && r.handoff) return `<span class="qprog">handed off: pack in <code>${esc(r.handoff.pack || '')}</code>; save the images in <code>${esc(r.handoff.results || '')}</code></span><button data-x="copy">Copy prompt</button><button data-x="run" class="pri">Collect results</button>`;
       if (r.status === 'failed') return `<span class="qwhy" title="${esc(r.why || '')}">✕ ${esc(String(r.why || 'failed').slice(0, 140))}</span><button data-x="run" class="pri" title="run again (outputs that exist are skipped; a submitted job is polled, not paid twice)">Retry · ${money(r.est_cost)}</button><button data-x="reject">Reject</button>`;
       if (r.status === 'done' && r.retaking) return `<span class="qprog">⟳ retake ${esc((r.retaking.takes || []).map(t => t + 1).join(', '))}: ${esc(progress(r))}</span>`;
-      if (r.status === 'done') { const L = r.linked, tf = r.takes_failed || [], per = (Number(r.est_cost) || 0) / Math.max(1, r.takes || 1); return `${tf.length ? `<button data-x="retake" class="pri" title="run only the failed take${tf.length > 1 ? 's' : ''} again (the done takes are kept and not paid again); within the approved estimate, the cap checked">Retry take ${tf.map(t => t + 1).join(', ')} · ${money(per * tf.length)}</button>` : ''}<span class="qdone">✓ ${costLbl(r)}${tf.length ? ` · take ${tf.map(t => t + 1).join(', ')} failed` : ''}${L ? ` · ${L.nodes?.length ? `node${L.nodes.length > 1 ? 's' : ''} ${esc(L.nodes.join(', '))}` : ''}${L.proposals?.length ? ` proposed ${esc(L.proposals.join(', '))}` : ''} in ${esc(L.id)} ${esc(L.tree || '')}: keep or pick` : ''}</span>${L ? '<button data-x="stage" title="keep or pick them in the stage">Open in stage</button>' : ''}`; }
+      if (r.status === 'done') { const L = r.linked, tf = r.takes_failed || [], per = (Number(r.est_cost) || 0) / Math.max(1, r.takes || 1); return `${tf.length ? `<button data-x="retake" class="pri" title="run only the failed take${tf.length > 1 ? 's' : ''} again (the done takes are kept and not paid again); within the approved estimate, the cap checked">Retry take ${tf.map(t => t + 1).join(', ')} · ${money(per * tf.length)}</button>` : ''}<span class="qdone">✓ ${costLbl(r)}${tf.length ? ` · take ${tf.map(t => t + 1).join(', ')} failed` : ''}${L ? ` · ${L.nodes?.length ? `node${L.nodes.length > 1 ? 's' : ''} ${esc(L.nodes.join(', '))}` : ''}${L.proposals?.length ? ` proposed ${esc(L.proposals.join(', '))}` : ''} in ${esc(L.id)} ${esc(L.tree || '')}: keep or pick` : ''}</span>${L ? '<button data-x="stage" title="keep or pick them in the stage">Open in stage</button>' : ''}${(r.outputs || []).length ? `<button data-rn="reqsheet" data-id="${esc(r.id)}" title="a contact sheet of its takes (ffmpeg, free)">Sheet</button>` : ''}`; }
       if (r.status === 'rejected') return `<button data-x="redraft">Back to draft</button>`;
       if (r.status === 'withdrawn') return `<span class="qwhy" title="${esc(r.why || '')}">withdrawn by ${author(r) === 'director' ? 'you' : 'the agent'}${r.superseded_by?.length ? ' · superseded by ' + esc(r.superseded_by.join(', ')) : ''}${r.why ? ': ' + esc(String(r.why).slice(0, 120)) : ''}</span><button data-x="redraft">Back to draft</button>`;
       return '';

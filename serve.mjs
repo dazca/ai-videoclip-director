@@ -162,7 +162,7 @@ fs.watch(DATA_ROOT, { recursive: true }, (_ev, name) => {
   if (!name) { clearTimeout(watchTimer.get('*')); watchTimer.set('*', setTimeout(() => notify('*', ['*']), 80)); return; }   // Windows drops names when its event buffer overflows
   const f = name.replace(/\\/g, '/');
   // (gen/: the runner's outputs, job.json and lock: the page follows requests.json and media.json instead; .history: the git mirror)
-  if (f.endsWith('.tmp') || f.endsWith('.lock') || f.includes('/.snapshots') || f.includes('/.history') || f.includes('/.uploads') || f.includes('/thumbs/') || /\/gen(\/|$)/.test(f)) return;
+  if (f.endsWith('.tmp') || f.endsWith('.lock') || f.includes('/.snapshots') || f.includes('/.history') || f.includes('/.uploads') || f.includes('/thumbs/') || /\/gen(\/|$)/.test(f) || /\/(renders|sheets)(\/|$)/.test(f) || f.includes('/.sheet-')) return;
   const i = f.indexOf('/'); if (i < 0) return;
   clearTimeout(watchTimer.get(f));
   watchTimer.set(f, setTimeout(() => notify(f.slice(0, i), [f.slice(i + 1)]), 80));
@@ -200,7 +200,7 @@ function pushUi(project, cmd) {
 
 // request bodies: 5 MB, except a sketch save (two base64 PNGs + the stroke JSON): 25 MB. Over the limit: 413 at once
 // (by Content-Length when sent, else while reading); the rest of the upload is discarded and the connection closed.
-const bodyLimit = (p) => p === '/api/op/sketch_save' || p === '/api/op/ref_upload' ? 25e6 : p === '/api/op/media_upload' ? 9e6 : 5e6;
+const bodyLimit = (p) => p === '/api/op/sketch_save' || p === '/api/op/ref_upload' ? 25e6 : p === '/api/op/media_upload' || p === '/api/op/song_upload' ? 9e6 : 5e6;
 function readBody(req, limit) {
   return new Promise((ok, bad) => {
     const too = () => new S.WbError(413, `body too big (${limit / 1e6} MB max)`);
@@ -497,6 +497,10 @@ http.createServer(async (req, res) => {
         // E10: accepting / editing the agent's interpretation of an intake answer or a note is the director's (page only)
         if (name === 'interpretation_act') body.via = fromPage ? 'page' : 'agent';
         if (name === 'events_act' || name === 'retime_apply' || name === 'retime_undo' || name === 'event_add' || name === 'retime_propose') body.via = fromPage ? 'page' : 'agent';
+        // E4: the render command and starting / cancelling a render are the director's (page only: the agent proposes); E8: who
+        // made a sheet / asked for a second opinion (provenance); E7: using a song version and uploading a song are the page's
+        if (name === 'render_config' || name === 'render_start' || name === 'render_cancel' || name === 'render_propose' || name === 'sheet_make' || name === 'sheet_ask') body.via = fromPage ? 'page' : 'agent';
+        if (name === 'song_version_use' || name === 'song_upload' || name === 'song_version_add') body.via = fromPage ? 'page' : 'agent';
         if (!fromPage) S.lockGate(project, name, body);   // a locked project refuses every agent write, proposals included
         delete body.import_ok;   // only a local script calling lib/store.mjs directly may import approved looks
         try { return json(res, 200, await S.ops[name](project, body)); }
@@ -546,7 +550,7 @@ http.createServer(async (req, res) => {
       // notes.json: the old note stores are migrated into it (v2) on its first read
       if (m[2] === 'notes.json' && fs.existsSync(path.join(pd, 'song.json'))) { try { S.notesDoc(m[1]); } catch (e) { /* a broken file is served as it is */ } }
       // a writable state file (or revisions.json / proposals.json / takes.json / checks.json, the server's) that does not exist yet reads as null (the page uses its default)
-      if ((S.WRITABLE.has(m[2]) || m[2] === 'revisions.json' || m[2] === 'proposals.json' || m[2] === 'takes.json' || m[2] === 'surfaces.json' || m[2] === 'checks.json' || m[2] === 'events.json') && !fs.existsSync(f)) return json(res, 200, null);
+      if ((S.WRITABLE.has(m[2]) || m[2] === 'revisions.json' || m[2] === 'proposals.json' || m[2] === 'takes.json' || m[2] === 'surfaces.json' || m[2] === 'checks.json' || m[2] === 'events.json' || m[2] === 'renders.json') && !fs.existsSync(f)) return json(res, 200, null);
       // a remote (LAN) client reads the project's JSON without private paths or items flagged private (media.json,
       // entities with private refs and iteration nodes, requests built on private photos)
       if (!isLocal(req) && /\.json$/i.test(f) && fs.existsSync(f)) {

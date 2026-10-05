@@ -18,7 +18,7 @@
     "test:mcp": "node mcp/test.mjs",
     "new-project": "node importers/new_project.mjs",
     "demo": "node tools/make_demo.mjs",
-    "test:security": "node tools/security-test.mjs && node tools/security-exporter.mjs && node tools/security-composition.mjs && node tools/security-worlds.mjs"
+    "test:security": "node tools/security-test.mjs && node tools/security-exporter.mjs && node tools/security-composition.mjs && node tools/security-worlds.mjs && node tools/security-renders.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.0",

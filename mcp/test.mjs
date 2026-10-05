@@ -1884,6 +1884,105 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
   check('E3 / E6 offline: chapters_update works on the files; a bad world is 400; the look\'s world without the page is 403', !oc.error && oc.chapters.find(c => c.id === 'c1')?.owner === 'offline' && /error 400/.test(ow.error || '') && offAct === 403, { oc: oc.error, ow: ow.error, offAct });
 }
 // ==================== 26. (E3 / E5 / E6) chapters, placeholder frames, looks per world: END ====================
+// ==================== 27. (E4 / E7 / E8) render jobs, song versions, contact sheets ====================
+// On its own project copy (mcp-renders): lib/ops/renders.mjs, lib/ops/songs.mjs, lib/contact.mjs. A render is a request of kind
+// "render": the agent proposes it (render_propose: a draft, never a command); the director sets the command (render_config) and
+// starts it (render_start): both page only (403 to the agent token, a claimed via "page", the runner, request_update and offline);
+// the job runs a fake render command (ffmpeg colour bars) and registers the MP4 + sheets. Sheets: sheet_make (never a path from the
+// caller: traversal refused), sheet_ask (a "review" note) answered by sheet_review. Song versions: song_version_add (a candidate)
+// and song_version_plan; using one is the page's (song_version_use).
+{
+  const RP = 'mcp-renders';
+  S.duplicateProject(PROJECT, RP, true);
+  const pageOp = (name, body = {}) => post(`/api/op/${name}?project=${RP}`, body, { origin: URL_ });
+  const AGENT_TOKEN = fs.readFileSync(path.join(DATA, '.wb-agent-token'), 'utf8').trim();
+  const agentOp = (name, body = {}) => fetch(`${URL_}/api/op/${name}?project=${RP}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-wb-agent-token': AGENT_TOKEN }, body: JSON.stringify(body) }).then(async r => ({ status: r.status, body: await r.json().catch(() => null) }));
+  const J = (f) => JSON.parse(fs.readFileSync(path.join(DATA, RP, f), 'utf8'));
+  const names = (await mcp.listTools()).tools.map(t => t.name);
+  check('E4 / E7 / E8 tools: renders_get, render_propose, sheet_make, sheets_get, sheet_review, song_versions_get, song_version_add, song_version_plan, suno_brief; NO tool sets the render command, starts / cancels a render, asks a second opinion or uses a song version',
+    ['renders_get', 'render_propose', 'sheet_make', 'sheets_get', 'sheet_review', 'song_versions_get', 'song_version_add', 'song_version_plan', 'suno_brief'].every(n => names.includes(n))
+    && !['render_config', 'render_start', 'render_cancel', 'sheet_ask', 'song_version_use', 'song_upload'].some(n => names.includes(n)));
+  // the agent proposes; a command it passes is never stored, request_create / request_update / the runner refuse a render
+  const MARK = path.join(DATA, RP, 'PWNED.txt');
+  const evil = ['node', '-e', `require('fs').writeFileSync(${JSON.stringify(MARK)}, 'x')`];
+  const pr = await call(mcp, 'render_propose', { project: RP, scope: 'excerpt', t0: 2000, t1: 10000, why: 'mcp test', command: evil });
+  const pr2 = await agentOp('render_propose', { scope: 'excerpt', t0: 1000, t1: 5000, command: evil, render: { command: evil }, extra: { command: evil } });
+  const rc = await call(mcp, 'request_create', { project: RP, kind: 'render', prompt: 'x', est_cost: 0, extra: { render: { scope: 'full', command: evil } } });
+  const rid = pr.request?.id;
+  const ru = await call(mcp, 'request_update', { project: RP, id: rid, status: 'running' });
+  const rr = await call(mcp, 'request_run', { project: RP, ids: [rid] });
+  const reqs = J('requests.json').items.filter(r => r.kind === 'render');
+  check('E4 render_propose: a DRAFT request of kind render ($0, the spec checked, an excerpt at most 20 s), never a command (MCP or HTTP); request_create kind render 400; request_update running 403; request_run refuses it',
+    pr.request?.status === 'draft' && pr.request.kind === 'render' && pr.request.est_cost === 0 && pr.request.render?.t1 === 10000 && pr2.status === 200
+    && !JSON.stringify(reqs).includes('PWNED') && !reqs.some(r => r.command || r.render?.command || r.extra) && /error 400/.test(rc.error || '') && /error 403/.test(ru.error || '')
+    && rr.refused?.some(x => x.id === rid && /render/.test(x.why)) && !(rr.started || []).length && /error 400/.test((await call(mcp, 'render_propose', { project: RP, scope: 'excerpt', t0: 0, t1: 25000 })).error || ''),
+    { pr: pr.error || pr.request?.status, pr2: pr2.status, rc: rc.error, ru: ru.error, rr: rr.refused });
+  // the command and the start are the director's
+  const FAKE = ['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'smptebars=size={width}x{height}:rate={fps}', '-t', '{duration}', '-pix_fmt', 'yuv420p', '{out}'];
+  const ac1 = await agentOp('render_config', { config: { command: evil } }), ac2 = await post(`/api/op/render_config?project=${RP}`, { config: { command: evil }, via: 'page' });
+  const as1 = await agentOp('render_start', { id: rid }), as2 = await post(`/api/op/render_start?project=${RP}`, { id: rid, via: 'page' }), sv = await agentOp('render_cancel', { id: rid });
+  const save = await post(`/api/save/renders.json?project=${RP}`, { base_rev: 0, data: { config: { command: evil } } });
+  const noCfg = await pageOp('render_start', { id: rid });
+  const pc = await pageOp('render_config', { config: { command: FAKE, min_free_mb: 64, ram_wait_s: 0, width: 320, height: 180 } });
+  const bad = await pageOp('render_config', { config: { command: ['ffmpeg', '{nope}'] } });
+  check('E4 the render command is the director\'s: render_config / render_start / render_cancel 403 to the agent token and to a claimed via "page"; renders.json is not a save (403); no command yet: 409; the page sets it (an unknown {placeholder}: 400)',
+    ac1.status === 403 && ac2.status === 403 && as1.status === 403 && as2.status === 403 && sv.status === 403 && save.status === 403 && noCfg.status === 409 && pc.status === 200 && bad.status === 400
+    && J('renders.json').config.command.join(' ') === FAKE.join(' ') && J('requests.json').items.find(r => r.id === rid).status === 'draft',
+    { ac1: ac1.status, ac2: ac2.status, as1: as1.status, as2: as2.status, save: save.status, noCfg: noCfg.status, pc: pc.status, bad: bad.status });
+  const st = await pageOp('render_start', { id: rid });
+  let done = null; for (let i = 0; i < 120 && !done; i++) { await wait(250); const g = await call(mcp, 'renders_get', { project: RP, id: rid }); const r = g.renders?.[0]; if (['done', 'failed'].includes(r?.status)) done = r; }
+  const media = J('media.json').items.filter(m => m.request === rid);
+  check('E4 the page starts it: the director\'s command runs (ffmpeg colour bars), the log, the MP4 + a contact sheet registered (kind render / sheet) linked to the request and the revision; $0; the agent\'s command never ran',
+    st.status === 200 && done?.status === 'done' && done.outputs.length >= 2 && fs.existsSync(path.join(DATA, RP, done.outputs[0])) && done.log_tail.some(l => /free RAM/.test(l)) && done.log_tail.some(l => /render: ffmpeg/.test(l))
+    && media.some(m => m.kind === 'render' && m.render === rid && m.revision === 'R0') && media.some(m => m.kind === 'sheet') && J('requests.json').items.find(r => r.id === rid).actual_cost_usd === 0 && !fs.existsSync(MARK),
+    { st: st.status, done: done?.status, why: done?.why, outs: done?.outputs, media: media.map(m => [m.kind, m.revision]) });
+  // sheets: storyboard / request / render; never a path from the caller
+  const s1 = await call(mcp, 'sheet_make', { project: RP, from: 'storyboard', title: '../../evil' }), s2 = await call(mcp, 'sheet_make', { project: RP, from: 'render', id: rid, every: 2 });
+  const trav = await Promise.all([{ from: 'render', id: '../../x' }, { from: 'request', id: '..\\..\\x' }, { from: 'render', id: 'r1/../../x' }].map(a => call(mcp, 'sheet_make', { project: RP, ...a })));
+  const trav2 = [await call(mcp, 'sheet_review', { project: RP, sheet: '../renders', verdict: 'ok' }), await call(mcp, 'sheets_get', { project: RP, sheet: '..' })];
+  const get = await fetch(`${URL_}/data/${RP}/sheets/%2e%2e/%2e%2e/.wb-agent-token`);
+  check('E8 sheet_make: storyboard (one tile per shot) and a render range, written under sheets/ with a generated id (a title is only a label); ids with "..", "\\" or "/" 400; sheet_review / sheets_get with a traversing id 400; /data/<p>/sheets/../ refused',
+    !s1.error && /^sheets\/sh[a-z0-9]+\.jpg$/.test(s1.file) && fs.existsSync(s1.abs) && s1.tiles >= 3 && !s2.error && s2.tiles >= 3 && trav.every(x => /error 400/.test(x.error || '')) && trav2.every(x => /error 400/.test(x.error || '')) && get.status >= 400,
+    { s1: s1.error || s1.file, s2: s2.error || s2.tiles, trav: trav.map(x => x.error?.slice(0, 30)), trav2: trav2.map(x => x.error?.slice(0, 30)), get: get.status });
+  const ask = await pageOp('sheet_ask', { sheet: s1.sheet });
+  const sg = await call(mcp, 'sheets_get', { project: RP, sheet: s1.sheet }), fr = sg.sheets?.[0]?.frames || [];
+  const rv = await call(mcp, 'sheet_review', { project: RP, sheet: s1.sheet, verdict: 'issues', items: [{ t: fr[1]?.t ?? 0, shot: fr[1]?.shot?.id, ok: false, note: 'mcp: the wall is too dark' }], note: 'mcp: one issue', status: 'approved', via: 'page' });
+  const okBad = await call(mcp, 'sheet_review', { project: RP, sheet: s1.sheet, verdict: 'ok', items: [{ ok: false, note: 'x' }] });
+  const n = J('notes.json').notes.find(x => x.id === ask.body?.note);
+  check('E8 second opinion: the page\'s ask is a note to the agent (ask "review", about the sheet); sheets_get gives each frame\'s scene / shot / lyric and the constants; sheet_review stores the review (via agent, never an approval) and absorbs the ask; "ok" with a failed item 400',
+    ask.status === 200 && n?.ask === 'review' && n.about === `sheet:${s1.sheet}` && n.status === 'absorbed' && fr.some(f => f.shot && f.scene) && sg.sheets[0].abs && !rv.error && rv.review.via === 'agent' && rv.absorbed.includes(n.id)
+    && /error 400/.test(okBad.error || '') && J('renders.json').sheets.find(s => s.id === s1.sheet).reviews.length === 1,
+    { ask: ask.status, n: n?.status, rv: rv.error || rv.review?.verdict, okBad: okBad.error });
+  // E7: the brief, a version, the plan; using it is the page's
+  const br = await call(mcp, 'suno_brief', { project: RP, style: 'warm electro-pop, 120 bpm, D major', exclude: 'rap', save: true });
+  const song0 = J('song.json'), take = path.join(TMP, 'mcp-take2.wav');
+  spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', `sine=frequency=330:duration=${(song0.duration_ms * 1.2 / 1000).toFixed(2)}`, take]);
+  const lrc = song0.lines.map(l => { const t = (l.t0 * 1.2 + 250) / 1000, m = Math.floor(t / 60); return `[${String(m).padStart(2, '0')}:${(t - m * 60).toFixed(2).padStart(5, '0')}] ${l.text}`; }).join('\n');
+  const add = await call(mcp, 'song_version_add', { project: RP, path: take, source: 'suno', lrc, suno: { title: 'take 2', link: 'javascript:alert(1)' } });
+  const plan = await call(mcp, 'song_version_plan', { project: RP, version: 'v2' });
+  const useA = await agentOp('song_version_use', { version: 'v2' }), useB = await post(`/api/op/song_version_use?project=${RP}`, { version: 'v2', via: 'page' });
+  const mid = J('song.json');
+  check('E7 suno_brief (style + lyrics with [section] tags, the gates, saved); song_version_add (a candidate: the song unchanged; LRC lines matched; a non-https link dropped); song_version_plan lists the boundaries that would move; song_version_use 403 to the agent and a claimed via "page"',
+    !br.error && br.ok && /^\[/.test(br.lyrics) && br.gates.every(g => g.ok) && J('settings.json').suno?.style === 'warm electro-pop, 120 bpm, D major'
+    && !add.error && add.version.id === 'v2' && add.version.alignment.method === 'lrc' && add.version.alignment.matched >= song0.lines.length - 1 && !add.version.suno?.link
+    && mid.duration_ms === song0.duration_ms && mid.current_version === 'v1' && !plan.error && plan.rows.length > 0 && !plan.problems.length && useA.status === 403 && useB.status === 403,
+    { br: br.error || br.counts, add: add.error || add.version?.alignment, plan: plan.error || plan.summary, useA: useA.status, useB: useB.status });
+  const use = await pageOp('song_version_use', { version: 'v2' }), after = J('song.json');
+  check('E7 the page uses v2: the song\'s length, audio and lyric timings follow the take (LRC), every scene / shot boundary moves in a new scenes and storyboard version',
+    use.status === 200 && after.current_version === 'v2' && Math.abs(after.duration_ms - song0.duration_ms * 1.2) < 60 && Math.abs(after.lines[0].t0 - (song0.lines[0].t0 * 1.2 + 250)) <= 12
+    && use.body.versions?.scenes?.length === 2 && use.body.versions?.storyboard?.length === 2,
+    { use: use.status, err: use.body?.error, dur: [song0.duration_ms, after.duration_ms], l0: [song0.lines[0].t0, after.lines[0].t0], v: use.body?.versions });
+  // offline (no server): the same page-only rules
+  const off = await connect({ WORKBENCH_URL: 'http://localhost:9' });
+  let o1 = null, o2 = null, o3 = null;
+  try { await S.ops.render_start(RP, { id: rid }); o1 = 'allowed'; } catch (e) { o1 = e.code; }
+  try { S.ops.render_config(RP, { config: { command: evil } }); o2 = 'allowed'; } catch (e) { o2 = e.code; }
+  try { await S.ops.song_version_use(RP, { version: 'v1' }); o3 = 'allowed'; } catch (e) { o3 = e.code; }
+  const oprop = await call(off, 'render_propose', { project: RP, scope: 'full' });
+  await off.close();
+  check('E4 / E7 offline: render_start, render_config and song_version_use without the page are 403; render_propose still writes a draft', o1 === 403 && o2 === 403 && o3 === 403 && oprop.request?.status === 'draft' && oprop.request.render?.scope === 'full', { o1, o2, o3, oprop: oprop.error || oprop.warnings });
+}
+// ==================== 27. (E4 / E7 / E8) render jobs, song versions, contact sheets: END ====================
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {
   // ---------------------------------------------------------------- clean up whatever happened

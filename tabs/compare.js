@@ -6,6 +6,7 @@
 // of the notes that caused it (absorbed_in + the agent's change summary). The data comes from POST /api/op/revision_compare
 // (the snapshots are not served to the page); restoring is POST /api/op/revision_restore (page only).
 import { store, esc, mediaUrl, postJSON } from '../js/store.js';
+import { compareSheetsHtml } from '../core/renders.js';
 
 const clock = (ms) => { const s = Math.max(0, ms || 0) / 1000, m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(1).padStart(4, '0')}`; };
 const usd = (x) => `$${(Number(x) || 0).toFixed(2)}`;
@@ -79,7 +80,7 @@ export default {
         + c.items.slice(0, 12).map(x => `<div class="cmprow"><span class="dim">${esc(x.id)}</span> ${usd(x.usd)} ${esc(x.tool || '')}${x.request ? ` <span class="dim">${esc(x.request)}</span>` : ''}${x.note ? ` <span class="dim">${esc(x.note)}</span>` : ''}</div>`).join('');
       const nt = !d.notes.length ? '' : `<h4>Notes absorbed <span class="dim">${d.notes.length}: what each one changed</span></h4>`
         + d.notes.map(n => `<div class="cmprow cmpnote" id="cmpn-${esc(n.id)}"><b class="sy">✓</b><b>${esc(n.id)}</b> <span class="dim">${esc(n.where)} · ${esc(n.absorbed_in)}</span> “${esc(n.text.length > 160 ? n.text.slice(0, 159) + '…' : n.text)}”${n.change ? ` → <i>${esc(n.change.summary)}</i>${n.change.file ? ` <span class="dim">${esc(n.change.file)}${n.change.version ? ' ' + esc(n.change.version) : ''}</span>` : ''}` : ''}</div>`).join('');
-      B.innerHTML = ly + timeline('script', 'Script', d) + timeline('storyboard', 'Storyboard', d) + bd + as + co + nt;
+      B.innerHTML = ly + timeline('script', 'Script', d) + timeline('storyboard', 'Storyboard', d) + bd + as + co + compareSheetsHtml(sel.a, sel.b) + nt;
     };
     const load = async () => {
       const my = ++seq; data = null; head(); body();
@@ -108,7 +109,7 @@ export default {
       const row = e.target.closest('[data-rid]');
       if (row) { auto = false; sel = { a: row.dataset.prev || 'now', b: row.dataset.rid }; if (sel.a === 'now') sel = { a: row.dataset.rid, b: 'now' }; list(); load(); }
     });
-    store.on((w) => { if (w === 'revisions' || w === 'all') render(); });
+    store.on((w) => { if (w === 'revisions' || w === 'all') render(); else if (w === 'renders' && data) body(); });
     this._render = render;
     render();
     this.api = { select: (a, b) => { sel = { a, b }; auto = false; list(); return load(); }, data: () => data, sel: () => ({ ...sel }) };

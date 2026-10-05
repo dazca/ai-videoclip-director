@@ -21,6 +21,7 @@ node tools/make_demo.mjs         # rebuild data/demo (synthetic, needs ffmpeg)
 node mcp/client.mjs <tool> '<json>' [--project <id>]   # call one MCP tool from any shell / folder (see "Calling a tool")
 node tools/run.mjs --project <id> <request ids> | --all [--dry-run]   # run APPROVED requests (see "Running approved requests")
 node exporters/composition-data.mjs --project <id> [--out composition/edl.json] [--map "gen/=assets/gen/"]   # the picks as edl.json (E9)
+node tools/contact.mjs <video> <out.jpg> [--every 2] | --seams 73.888,118.664 | --images a.png b.png <out.jpg>   # a contact sheet (E8; ffmpeg, free)
 ```
 
 **A stale server.** The server hashes its code at start (`serve.mjs`, `lib/`, `js/`, `tabs/`, `core/`, `app.js`). `/api/status`
@@ -60,6 +61,9 @@ win: `WB_PROJECT`, `WORKBENCH_DATA`, `WORKBENCH_MEDIA_BASE`, `FAL_KEY`.
 | `core/stagebar.js` | F8: ONE stage bar for every stage (`tabs/stage.js` renders it): fixed slots at the same x everywhere (`SLOTS`): name, status, Mark done / Reopen, Needs you, the primary act (`WB.stageActions[stage].primary {label, title, can, run}` when a stage offers one, Final: Lock for render…; else Save version / Send edit request = `stage.save`), Ask the agent… (`ASKS` per stage), Send round N (k) / Round N: Claude working / Close revision R<n> (the rail's commands), blockers + the agent's stage note, List / Time, ‹ prev / next › |
 | `core/dialog.js`, `core/connect.js` | a small modal (`openDialog`, `copyText`); F9 Help › Connect Claude… (the `claude mcp add` line for this checkout, the agent token's FILE path (never its value), the `mcp/client.mjs status` quick test, a copy button each, the state: pages open + the last agent write; from `GET /api/connect`, local only) and F10 Help › About (package.json `version` + the `git describe` commit, from `/api/status`) |
 | `js/interpret.js`, `lib/ops/interpret.mjs`, `mcp/tools/interpret.mjs`, `core/interp.js` | E10: the agent's interpretation next to the director's verbatim intake answers and notes: the shape and labels, the ops (`interpretation_set`, the page-only `interpretation_act`), the tool, and the block under an answer / a note (Script › Intake, every Notes column, the timeline notes column) with Accept / Edit |
+| `js/renders.js`, `lib/ops/renders.mjs`, `lib/contact.mjs`, `core/renders.js`, `mcp/tools/renders.mjs`, `tools/contact.mjs` | E4 render jobs and E8 contact sheets: the shared logic (renders.json, the config and its `{placeholders}`, `checkSpec` (excerpt ≤ 20 s / chapter / full), `orderGaps` (chapters before the full film), `seamsIn`, the revision of a sheet), the ops (`renders_get`, `render_propose`, the page-only `render_config` / `render_start` / `render_cancel`, `sheet_make`, `sheet_ask`, `sheets_get`, `sheet_review`; the job: RAM floor + wait, the warm-up, the director's command without a shell, the log, the MP4 + contact sheet + seams sheet registered and linked to the revision; one render at a time: `<data>/.render.lock`), ffmpeg sheets (labelled tiles, frame-exact seams), the page (Final › "Renders and sheets", Render… with its confirm, Render settings…, the sheet viewer with "Ask for a second opinion", Review › Queue's render rows and a done request's Sheet, Compare's sheets per revision), the tools and the CLI |
+| `js/songs.js`, `lib/ops/songs.mjs`, `core/songver.js`, `mcp/tools/songs.mjs` | E7 song versions and the Suno brief: the shared logic (`versionsOf` (v1 = the song as imported), the alignment of a new take (LRC lines matched by their words, measured line starts, offset + scale, or stretched), `timeMap`, `mapLines`, `songPlan` (the E1 re-time preview's rows for every scene / shot boundary and event), `sunoBrief` (style + lyrics with [section] tags, the Suno limits)), the ops (`song_versions_get`, `song_version_add`, `song_version_plan`, `suno_brief`; page only `song_version_use`, `song_upload`), the Lyrics stage's "versions…" (Preview with core/events.js `planTable`, Use = one undoable change) and "Suno brief…" dialogs, the tools |
+| `tools/verify-renders.mjs`, `tools/security-renders.mjs` | v27 of the UI suite (E4 / E7 / E8 in the page and over MCP, a fake ffmpeg render; screenshots `v27_*.png`) and their security regressions (page-only acts, a render never started by an agent, the command never an agent's, sheet paths not traversable, song files) |
 | `tools/verify-layout.mjs` | v26 of the UI suite (run by `npm run verify`, or alone): F7 the timeline fills the height at 1280 / 1600 and keeps every column on screen, the docked preview narrows the columns; F8 the same stage bar on every stage; F9 the Connect dialog (and its quick test, run as shown); F10 About; E10 interpretations over MCP and in the page; screenshots `v26_*.png` |
 | `js/events.js`, `js/eventscol.js`, `core/events.js`, `lib/ops/events.mjs`, `mcp/tools/events.mjs` | E1, named sync points: the shared logic (events.json v2 and the old array, kinds, `snapToEvent` (the nearest accepted event within 1 s), anchors (`anchorsOf`, `reanchor` for a draft, `settleAnchors` for a write: the anchor wins), `retimePlan` (anchored boundaries + the cuts that sit on them, old -> new, problems), `importList` (an audio events.json in seconds)), the timeline's events column (drag = measured), the page acts (the event dialog, + Named event here / at a word, Import events…, Re-time after the take… with its preview and one undo step, the Time view markers), the ops and the agent tools |
 | `core/timemode.js` | the stages' Time view (List | Time, Alt+T; ROADMAP_v4 F6): `TimeAxis` places a stage's rows on the timeline's warp (`WB.timeline.warp`, `tl.watch` for its relayouts and playhead), click-to-seek, scroll sync, "+ Add at m:ss" (`tmadd`); the timeline page stays laid out behind the others (`.pgwrap.bg`) so its warp stays true |
@@ -100,6 +104,8 @@ that owns them and imported by the others); ops call each other through `ops.<na
 | lyric gate (E2) | `surfaces.mjs` | `surfaces.mjs` | `surfaces_get` (read only: every lyric word covered or not, the uncovered runs, the surfaces per shot, the proposals), `surface_propose` (the agent's proposal: surfaces.json), `surface_act` (page only: accept / dismiss / reopen a proposal, add / remove a surface: shot.lyrics through a new storyboard version; no tool) |
 | named events (E1) | `events.mjs` | `events.mjs` | `events_get` (read only: the events, the boundaries anchored to each, the pending re-time plan, the records), `event_add` (an agent's event: proposed), `retime_propose` (an agent's re-time: a proposed record + its plan; nothing moves); `events_act`, `retime_apply`, `retime_undo` page only (no tool) |
 | interpretations (E10) | `interpret.mjs` | `interpret.mjs` | `interpretation_set` (the agent's reading of an intake answer (`key`) or a note (`note`): via agent, status proposed; an edited one is the director's: 409), `interpretation_act` (page only: accept / edit; no tool) |
+| render jobs, contact sheets (E4 / E8) | `renders.mjs` | `renders.mjs` | `renders_get` (read only: the director's render settings, the machine lock and free RAM, the render jobs with their phase and log, the order, the sheets), `render_propose` (a draft request of kind `render`, never a command), `sheet_make`, `sheets_get` (read only: each frame's scene / shot / lyric, the constants on screen), `sheet_review` (the agent's second opinion: renders.json only), `sheet_ask` (the director's ask: no tool); `render_config` / `render_start` / `render_cancel` page only (no tool) |
+| song versions, Suno brief (E7) | `songs.mjs` | `songs.mjs` | `song_versions_get`, `song_version_add` (a candidate take: nothing moves), `song_version_plan` (read only: what would move), `suno_brief` (the paste text; `save` stores the style); `song_version_use` / `song_upload` page only (no tool) |
 | rounds, revisions | `rounds.mjs` | `rounds.mjs` | review rounds (`round_get`, `round_absorb`, `round_reply`, `round_finish`; `round_send` is page only: no tool) and revisions R<n> (`revisions_get`, `revision_compare`; `revision_close` / `revision_restore` are page only: no tool), the opt-in git mirror |
 
 A new domain: a `lib/ops/<domain>.mjs` imported (or re-exported) by `lib/store.mjs`, and a `mcp/tools/<domain>.mjs`
@@ -273,6 +279,21 @@ relative to the media base; any other path is relative to the project folder. Fu
   `job`) or a request targeting `shot:<id>` (`request` / `job`). Logic: `js/takes.js`, `lib/ops/takes.mjs`.
 - `surfaces.json` (the server's only; the page reads it): the agent's lyric-surface proposals (E2), `{v: 1, rev, proposals[{id "sp03", shot,
   line, w?, where, why, by, via: "agent", at, status: open|accepted|dismissed, decided_at?, decided_by?}]}`. Logic: `js/surfaces.js`.
+- `renders.json` (the server's only; the page reads it; E4 / E8): `{v: 1, rev, config: {command: [argv with {placeholders}], cwd, warm?, min_free_mb,
+  ram_wait_s, ram_tries, abort_below_mb, workers, width, height, fps, excerpt_max_s, sheet_every_s, timeout_min, by: "director", via: "page", at} | null,
+  sheets[{id, kind: contact | seams, from: render | request | storyboard, source, file, media, t0?, t1?, frames[{t, label, shot?}], seams?, revision, by, via,
+  at, asks[note ids], reviews[{id "sr01", verdict: ok | issues | fail, items[{t?, shot?, constant?, ok, note}], note, by, via: "agent", at}]}]}`. A render
+  job is a request of kind `render` in requests.json: `render {scope: excerpt | chapter | full, t0, t1, chapter?, why?}` (est_cost 0), the run in
+  `render_run {phase: waiting_ram | warming | rendering | sheets | done | failed | cancelled, started, ended?, ram {start_mb, min_mb, samples}, log,
+  out?, media?, sheets[], revision}`; its files `renders/<id>/<id>.mp4` (media kind `render`), `<id>-sheet.jpg` / `<id>-seams.jpg` (kind `sheet`,
+  each media entry carries `render`, `sheet`, `revision`) and `render.log`, always named from the id. Other sheets: `sheets/<id>.jpg`
+  (`private/sheets/` when a source is private). `<data folder>/.render.lock` = the render running on this machine (pid, heartbeat). Logic: `js/renders.js`.
+- `song.json` (E7) may carry `versions[{id "v2", label, source: suno | upload | import | other, audio, duration_ms, bpm, beats_per_bar, offset_ms,
+  style?, exclude?, lyrics_prompt?, suno?{title, model, link (https only)}, lines[{id, t0, t1}] (the lyric timings in that take), alignment{method:
+  lrc | lines | offset | stretch | current, matched, total, offset_ms?, scale?}, by, via, at}]` and `current_version` (v1 = the song as imported, made
+  when the first take is added). Uploaded takes live in `audio/versions/`. Using a version rewrites the song (audio, length, grid, sections, line
+  timings), maps every scene / shot boundary and event through the same time map (a new scenes and storyboard version; events get
+  `retimed[{from, to, song}]`) and rebuilds the waveform. `settings.json` `suno {style, exclude, title}`: the brief's saved texts. Logic: `js/songs.js`.
 - `proposals.json` (the server's only; the page reads it) + `proposals/<set>-<item>.svg`: proposals, `{v: 1, rev,
   sets[{id "ps03", target{stage, kind, id}, round, by, via, source: agent|local, created, answers?[note ids], items[{id "a",
   title, why, svg?: "proposals/ps03-a.svg" (sanitised) | text?, status: open|picked|mixed|dismissed, note? (a mix), at?, by?,
@@ -498,6 +519,26 @@ of t). The first film's `xp/world.js` is NOT changed: its adoption is a proposal
    yours (via agent, status proposed), shown under the verbatim words. The director accepts or edits it in the page
    (`interpretation_act`: no tool, 403); an edited one is their words (409 to you: reply in a note). Act on the accepted / edited
    reading; ask when one is still "proposed" and it matters.
+4k. **Renders, contact sheets, second opinions** (E4 / E8; PRODUCTION.md's etiquette). A render is local and costs $0, but it is heavy:
+   propose it with `render_propose {scope: excerpt (t0, t1; at most 20 s) | chapter (an id) | full, why}` (a draft request of kind `render`)
+   and tell the director what it is for; only they start it (Render… in Final › "Renders and sheets" or Review › Queue, after a confirm), with
+   THEIR command (Render settings…: an argv list with `{out}`, `{from}`, `{to}`, `{duration}`, `{chapter_file}`, `{width}`, … ; no shell). You
+   never give a command and never start, cancel or approve a render (`render_config` / `render_start` / `render_cancel`: no tool, 403;
+   `request_create` kind render 400; `request_update` / `request_run` refuse it). The job renders one at a time on the machine, waits for
+   free RAM above the floor (else fails with why), runs the warm-up first, renders chapters before the full film (409 until each chapter
+   has a done render, unless the director overrides), logs (`renders_get {id}`), and registers the MP4, a contact sheet (a frame every N s)
+   and a seams sheet (around each chapter start inside the range) linked to the request and the revision. Contact sheets of a render's range,
+   a request's takes or the storyboard: `sheet_make` (free; returns the absolute file: look at it). A second opinion: the director asks
+   ("Ask for a second opinion": a note to you, ask `review`, about `sheet:<id>`); `sheets_get {sheet}` gives each frame's song time, scene,
+   shot, cast and lyric and the constants of the characters on screen; answer with `sheet_review {sheet, verdict: ok | issues | fail, items:
+   [{t, shot, constant, ok, note}], note}` (it absorbs the ask; never an approval). Sheets show in Final, the Queue and Review › Compare.
+4l. **Song versions and Suno** (E7). Nothing calls Suno. `suno_brief {style, exclude, title, save}` builds the paste: STYLE (≤ 1000
+   characters), EXCLUDE, TITLE and the Lyrics stage's lines with their [section] tags (a tag without lines is a cue: `[Stop - …]`; ≤ 5000).
+   The director pastes it, picks a take and uploads it (Lyrics › versions…), or you register a file they downloaded: `song_version_add {path,
+   source: suno, style, lyrics_prompt, lrc | lines | offset_ms + scale}` (how its lyrics line up: an LRC is matched by the words; else
+   measured line starts; else an offset; default stretched to its length). It is a candidate: nothing moves. `song_version_plan {version}`
+   shows what would move (lyric lines, every scene / shot boundary and event, problems). Using a version is the director's (Preview, then
+   Use: one undoable change; `song_version_use`: no tool, 403). After it, measure the stops in the new take and propose a re-time (E1).
 5. **Snapshot before big edits** (`snapshot_save`); a restore snapshots the current state first, so it is undoable.
 6. Register every new file (`media_add`, or automatically on `request_update` done) so it shows up in the page.
 
@@ -522,7 +563,7 @@ of t). The first film's `xp/world.js` is NOT changed: its adoption is a proposal
   private refs", and the ops `take_act`, `surface_act`, `media_use`, `media_upload`, `batch_act`, `jobbooks_import`, `asset_act` /
   `character_act` (base / import accept, approvals, constants), `ref_upload`, `breakdown_promote`, `round_send`,
   `revision_close`, `revision_restore`, `final_lock` / `final_unlock`, `proposal_act`, `events_act`, `retime_apply` /
-  `retime_undo`, `interpretation_act`. An agent gets 403 on each
+  `retime_undo`, `interpretation_act`, `render_config`, `render_start`, `render_cancel`, `song_version_use`, `song_upload`. An agent gets 403 on each
   ("agents use the MCP tools"), whatever `via` its body claims; an agent's save is stamped `by: "agent", via:
   "agent"`, and `/api/restore` without the page is an agent's restore. Every `/api` write answers `x-wb-client: page |
   agent`. Offline mode is unchanged: the MCP server's file ops run with `via` absent (an agent) and never approve.
@@ -770,6 +811,22 @@ of t). The first film's `xp/world.js` is NOT changed: its adoption is a proposal
   `.`, a drive, a backslash or a leading slash (400). A private take (the PRIVATE rule, the `private_media` regex, or
   `private: true` in media.json) is never written: the shot exports as a placeholder `private` without its file or media id;
   a private alternative is dropped (tools/security-composition.mjs). No approval, pick or project file is touched.
+- Renders, sheets, song versions (E4 / E7 / E8; `lib/ops/renders.mjs`, `lib/ops/songs.mjs`, tools/security-renders.mjs): `render_config`,
+  `render_start`, `render_cancel`, `song_version_use` and `song_upload` are page only (S9; no MCP tool; 403 to the page token alone, the agent
+  token, the Origin or Sec-Fetch-Site alone, cross-site, a forged Origin with the agent token, a claimed via "page" and offline). A render is
+  never started by an agent: `request_create` kind render is 400, `request_update` of a render 403 (but its author's withdraw), the runner
+  (`request_run`, `tools/run.mjs`) refuses kind render before anything. The command is read only from renders.json `config` (the director's,
+  set by `render_config`; renders.json is not a save: 403): `render_propose` and `render_start` ignore any command in their body or in the
+  request (an agent's forged `render.command` never runs); argv is spawned without a shell, a `{placeholder}` that is not known is 400 and a
+  value fills one argument. A job's files are named from its request id (`renders/<id>/…`; a stored `render_run.log` / `out` is never used as a
+  path). One render at a time per data folder (`.render.lock`, a dot-file: never served; a dead or silent holder is taken over). Sheets:
+  `sheet_make` takes ids only (`^[A-Za-z0-9_-]{1,64}$` for a request / render, `from` from a list; the sheet id is generated, the file is always
+  `sheets/<id>.jpg` or `private/sheets/<id>.jpg` when a source is private (flagged private in media.json); a title is only a label);
+  `sheet_review` / `sheets_get` / `sheet_ask` take a sheet id `^[a-z0-9][a-z0-9_-]{0,63}$` (400). `sheet_review` writes renders.json only (and
+  absorbs the ask), stored `via: "agent"`, never an approval. `song_version_add` takes an audio file (by its name, and ffprobe must read a
+  duration: 415), never a PRIVATE path or one with `..` (400); a file elsewhere on the machine is copied into `audio/versions/`; `song_upload`
+  sniffs the first chunk as audio (MP3 / WAV / FLAC / OGG / M4A, else 415). While the project is locked for render the agent's `render_propose`
+  is 409; `sheet_make`, `sheet_review` and `song_version_plan` still work. Whys, titles and review notes render escaped (Final, the viewer).
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.
 
@@ -843,6 +900,13 @@ initial project. Tools:
 | `chapters_update` | E3: the chapters (full list, or upsert / remove): scenes, owner, file; returns each with its DERIVED status (planned / generating / built / approved), picked / approved / placeholders; a status sent is ignored |
 | `look_world_propose` | E6: propose the world an existing look is for (world_proposal; the director accepts in the page); a new look takes `look_create world` |
 | `take_propose` | propose a take for a shot with in / out (ms or m:ss.mmm inside the take) and why: an open proposal in takes.json the director picks with one click (never a pick) |
+| `renders_get` | E4 / E8, read only: the director's render settings (command, folder, warm-up, RAM floor, workers, size), the machine (free RAM, the render lock), the render jobs (scope, t0 / t1, status, phase, outputs, the log tail), the order (chapters not rendered yet), the sheets with their review and open asks |
+| `render_propose` | E4: a render job as a DRAFT request of kind render (scope excerpt (≤ 20 s) / chapter / full, why); never a command; the director starts it in the page |
+| `sheet_make` | E8: a contact sheet (ffmpeg, free) of a done render's range (`every` s), a request's takes or the storyboard; sheets/<generated id>.jpg, registered; returns the absolute file |
+| `sheets_get` | E8, read only: the sheets with absolute files and, per frame, its song time, scene, shot (cast), lyric line, the constants of the characters on screen, reviews, open asks |
+| `sheet_review` | E8: your second opinion on a sheet (verdict ok / issues / fail, items {t, shot, constant, ok, note}, note): renders.json only; absorbs the director's ask |
+| `song_versions_get`, `song_version_add`, `song_version_plan` | E7: the takes of the song (v1, v2…: source, audio, length, alignment, style / lyrics used); add a take (a candidate; LRC / lines / offset / stretch); what using one would move |
+| `suno_brief` | E7: the text to paste into Suno (style, exclude, title + the lyrics with [section] tags; counts and gates); `save` stores the style; nothing calls Suno |
 | `final_get` | stage 7, read only: `ready`, `locked`, `failing`, the checklist (10 derived checks with their gaps, `lyrics` = the lyric gate), `pending` rows by group (lyrics, script, breakdown, characters, scenery, storyboard, requests: status, why, est / spent, notes open, approvable), `counts`, `costs` (spent / committed / drafts / to request / projected vs the cap); filters group / status / notes |
 | `approvals_get`, `request_changes` | approval states (approving is the director's, in the page: no tool) |
 | `requests_list`, `request_create`, `request_update` | the generation queue and its lifecycle (`asset` links a stage-4 / 5 generation to an asset tree; `char` is deprecated: a warning, stored as `asset`); `recipe` builds the prompt from the photoreal blocks; `video {model, start, end?, ref_video?, seconds}` makes a video request (refs, tool, est_cost from it); `warnings[]` |
@@ -959,7 +1023,7 @@ listed in `GENERATORS` (`lib/run.mjs`). Tests never call fal: `tools/mock-fal.mj
   pick does there (one undo step with the recorded pick); add the stage / kind to `js/proposals.js` `TARGETS`.
 - **A page-only act** (the director's decision): an op in its `lib/ops/<domain>.mjs` that fails unless `via === 'page'`, and one
   line in `serve.mjs` setting `body.via` from the request's Origin (see `breakdown_promote`, `character_act`,
-  `asset_act`, `ref_upload`, `round_send`, `proposal_act`, `final_lock`, `take_act`, `surface_act`, `media_upload`, `media_use`, `batch_act`, `jobbooks_import`, `events_act`, `retime_apply`, `retime_undo`, `interpretation_act`); no MCP tool; a security check that the agent surface gets 403.
+  `asset_act`, `ref_upload`, `round_send`, `proposal_act`, `final_lock`, `take_act`, `surface_act`, `media_upload`, `media_use`, `batch_act`, `jobbooks_import`, `events_act`, `retime_apply`, `retime_undo`, `interpretation_act`, `render_config`, `render_start`, `render_cancel`, `song_version_use`, `song_upload`); no MCP tool; a security check that the agent surface gets 403.
 - **An agent op / MCP tool**: a function in the `Object.assign(ops, {...})` of its `lib/ops/<domain>.mjs` (it is then
   also `POST /api/op/<name>`; see "Where to add an op or a tool"), and a `mcp.registerTool` in `mcp/tools/<domain>.mjs`
   with a zod schema and a description an agent can follow; cover it in `mcp/test.mjs`.

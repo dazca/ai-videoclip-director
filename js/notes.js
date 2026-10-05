@@ -36,7 +36,7 @@ export const KINDS = {
   timeline: ['time'],
 };
 export const STATUSES = ['open', 'absorbed', 'dismissed'];
-export const ASKS = ['request', 'fill_gaps', 'extract', 'storyboard', 'round', 'proposals', 'check'];
+export const ASKS = ['request', 'fill_gaps', 'extract', 'storyboard', 'round', 'proposals', 'check', 'review'];
 export const PREFIX = { lyrics: 'ln', script: 'sn', breakdown: 'bn', characters: 'cn', scenery: 'an', storyboard: 'sbn', final: 'fn', timeline: 'n' };
 export const STAGE_TITLE = { lyrics: 'Lyrics', script: 'Script', breakdown: 'Breakdown', characters: 'Characters', scenery: 'Scenery', storyboard: 'Storyboard', final: 'Final', timeline: 'Timeline' };
 export const TEXT_MAX = 8000;

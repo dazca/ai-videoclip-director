@@ -17,6 +17,7 @@ import './core/partb.js';
 import './core/importmedia.js';   // File › Import media…, drop files on the page, "Use as…" (D8)
 import './core/compexport.js';    // File › Export composition data… (E9: edl.json for the HyperFrames composition)
 import './core/events.js';        // E1: named events (+ Named event here, the event dialog, Re-time after the take…, Import events…)
+import './core/renders.js';       // E4 / E8: render jobs (Render… with a confirm, settings), contact sheets, second opinions
 import { mountRail } from './core/rail.js';
 import { wizard } from './core/wizard.js';
 import { watchCode } from './core/stale.js';

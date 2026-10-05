@@ -104,9 +104,12 @@ export function plan(moves) {
   const m = moves || E.pendingEvents(store.eventsDoc).map(e => ({ event: e.id, to: e.measured }));
   return E.retimePlan({ moves: m, events: store.events, ...ctx() });
 }
-const planTable = (p) => p.rows.length
-  ? `<table class="rtrows"><tr><th>boundary</th><th>old</th><th></th><th>new</th><th>why</th></tr>${p.rows.map(r => `<tr data-row="${esc(`${r.kind}:${r.id}:${r.edge}`)}"><td>${r.kind} <b>${esc(r.id)}</b>.${r.edge === 't0' ? 'start' : 'end'}</td><td class="old">${fmt(r.from, true)}</td><td>→</td><td class="new">${fmt(r.to, true)}</td><td class="why">${r.why === 'anchored' ? '⚓ anchored to' : 'shares the cut of'} ${esc(r.event)}</td></tr>`).join('')}</table>`
-  : '<div class="dim">no scene or shot boundary is anchored to these events (anchor them in the script / storyboard: snap "events")</div>';
+// the preview table of a plan (also E7's song versions: core/songver.js, rows with why "song" and kind "event")
+export const planTable = (p, empty = '<div class="dim">no scene or shot boundary is anchored to these events (anchor them in the script / storyboard: snap "events")</div>') => p.rows.length
+  ? `<table class="rtrows"><tr><th>boundary</th><th>old</th><th></th><th>new</th><th>why</th></tr>${p.rows.map(r => `<tr data-row="${esc(`${r.kind}:${r.id}:${r.edge}`)}"><td>${r.kind} <b>${esc(r.id)}</b>${r.edge === 't' ? '' : '.' + (r.edge === 't0' ? 'start' : 'end')}</td><td class="old">${fmt(r.from, true)}</td><td>→</td><td class="new">${fmt(r.to, true)}</td><td class="why">${r.why === 'song' ? 'follows the song' : r.why === 'anchored' ? '⚓ anchored to' : 'shares the cut of'} ${esc(r.event)}</td></tr>`).join('')}</table>`
+  : empty;
+export const evDialog = (...a) => dialog(...a);
+export const evCss = () => css();
 export function openRetime() {
   css(); rtEl?.remove();
   const D = store.eventsDoc, pend = E.pendingEvents(D), props = D.retimes.filter(r => r.status === 'proposed'), last = [...D.retimes].reverse().find(r => r.status === 'applied');

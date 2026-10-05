@@ -128,8 +128,8 @@ export function finalView(I) {
       act: { approve: { kind: 'approvals', key: 'use:' + u.id }, changes: { kind: 'approvals', key: 'use:' + u.id } } });
   }
 
-  // 7. draft requests
-  for (const r of reqs.filter(x => x.status === 'draft')) {
+  // 7. draft requests (a render job is not approved: the director starts it with Render…, E4: Final › Renders and sheets)
+  for (const r of reqs.filter(x => x.status === 'draft' && x.kind !== 'render')) {
     const l = A.linkOf(r), shotId = /^shot:/.test(r.target || '') ? r.target.slice(5) : null, sh = shotId ? shots.find(s => s.id === shotId) : null;
     const stage = l ? A.TYPE[l.type || 'character']?.stage : null;
     const targets = l ? [{ stage, kind: 'tree', id: `${l.id}/${l.tree || A.rootTree(l.type || 'character')}` }] : sh ? [{ stage: 'final', kind: 'shot', id: sh.id }] : [{ stage: 'final', kind: 'stage', id: null }];

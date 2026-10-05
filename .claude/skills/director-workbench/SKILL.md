@@ -278,6 +278,16 @@ moves nothing. Tell the director, `ui_focus` the timeline; they apply it in the 
 take…: one undoable change, a new scenes and storyboard version). Accepting events and applying / undoing a re-time are
 theirs (403 to you).
 
+## Renders, contact sheets, song takes (E4 / E7 / E8)
+
+A render is local ($0) but heavy: `render_propose {scope: excerpt (≤ 20 s) | chapter | full, why}` makes a draft; the director
+starts it in the page with THEIR command (one at a time, enough free RAM, chapters before the full film). Never give a command or
+start one. Look with contact sheets: `sheet_make {from: render | request | storyboard}` returns the file; when the director asks for
+a second opinion (a note, ask `review`), `sheets_get {sheet}` then `sheet_review {sheet, verdict, items, note}` against the script and
+the constants. Song takes: `suno_brief` (style + lyrics with [section] tags, within Suno's limits) for the director to paste (nothing
+calls Suno); register a take they bring back with `song_version_add` (an LRC if you have one) and show `song_version_plan`; using it
+is theirs (Lyrics › versions…), then re-time the events to the new take (E1).
+
 ## Never
 
 - Never call a paid API (image, video, voice, music) without an APPROVED request whose `est_cost` fits the cap.

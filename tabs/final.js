@@ -13,6 +13,7 @@ import { fmt } from '../js/timeline.js';
 import { NotesColumn } from '../core/notescol.js';
 import * as FN from '../js/final.js';
 import { isTime } from '../core/timemode.js';
+import { mountRenders } from '../core/renders.js';
 
 const WB = () => window.WB;
 const nowIso = () => new Date().toISOString().slice(0, 19);
@@ -27,8 +28,10 @@ export class FinalList {
     this.sel = new Set(); this.chg = null; this.confirm = null; this.ledger = null; this.view = null;
     this.f = { group: prefs.get(this.pf + 'Group', ''), st: prefs.get(this.pf + 'St', ''), notes: prefs.get(this.pf + 'Notes', false) };
     el.classList.add('fnws');
-    el.innerHTML = `<div class="lybar fnbar"></div><div class="fnlockbar" hidden></div><div class="fnconf" hidden></div>${panels ? '<div class="fntop"></div>' : ''}<div class="fnlist" tabindex="-1"></div>`;
+    el.innerHTML = `<div class="lybar fnbar"></div><div class="fnlockbar" hidden></div><div class="fnconf" hidden></div>${panels ? '<div class="fntop"></div><div class="fnrend"></div>' : ''}<div class="fnlist" tabindex="-1"></div>`;
     this.$ = (s) => el.querySelector(s);
+    // E4 / E8: the render jobs, the director's Render… (with a confirm), the contact sheets and their second opinions (core/renders.js)
+    if (panels) mountRenders(this.$('.fnrend'));
     if (notes) this.nc = new NotesColumn({ stage, scroller: this.$('.fnlist'), allStages: true,
       top: { label: 'notes on the final cut', targets: [{ stage: 'final', kind: 'stage', id: null }] },
       scope: (n) => n.target.stage === 'final' || this.tkeys?.has(keyOf(n.target)),

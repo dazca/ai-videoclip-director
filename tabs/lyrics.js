@@ -19,6 +19,8 @@ import { stripHtml, register as registerProposals, offerPrepare } from '../core/
 import { TimeAxis } from '../core/timemode.js';
 import { upperBound } from '../js/warp.js';
 import { coverage } from '../js/surfaces.js';
+import { versionsOf, currentVersionId } from '../js/songs.js';
+import { openVersions, openBrief } from '../core/songver.js';
 
 const WB = () => window.WB;
 const visible = () => WB()?.app?.active() === 'stage' && WB().stages?.current() === 'lyrics';
@@ -181,9 +183,11 @@ class Workspace {
   }
   renderSong() {
     const s = store.song, has = !!s?.audio?.mix, n = s?.lines?.length || 0;
+    // E7: the takes of the song (v1, v2…) and the Suno brief (core/songver.js)
+    const nv = versionsOf(s).length, sv = ` · <a data-a="songvers" title="the takes of the song: add a Suno take, preview what moves, use it">${esc(currentVersionId(s))}${nv > 1 ? ` of ${nv}` : ''} · versions…</a> · <a data-a="suno" title="style + lyrics with section tags, to paste into Suno">Suno brief…</a>`;
     this.$('.lysong').innerHTML = has
-      ? `song <b>${esc(s.audio.mix.split('/').pop())}</b> · ${fmt(s.duration_ms)} · ${s.bpm} bpm · timing ${esc(s.timing || 'imported')}${n ? '' : ' · no lines yet'} <a data-a="song" title="replace the song file">replace…</a>`
-      : `<b>no song file yet</b> · timings are estimated over a ${fmt(s?.duration_ms || 0)} placeholder; add the song when you have it (lines keep their order, timings are re-estimated over the real song) <a data-a="song">Add song…</a>`;
+      ? `song <b>${esc(s.audio.mix.split('/').pop())}</b> · ${fmt(s.duration_ms)} · ${s.bpm} bpm · timing ${esc(s.timing || 'imported')}${n ? '' : ' · no lines yet'} <a data-a="song" title="replace the song file">replace…</a>${sv}`
+      : `<b>no song file yet</b> · timings are estimated over a ${fmt(s?.duration_ms || 0)} placeholder; add the song when you have it (lines keep their order, timings are re-estimated over the real song) <a data-a="song">Add song…</a> · <a data-a="suno" title="style + lyrics with section tags, to paste into Suno">Suno brief…</a>`;
     this.$('.lysong').classList.toggle('nosong', !has);
   }
   renderPoem() {
@@ -335,6 +339,8 @@ not on screen: ${un.join(' ')}` : ''}
       if (act === 'restore') return this.restore(t.closest('[data-v]').dataset.v);
       if (act === 'ab') { this.compare = { ...this.ab }; this.textMode = false; return this.render(); }
       if (act === 'song') return this.songDialog();
+      if (act === 'songvers') return openVersions();
+      if (act === 'suno') return openBrief();
       if (act === 'paste') { const v = this.$('.lypaste').value; if (!v.trim()) return; this.draft = F.assignIds(F.parseText(v), null, this.doc).sections; this.saveDraft(); return this.save('first draft'); }
       if (act === 'versions') return this.setSide(this.side === 'versions' ? null : 'versions');
       if (act === 'closeside') return this.setSide(null);
