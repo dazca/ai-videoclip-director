@@ -630,3 +630,6 @@ Rules for the loop:
 - In progress: B9–B10 (proposals), C1–C3 (final approvals).
 - Next: review pass (spec + security), D3b (video), D6 (take selection), D8 (import media UI), D4 (waves / pilot gates), time-aligned stage toggle, G (hosted mode, on Dani's go).
 - 2026-10-05: done: the time-aligned stage toggle (F6, provisional): List | Time per stage (Alt+T), rows on the timeline's warp (verify v19).
+- 2026-10-05 (later): done: B9–B11 (proposals), C1–C4 (final approvals, lock), D2 (constants editor), D3b + D3c (video, retake, batch cap, stale locks), D4 (batches, waves, job-book import), D6 (take selection), D7 (identity checks, agent path), D8 (import media), S8 (agent_approvals removed), time-aligned stage toggle, review #1 fixes.
+- In progress: review #2 fixes (S9 page vs agent tokens, private-ref normalisation, batch gate, lock heartbeat, UX list).
+- Next: E1 named sync points with re-time, E9 composition data export, remaining E/F items, G hosted mode (on Dani's go).
