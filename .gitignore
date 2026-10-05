@@ -14,6 +14,7 @@ data/*
 !data/_template/
 !data/demo/
 data/**/.snapshots/
+data/**/.history/
 data/**/_src/
 data/**/*.tmp
 data/.demo-src/

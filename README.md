@@ -67,7 +67,10 @@ Tools: `status`, `projects` (list/create/duplicate/open), `snapshot_save` / `sna
 `timeline_query`, `shots_list` / `shot_get` / `shot_update`, `entities_list` / `entity_get` / `entity_upsert`, `media_list` /
 `media_add`, the notes of every stage and the timeline in one list: `notes_get` / `notes_add` (any row: a lyric line or word range, a
 scene or beat, an item, an asset / tree / node + image pin, a shot, a time) / `notes_status` (absorbed with a reply; the director's
-notes are dismissed only by the director), and the old `notes_list` / `note_add` / `note_resolve` (the timeline), `approvals_get` / `approve` / `request_changes`, `requests_list` /
+notes are dismissed only by the director), and the old `notes_list` / `note_add` / `note_resolve` (the timeline); review rounds:
+`round_get` (the round the director sent: its notes by stage with the content they point at) / `round_absorb` (a note done,
+linked to the change) / `round_reply` / `round_finish`, and `revisions_get` (the revisions R1, R2, …, and a per-stage compare
+of two); `approvals_get` / `approve` / `request_changes`, `requests_list` /
 `request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`), `costs_get` (one total over costs.json and
 `media_add`, `notes_list` / `note_add` / `note_resolve`, `approvals_get` / `approve` / `request_changes`, `requests_list` /
 `request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`; `takes`), `request_run` (run approved requests: the runner) / `generators_get`, `costs_get` (one total over costs.json and
@@ -113,7 +116,20 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   (+ shot), breakdown (+ item by kind), trees (+ note on this node, + pinned note), any row (+ note here); every one is
   undoable (Ctrl+Z) and in the palette. The **stage rail** shows each stage's open notes; the top bar "N open notes"
   counts them all (click: Review › Notes, every note in one table). All notes are one list, `notes.json` v2 (the old
-  per-stage note lists are read into it once: see Files).
+  per-stage note lists are read into it once: see Files). The Notes column takes the width the stage's rows leave
+  (the lyrics: everything right of the poem, up to 800 px; elsewhere about a fifth of the stage, 236-400 px).
+- **Review rounds and revisions** (SPEC v4 §2): the right end of the stage rail reads **Round N · K open notes**. When
+  your notes are in, click **Send round to Claude** (or File › Send round): every open note of yours goes to the agent
+  as one ask, and notes you write afterwards wait for the next round. While the agent works the rail shows its progress
+  (**absorbed · replied · left**, a small bar); when it says it is done, **Close revision R<n>**: the whole project is
+  snapshotted (immutable) and indexed. The **R<n>** chip on the rail (or File › Compare revisions, Review › Compare)
+  opens **Compare**: the revisions on the left (round, summary, notes absorbed, files, cost; a click compares one with
+  the one before), and A → B on the right (default: the latest against the previous one, or "R0", the state before
+  the first round): the lyric lines changed (word diff), scenes and shots added / removed / moved on a mini time line,
+  breakdown items, each asset tree's head as image A / B, the cost delta, and the notes absorbed in between; each change
+  carries the chip of the note that caused it. **restore** (two clicks) puts the project files back to a revision (the
+  current state is snapshotted first; your notes stay as they are). File › Mirror revisions to git (off by default)
+  also commits each revision into `data/<project>/.history`, a git repository of its own, if git is on PATH.
 - **New project** (File > New project, and automatically on an empty project): a wizard, **name -> lyrics (paste) ->
   song (optional path on this machine) -> Create**; opens the new project on the lyrics stage. File > New empty
   project keeps the old one-line prompt.
@@ -343,7 +359,9 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `breakdown.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, script?, items[{id: "bi03", kind: character/location/prop/wardrobe/fx, name, description, links[{scene, beats[], note?}], source: agent/director, aliases?, for? (wardrobe: the character item), dropped?}]}], states{<item>: {status: draft/review/ok, entity_id?, look_id?, by, via, at}}, notes[{id: "bn01", item \| null, scene?, text, by, via, to?: "agent", kind?: request/extract, status, at, version, replies[]}]}`: stage 3, the breakdown (shared with the page). Versions are immutable (a save appends; restore copies); statuses and entity links live outside them; only the page sets an item `ok` or links it to an entity ("Create entity": a draft entity in `entities/`, or a look on a character). Links name scene / beat ids of `scenes.json`. Shapes and logic: `js/breakdown.js` |
 | `storyboard.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, script?, shots[{id: "sh03", scene, t0, t1, kind: wide/medium/close/insert/performance/xp-desktop/…, title, text, camera, sketch, beats[], cast[], locations[], props[], variants{<entity>: <variant / look> \| null}, gen: still/video/null, clips[], thumb?, section?}]}], notes[{id: "sbn01", shot, scene?, text, by, via, to?: "agent", kind?: request/storyboard/fill_gaps, gaps?, status, at, version, replies[]}]}`: stage 6, the storyboard. A version is immutable (a save appends one); the shots of a scene tile it; the variant each asset needs is the scene's (entity `uses`) unless `variants` overrides it. The shot's approval is `approvals.json` `shot:<id>`. Missing = v1 derived from `shots.json` (never rewritten; its readers keep working). Logic: `js/storyboard.js` |
 | `sketches/<id>.json` / `.png` / `.mask.png` | a sketch: `{id, w, h, paper, underlay{src, opacity, fit}, strokes[], mask[], pins[{n, x, y, text}], title?, created, updated, by, via}` (format: `core/sketch/sketch.js`), the flattened image and the edit mask; written by `sketch_save`, registered in `media.json` (`kind: "sketch"`, `sketch`, `mask`, `scenes[]`, `pins`); under `private/sketches/` when drawn over a private image; not snapshotted |
-| `.snapshots/<yyyymmdd-hhmmss>-<slug>/` | copies of the small JSON files (no peaks, thumbs, `_src`, settings) + `.meta.json {id, at, message, auto, files}` |
+| `.snapshots/<yyyymmdd-hhmmss>-<slug>/` | copies of the small JSON files (no peaks, thumbs, `_src`, settings, revisions.json) + `.meta.json {id, at, message, auto, files, revision?, immutable?}` |
+| `revisions.json` | the review rounds and revisions (written by the server only; the page reads it): `{v: 1, rev, rounds[{n, status: sent/finished/closed, sent_at, sent_by, notes[ids], ask (the note to the agent), base (the snapshot when sent), finished_at?, summary?, closed_at?, revision?}], revisions[{id: "R3", n, round, created, summary, notes_absorbed[], notes_replied[], files_changed[], cost_usd, cost_delta, snapshot, base, by, via, git?: {commit} \| {skipped}}], restores[{at, revision, previous}]}`. A revision's snapshot is never changed; restoring one snapshots the current state first and keeps notes.json. Logic: `js/revisions.js`, `lib/ops/rounds.mjs` |
+| `.history/` | only with `settings.json` `revisions_git: true` and git on PATH: a git repository of its own with one commit per revision (the snapshot's files); never served, never the workbench's repository |
 
 ## How an agent edits them
 
@@ -468,6 +486,14 @@ small files are served in one read so no handle stays open.
   replies `by: "director", via: "page"`, keeps an existing note's author, via, created, target, round and an agent's
   words, stamps a status change `closed_by: "director"`, only grows `legacy_seen`, and refuses an old (v1) list or a
   bad target / status / id (400). Note texts are rendered as text everywhere (Notes columns, the timeline, Review).
+- Review rounds and revisions: sending a round (`round_send`), closing (`revision_close`) and restoring
+  (`revision_restore`) a revision are the page's acts only (the server passes `via: "page"` for its own Origin; no MCP
+  tool; the agent surface and offline get 403). `revisions.json` is not a page save (403). A page save of `notes.json`
+  keeps the server's `round`, a note's `round`, `absorbed_in` and `change` (a new note gets none). `round_absorb` checks
+  the note is in the round in flight and its `change` (a known stage, a project-relative file without `..`, a version
+  word, a summary). `/data/<p>/` never serves a dot-folder or dot-file (`.snapshots`, `.history`); the compare op reads
+  snapshots for the page and names revisions only as `R<n>`, `R0` or `now`. The git mirror runs `git` with
+  `--git-dir=data/<p>/.history/.git` (never the workbench repository) and only when the director turned it on.
 - Stage 2 (script): a page save of `scenes.json` cannot rewrite a saved version nor the author of an existing note,
   status or intake answer; new versions, notes, replies, changed scene statuses and answers are stamped
   `by: "director", via: "page"`; a malformed file is refused (400). Only the page marks a scene `ok` (`scenes_update`

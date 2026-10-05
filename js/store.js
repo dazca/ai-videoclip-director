@@ -13,6 +13,7 @@ import { normScenes } from './scenes.js';
 import { normBreakdown } from './breakdown.js';
 import { normBoard, boardShots } from './storyboard.js';
 import * as N from './notes.js';
+import { normRevisions } from './revisions.js';
 const QP = new URLSearchParams(location.search).get('project');
 export const PROJECT = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/.test(QP || '') ? QP : 'demo';
 export const DATA = `data/${PROJECT}/`;
@@ -75,7 +76,7 @@ const nowIso = () => new Date().toISOString().slice(0, 19);
 export const store = {
   project: PROJECT,
   song: null, events: null, energy: null, script: null, shots: null, uses: null, costs: null,
-  notes: null, approvals: null, requests: null, overrides: null, settings: null, entities: [], media: [], mediaById: {}, mediaByPath: {}, peaks: {},
+  notes: null, revisions: null, approvals: null, requests: null, overrides: null, settings: null, entities: [], media: [], mediaById: {}, mediaByPath: {}, peaks: {},
   runs: {},                       // request id -> the runner's last progress event (SSE {run}), shown in the Queue
   listeners: new Set(),
   onMutate: null,                 // set by core/history.js: (entry) => void
@@ -96,6 +97,8 @@ export const store = {
     this.entities = await Promise.all(index.map(e => getJSON(e.path)));
     for (const f of ['lyrics.json', 'scenes.json', 'breakdown.json', 'storyboard.json', 'notes.json', 'stages.json']) this[WRITABLE[f][0]] = NORM[f](this, this[WRITABLE[f][0]]);
     this.entityById = Object.fromEntries(this.entities.map(e => [e.id, e]));
+    // revisions.json (review rounds + revisions R<n>, js/revisions.js): the server writes it, the page only reads it
+    this.revisions = normRevisions(await getJSON('revisions.json', null).catch(() => null));
     this.media = (await getJSON('media.json', { items: [] })).items || [];
     this.mediaById = Object.fromEntries(this.media.map(m => [m.id, m]));
     this.mediaByPath = Object.fromEntries(this.media.map(m => [m.path, m]));
@@ -120,6 +123,7 @@ export const store = {
       // our own saves come back here too: apply only when the file differs from what the page has (agent edit, restore)
       // while a page save of that file is in flight the fetched copy may predate it: re-read once the save settles
       if (WRITABLE[file]) { const [field, d] = WRITABLE[file]; let v = await getJSON(file, d); if (NORM[file]) v = NORM[file](this, v); if (this._saving[file]) { this._missed.add(file); continue; } if (JSON.stringify(v) !== JSON.stringify(this[field])) { this[field] = v; this.emit(field); } }
+      else if (file === 'revisions.json') { const v = normRevisions(await getJSON(file, null).catch(() => null)); if (JSON.stringify(v) !== JSON.stringify(this.revisions)) { this.revisions = v; this.emit('revisions'); } }
       else if (/^peaks\//.test(file)) { const id = file.slice(6, -5); delete this.peaks[id]; await this.loadPeaks([id]); this.emit('peaks'); }
     }
     // a storyboard still derived from shots.json places its shots in the scenes: follow a new script

@@ -11,6 +11,8 @@
 // agent restore); stage 6: storyboard_get / shots_update (derived from shots.json, versions, tiling on the beat grid, statuses,
 // warnings, restore, diff), shot notes and asks, gaps_get (draft requests, the estimate vs the cap); notes.json v2: the migration of
 // every old note store without loss, notes_get / notes_add / notes_status, the old note tools as aliases, wait_for on a note),
+// review rounds and revisions (round_get / round_absorb / round_reply / round_finish, the page-only send / close / restore, the
+// compare, the opt-in mirror),
 // resources, the director-session prompt, the guard rules (edit voids approval, director-only approvals, media kind,
 // CSRF / Host / token checks, path traversal and the PRIVATE rule) and the offline (files only) mode. The temp folder
 // is removed at the end, whatever happens; data/demo must be byte-identical afterwards.
@@ -19,7 +21,7 @@ import path from 'node:path';
 import os from 'node:os';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -122,7 +124,8 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     'script_get', 'scenes_update', 'scene_note_add', 'scene_note_resolve', 'intake_get', 'intake_answer', 'sketch_save', 'sketch_get', 'sketch_list',
     'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve', 'character_get', 'character_iteration_add', 'character_note_add', 'look_create',
     'asset_get', 'asset_iteration_add', 'asset_note_add', 'variant_create',
-    'storyboard_get', 'shots_update', 'shot_note_add', 'shot_note_resolve', 'gaps_get', 'notes_get', 'notes_add', 'notes_status', 'request_run', 'generators_get'];
+    'storyboard_get', 'shots_update', 'shot_note_add', 'shot_note_resolve', 'gaps_get', 'notes_get', 'notes_add', 'notes_status', 'request_run', 'generators_get',
+    'round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get'];
   check('tools/list has every tool', EXPECT.every(t => tools.includes(t)), { count: tools.length, missing: EXPECT.filter(t => !tools.includes(t)) });
   const schemaOk = (await mcp.listTools()).tools.every(t => t.description?.length > 40 && t.inputSchema?.type === 'object');
   check('every tool has a description and a JSON schema', schemaOk);
@@ -1068,6 +1071,75 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   // the key never appears: not in any file of the project / media base, any tool response, or the server log
   const leaks = walk(TMP).filter(fl => { try { return fs.readFileSync(path.join(TMP, fl)).includes(FAL_KEY); } catch (er) { return false; } });
   check('the fal key never appears in a file (job.json, requests, costs, media, settings), a tool response or the server log', !leaks.length && !texts.some(t => t.includes(FAL_KEY)) && !srvLog.includes(FAL_KEY) && texts.length > 10, { leaks, responses: texts.length });
+}
+// 16. review rounds and revisions (SPEC v4 §2): notes -> the page sends the round (one ask) -> the agent reads, absorbs,
+// replies and finishes through MCP -> the page closes the revision R1 -> compare R0 / R1 -> restore; an agent cannot
+// send, close or restore (no tool, 403 over HTTP and offline); the git mirror is off by default and, when on, commits into
+// data/<p>/.history (its own repository: the workbench repository does not move)
+{
+  const RP = 'mcp-rounds';
+  S.duplicateProject(PROJECT, RP, true);
+  const RD = path.join(DATA, RP), RJ = (f) => JSON.parse(fs.readFileSync(path.join(RD, f), 'utf8'));
+  const pageOp = (name, body = {}) => post(`/api/op/${name}?project=${RP}`, body, { origin: URL_ });
+  const agentOp = (name, body = {}) => post(`/api/op/${name}?project=${RP}`, body);
+  // the director's notes, saved by the page
+  const n0 = await (await fetch(`${URL_}/data/${RP}/notes.json`)).json();
+  const lyr = await call(mcp, 'lyrics_get', { project: RP }), L1 = lyr.sections[0].lines[0];
+  n0.notes.push({ id: 'ln90', target: { stage: 'lyrics', kind: 'line', id: L1.id }, text: 'mcp: this line, warmer', status: 'open', replies: [] },
+    { id: 'sn90', target: { stage: 'script', kind: 'scene', id: 'sc01' }, text: 'mcp: sc01 too long?', status: 'open', replies: [] },
+    { id: 'n90', target: { stage: 'timeline', kind: 'time', id: null, t: 3000 }, text: 'mcp: a flash here', status: 'open', replies: [] });
+  const sv = await post(`/api/save/notes.json?project=${RP}`, { base_rev: n0.rev, data: n0 }, { origin: URL_ });
+  const tools = (await mcp.listTools()).tools.map(t => t.name);
+  const g0 = await call(mcp, 'round_get', { project: RP });
+  const deny = [await agentOp('round_send'), await agentOp('revision_close'), await agentOp('revision_restore', { id: 'R1' })].map(r => r.status);
+  let offErr = null; try { S.ops.round_send(RP, {}); } catch (e) { offErr = e.code; }
+  check('rounds: the agent has round_get / round_absorb / round_reply / round_finish / revisions_get but no tool to send a round, close or restore a revision; the agent surface gets 403 (HTTP and offline); before a send round_get says "collecting" with the open notes',
+    sv.status === 200 && ['round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get'].every(t => tools.includes(t)) && !['round_send', 'revision_close', 'revision_restore'].some(t => tools.includes(t))
+    && deny.every(s => s === 403) && offErr === 403 && g0.status === 'collecting' && g0.open === 3, { deny, offErr, g0 });
+  const sent = await pageOp('round_send'), N1 = RJ('notes.json'), ask = N1.notes.find(n => n.id === sent.body?.ask);
+  const again = await pageOp('round_send');
+  const g = await call(mcp, 'round_get', { project: RP });
+  check('round_send (page): ONE ask to the agent naming every open note with its target; notes.json round 2; round_get groups the notes by stage with their content inlined; a second send while the round is out: 409',
+    sent.status === 200 && sent.body.notes === 3 && ask?.to === 'agent' && ask.ask === 'round' && ['ln90', 'sn90', 'n90'].every(id => ask.text.includes(id)) && N1.round === 2 && again.status === 409
+    && g.status === 'sent' && g.becomes === 'R1' && g.stages.lyrics?.[0]?.content?.line === L1.text && g.stages.script?.[0]?.content?.title && g.stages.timeline?.[0]?.content?.time === '0:03.000',
+    { sent: sent.body, again: again.status, stages: Object.keys(g.stages || {}) });
+  const secs = lyr.sections.map(s => ({ label: s.label, lines: s.lines.map(l => l.id === L1.id ? 'Tone on, the lights are warm and low' : l.text) }));
+  const up = await call(mcp, 'lyrics_update', { project: RP, sections: secs, message: 'round 1' });
+  const ab = await call(mcp, 'round_absorb', { project: RP, note: 'ln90', change: { stage: 'lyrics', file: 'lyrics.json', version: up.version, summary: `line ${L1.id} warmer` } });
+  const abBad = await call(mcp, 'round_absorb', { project: RP, note: 'sn90', change: { stage: 'script', file: '../x', summary: 'x' } });
+  const rp = await call(mcp, 'round_reply', { project: RP, note: 'sn90', text: 'sc01 is 4 s: keep it?' });
+  await call(mcp, 'round_absorb', { project: RP, note: 'n90', change: { stage: 'timeline', summary: 'a flash cue noted for the edit' } });
+  const fin = await call(mcp, 'round_finish', { project: RP, summary: '2 absorbed, 1 question' }), fin2 = await call(mcp, 'round_finish', { project: RP, summary: 'again' });
+  const N2 = RJ('notes.json');
+  check('round_absorb links a note to the change (absorbed, absorbed_in R1, change {stage, file, version, summary}); a bad file path is refused (400); round_reply keeps the note open; round_finish answers the ask, approves nothing, and only once (409)',
+    ab.absorbed_in === 'R1' && N2.notes.find(n => n.id === 'ln90').change?.version === up.version && /400/.test(abBad.error || '') && rp.status === 'open' && fin.status === 'finished' && fin.progress.absorbed === 2 && fin.progress.replied === 1
+    && /409/.test(fin2.error || '') && N2.notes.find(n => n.id === ask.id).status === 'absorbed' && RJ('revisions.json').rounds[0].status === 'finished',
+    { ab, abBad: abBad.error, fin, fin2: fin2.error });
+  const cl = await pageOp('revision_close'), R1 = cl.body;
+  const cmp = await call(mcp, 'revisions_get', { project: RP, compare: ['R0', 'R1'] }), lst = await call(mcp, 'revisions_get', { project: RP });
+  const snapServed = await fetch(`${URL_}/data/${RP}/.snapshots/${R1?.snapshot}/notes.json`).then(r => r.status);
+  check('revision_close (page) makes R1: {id, round, created, summary, notes_absorbed, notes_replied, files_changed, cost_delta, snapshot}; no .history (the git mirror is off by default); revisions_get compares R0 -> R1 (the lyric line as a word diff linked to ln90) and lists R1; snapshots are not served',
+    cl.status === 200 && R1.id === 'R1' && R1.round === 1 && R1.notes_absorbed.sort().join() === 'ln90,n90' && R1.notes_replied.join() === 'sn90' && R1.files_changed.includes('lyrics.json') && R1.cost_delta === 0 && !R1.git
+    && !fs.existsSync(path.join(RD, '.history')) && cmp.lyrics?.lines?.[0]?.op === '~' && cmp.lyrics.lines[0].notes?.includes('ln90') && cmp.notes?.length === 2 && lst.revisions?.length === 1 && lst.in_flight === null && snapServed === 403,
+    { R1, lines: cmp.lyrics?.lines, snapServed });
+  // the git mirror, opt-in: a commit in data/<p>/.history, never in the workbench repository
+  const gitOk = !spawnSync('git', ['--version']).error;
+  const head = (dir) => spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
+  const wbHead = gitOk ? head(WB) : null;
+  const st0 = await (await fetch(`${URL_}/data/${RP}/settings.json`)).json() || { rev: 0, keybindings: {} };
+  await post(`/api/save/settings.json?project=${RP}`, { base_rev: st0.rev || 0, data: { ...st0, revisions_git: true } }, { origin: URL_ });
+  await call(mcp, 'scenes_update', { project: RP, upsert: [{ id: 'sc01', title: 'mcp R2 title' }], message: 'R2' });
+  const cl2 = (await pageOp('revision_close', { summary: 'a checkpoint with the mirror on' })).body;
+  const histServed = await fetch(`${URL_}/data/${RP}/.history/.git/config`).then(r => r.status);
+  const commits = gitOk ? spawnSync('git', [`--git-dir=${path.join(RD, '.history', '.git')}`, 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).stdout.trim() : null;
+  check('the git mirror (settings revisions_git: true): R2 is a commit in data/<p>/.history (its own repository, with the snapshot\'s files); the workbench repository\'s HEAD does not move; .history is never served',
+    !gitOk || (cl2.git?.commit && fs.existsSync(path.join(RD, '.history', '.git')) && fs.existsSync(path.join(RD, '.history', 'scenes.json')) && commits === '1' && head(WB) === wbHead && histServed === 403),
+    { git: gitOk, r2: cl2.git, commits, histServed });
+  const rs = await pageOp('revision_restore', { id: 'R1' });
+  const titleNow = RJ('scenes.json').versions.find(v => v.id === RJ('scenes.json').current).scenes.find(s => s.id === 'sc01').title;
+  check('revision_restore (page) R1: the files go back (sc01 without the R2 title), the state before is a snapshot, the notes are kept as they are, revisions.json keeps R1 and R2 (+ the restore)',
+    rs.status === 200 && !/mcp R2 title/.test(titleNow) && fs.existsSync(path.join(RD, '.snapshots', rs.body.previous)) && RJ('notes.json').notes.some(n => n.id === 'ln90' && n.absorbed_in === 'R1') && RJ('revisions.json').revisions.length === 2 && RJ('revisions.json').restores.length === 1,
+    { restore: rs.body?.restored || rs.body, titleNow });
 }
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {

@@ -21,6 +21,7 @@ export const PAGES = [
     { id: 'approvals', title: 'Approvals', load: () => import('./approvals.js'), count: (s) => Object.values(s.approvals?.items || {}).filter(v => v.state === 'changes').length || '' },
     { id: 'queue', title: 'Queue', load: () => import('./queue.js'), count: (s) => (s.requests?.items || []).filter(r => r.status === 'draft').length || '' },
     { id: 'notes', title: 'Notes', load: () => import('./notes.js'), count: (s) => s.notes.notes.filter(n => n.status === 'open').length || '' },   // every stage's notes (notes.json v2)
+    { id: 'compare', title: 'Compare', load: () => import('./compare.js'), count: (s) => s.revisions?.revisions?.length || '' },   // revisions R<n> side by side (js/revisions.js)
     { id: 'costs', title: 'Costs', load: () => import('./costs.js'), count: (s) => s.costs ? '$' + Math.round(s.costs.items.reduce((a, x) => a + (Number(x.usd) || 0), 0)) : '' },
   ] },
   { id: 'settings', title: 'Settings', tab: false, load: () => import('./settings.js') },

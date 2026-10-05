@@ -48,14 +48,13 @@ win: `WB_PROJECT`, `WORKBENCH_DATA`, `WORKBENCH_MEDIA_BASE`, `FAL_KEY`.
 | `js/prices.js` | the ONE price table (list prices with the day each was verified): every estimate in the page, the server and the tools |
 | `js/recipe.js`, `templates/photoreal_recipe.json`, `docs/PHOTOREAL.md` | the photoreal recipe: the default prompt template (blocks per model), its data, and the guide that explains it |
 | `index.html`, `app.js`, `app.css` | the page shell |
-| `core/` | command registry + keymap, menus, palette, undo history (`history.push({label, undo, redo})` for a stage draft edit), selection, projects/exports, preview dock, default commands (+ the timeline "+ Add", `notes.addHere`), `rail.js` (stage rail + stage commands + open-notes counts), `notescol.js` (the Notes column every stage mounts: row-aligned cells, typing, threads, API in its header), `wizard.js` (new-project wizard), `sketch/` (the sketch tool: `mountSketch` / `openSketch`, API in its header) |
-| `js/` | store (data + live reload), timeline (the warp), columns, player, verify hooks, `notes.js` (ONE notes model for every stage and the timeline: notes.json v2, targets, validation, the migration of the old stores, the old shapes; shared with `lib/ops/notes.mjs` and `serve.mjs`), `flow.js` (the guided flow: stages + lyrics model), `scenes.js` (stage 2: scenes, intake, gaps, snapping), `breakdown.js` (stage 3: items, links, merge / split, the "Suggest from script" pre-pass), `assets.js` (stages 4 and 5: the asset workspace logic for characters, locations and props: iteration trees, branches, variants and their axes, statuses, estimates, prompts, the variant per scene) and `characters.js` (the stage-4 names on top of it), `storyboard.js` (stage 6: shots, tiling on the beat grid, "shots from beats", the assets a shot needs and their variants, estimates, gaps), all shared with `lib/store.mjs` |
-| `tabs/` | one module per view; `tabs/registry.js` lists pages and sub-views; `stage.js` (stage workspaces), `lyrics.js` (stage 1), `script.js` (stage 2), `breakdown.js` (stage 3), `assetws.js` (the generic asset workspace + its commands), `charstage.js` (stage 4 on it; `characters.js` is the Assets sub-view), `scenery.js` (stage 5 on it: locations and props), `storyboard.js` (stage 6: the board, the shot panel, the gaps, the estimate vs the cap), `final.js` (stage 7, a placeholder: the shots and their states); `notes.js` is Review › Notes (every note in one table); each stage mounts the Notes column (`core/notescol.js`) |
+| `core/` | command registry + keymap, menus, palette, undo history (`history.push({label, undo, redo})` for a stage draft edit), selection, projects/exports, preview dock, default commands (+ the timeline "+ Add", `notes.addHere`), `rail.js` (stage rail + stage commands + open-notes counts + the review round at its right end: "Round N · K open notes", Send round to Claude, the agent's progress, Close revision, the revision chip; `WB.rounds`), `notescol.js` (the Notes column every stage mounts: row-aligned cells, typing, threads, its width (`width` / `maxWidth`), API in its header), `wizard.js` (new-project wizard), `sketch/` (the sketch tool: `mountSketch` / `openSketch`, API in its header) |
+| `js/` | store (data + live reload), timeline (the warp), columns, player, verify hooks, `notes.js` (ONE notes model for every stage and the timeline: notes.json v2, targets, validation, the migration of the old stores, the old shapes; shared with `lib/ops/notes.mjs` and `serve.mjs`), `revisions.js` (review rounds and revisions: revisions.json, the round in flight, its progress, the compare helpers; shared with `lib/ops/rounds.mjs`), `flow.js` (the guided flow: stages + lyrics model), `scenes.js` (stage 2: scenes, intake, gaps, snapping), `breakdown.js` (stage 3: items, links, merge / split, the "Suggest from script" pre-pass), `assets.js` (stages 4 and 5: the asset workspace logic for characters, locations and props: iteration trees, branches, variants and their axes, statuses, estimates, prompts, the variant per scene) and `characters.js` (the stage-4 names on top of it), `storyboard.js` (stage 6: shots, tiling on the beat grid, "shots from beats", the assets a shot needs and their variants, estimates, gaps), all shared with `lib/store.mjs` |
+| `tabs/` | one module per view; `tabs/registry.js` lists pages and sub-views; `stage.js` (stage workspaces), `lyrics.js` (stage 1), `script.js` (stage 2), `breakdown.js` (stage 3), `assetws.js` (the generic asset workspace + its commands), `charstage.js` (stage 4 on it; `characters.js` is the Assets sub-view), `scenery.js` (stage 5 on it: locations and props), `storyboard.js` (stage 6: the board, the shot panel, the gaps, the estimate vs the cap), `final.js` (stage 7, a placeholder: the shots and their states); `notes.js` is Review › Notes (every note in one table); `compare.js` is Review › Compare (two revisions per stage, each change with its note; restore); each stage mounts the Notes column (`core/notescol.js`) |
 | `docs/SPEC_v3_GUIDED.md` | the guided creation flow (seven stages); phase 1 = stage rail, wizard, lyrics stage; phase 2 = the script stage + sketch files; phase 3 = the breakdown stage; phase 4 = the characters stage; phase 5 = the scenery stage (locations, props) on the generic asset workspace; phase 6 = the storyboard stage (shots per scene, gaps) |
 | `catalog/` | the free starter catalogue (CC0 / public-domain bases: bodies, poses, face angles, garments, locations, props; `catalog.json`, `LICENSES.md`), served read-only for stage 4 |
 | `importers/` | `new_project.mjs` (song + lyrics -> project), `azemar_*` (the owner's production, kept as a worked example) |
-| `tools/` | `verify.mjs` (UI suite; its stage-4 / 5 blocks are `verify-characters.mjs` (v7), `verify-scenery.mjs` (v8), `verify-storyboard.mjs` (v9) and `verify-dogfood.mjs` (v10: proposals, image import, request warnings, merged costs, the recipe form, the stale bar) and `verify-notes.mjs` (v11: the migration of the old note stores, the Notes column per stage and on the timeline, the right-click "+ Add" menus + Ctrl+Z, the counters), each runnable alone; `verify-stages.mjs` (F1: stage status from content, per stage empty / partial / done / regressed, the rail screenshots `f1_*.png`; run after it by `npm run verify`)), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `make_demo.mjs`, `chrome.mjs` |
-| `tools/` | `verify.mjs` (UI suite; its stage-4 / 5 blocks are `verify-characters.mjs` (v7), `verify-scenery.mjs` (v8), `verify-storyboard.mjs` (v9) and `verify-dogfood.mjs` (v10: proposals, image import, request warnings, merged costs, the recipe form, the stale bar), `verify-runner.mjs` (v12: the Queue's Approve / Reject / Run, live progress, outputs as nodes, Settings > Generator, on a mock fal), each runnable alone; `verify-stages.mjs` (F1: stage status from content, per stage empty / partial / done / regressed, the rail screenshots `f1_*.png`; run after it by `npm run verify`)), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `mock-fal.mjs` (a mock fal for every runner test: never the real one), `run.mjs` (the runner CLI), `make_demo.mjs`, `chrome.mjs` |
+| `tools/` | `verify.mjs` (UI suite; its stage-4 / 5 blocks are `verify-characters.mjs` (v7), `verify-scenery.mjs` (v8), `verify-storyboard.mjs` (v9) and `verify-dogfood.mjs` (v10: proposals, image import, request warnings, merged costs, the recipe form, the stale bar), `verify-notes.mjs` (v11: the migration of the old note stores, the Notes column per stage and on the timeline, the right-click "+ Add" menus + Ctrl+Z, the counters), `verify-runner.mjs` (v12: the Queue's Approve / Reject / Run, live progress, outputs as nodes, Settings > Generator, on a mock fal) and `verify-rounds.mjs` (v13: a full review round in the page and over MCP, Close revision, Compare, restore, the page-only acts, the git mirror off by default, the Notes column's width), each runnable alone; `verify-stages.mjs` (F1: stage status from content, per stage empty / partial / done / regressed, the rail screenshots `f1_*.png`; run after it by `npm run verify`)), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `mock-fal.mjs` (a mock fal for every runner test: never the real one), `run.mjs` (the runner CLI), `make_demo.mjs`, `chrome.mjs` |
 | `exporters/hyperframes-html/` | HTML package of a HyperFrames composition: `export.mjs`, `verify.mjs`, `serve.mjs` (see Export) |
 | `data/<project>/` | one folder per project; only `data/_template/` and `data/demo/` are in git |
 
@@ -66,15 +65,14 @@ that owns them and imported by the others); ops call each other through `ops.<na
 | domain | ops (`lib/ops/`) | tools (`mcp/tools/`) | what |
 |---|---|---|---|
 | core | `core.mjs` | `core.mjs` | code version (stale server), projects, snapshots (restore carry-forward), `song_get`, `timeline_query`, the media index (`media_list` / `media_add` / `media_update`), `scrubPrivate`; tools also `status`, `projects`, `wait_for`, `ui_focus` |
-| requests, approvals, costs | `requests.mjs` | `requests.mjs` | the recipe file, `requests_list` / `request_create` / `request_update`, `approvals_get` / `set_states` (tools `approve`, `request_changes`), `costs_get`, `cost_record`, the falgen merge |
 | notes | `notes.mjs` | `notes.mjs` | ONE notes model for every stage and the timeline (notes.json v2): `notesDoc` (migrates the old stores on first read), `checkTarget`, `addNote` / `replyNote` / `setStatus` (the other domains' note tools call these), `notes_get` / `notes_add` / `notes_status`, and the old timeline tools `notes_list` / `note_add` / `note_resolve` |
 | requests, approvals, costs | `requests.mjs` | `requests.mjs` | the recipe file, `requests_list` / `request_create` / `request_update`, `request_run` / `generators_get` (the runner: `lib/run.mjs`, `generators/`), `approvals_get` / `set_states` (tools `approve`, `request_changes`), `costs_get`, `cost_record`, the falgen merge |
-| notes | `notes.mjs` | `notes.mjs` | notes pinned to song time (`notes_list`, `note_add`, `note_resolve`) |
 | stages, lyrics | `lyrics.mjs` | `lyrics.mjs` | `stages_get` / `stage_update`, `startStage`, stage 1 (`lyrics_*`, `song_attach`), `createGuidedProject` |
 | script, scenes, sketches | `scenes.mjs` | `scenes.mjs` | stage 2: `script_get`, `scenes_update`, `scene_note_*`, `intake_*`, `sketch_*` |
 | breakdown | `breakdown.mjs` | `breakdown.mjs` | stage 3: `breakdown_*` (`breakdown_promote` is page only: no tool) |
 | assets, characters | `assets.mjs` | `assets.mjs` | entities (`entities_list`, `entity_get`, `entity_upsert`) and stages 4-5 (`asset_*`, `character_*`, `look_create`, `variant_create`, `base_propose`, `node_import_propose`; `asset_act` / `character_act` / `ref_upload` are page only: no tool) |
 | storyboard | `storyboard.mjs` | `storyboard.mjs` | the shots.json shots (`shots_list`, `shot_get`, `shot_update`) and stage 6 (`storyboard_get`, `shots_update`, `shot_note_*`, `gaps_get`) |
+| rounds, revisions | `rounds.mjs` | `rounds.mjs` | review rounds (`round_get`, `round_absorb`, `round_reply`, `round_finish`; `round_send` is page only: no tool) and revisions R<n> (`revisions_get`, `revision_compare`; `revision_close` / `revision_restore` are page only: no tool), the opt-in git mirror |
 
 A new domain: a `lib/ops/<domain>.mjs` imported (or re-exported) by `lib/store.mjs`, and a `mcp/tools/<domain>.mjs`
 imported by `mcp/server.mjs`.
@@ -108,14 +106,16 @@ relative to the media base; any other path is relative to the project folder. Fu
 - `media.json`: every generated/imported file with kind, links (entities, shots, uses, job, take), status, thumbnails.
 - `notes.json` (shared, v2): ONE list of notes for every stage and the timeline, `{v: 2, rev, round, notes[{id, target{stage,
   kind, id, w?, quote?, t?, pin?{x, y}, line?, scene?}, text, by, via: page|agent|import, status: open|absorbed|dismissed,
-  round, replies[{id, text, by, via, at}], absorbed_in, created, to?: "agent", ask?: request|fill_gaps|extract|storyboard,
-  gaps?, version?, marker?, about?, legacy?{store, id}, closed_by?, closed_via?, closed_at?}], legacy_seen[]}`. Targets per
+  round, replies[{id, text, by, via, at}], absorbed_in, created, to?: "agent", ask?: request|fill_gaps|extract|storyboard|round,
+  gaps?, version?, marker?, about?, legacy?{store, id}, closed_by?, closed_via?, closed_at?, change?{stage, file?, version?,
+  summary, at, by}}], legacy_seen[]}`. Targets per
   stage: lyrics `stage` / `section` / `line` (+ `w` [first, last word], `quote`); script `stage` / `scene` / `beat`
   (`"sc02/b1"`); breakdown `stage` / `item` / `scene`; characters and scenery `stage` / `asset` / `tree`
   (`"ada/look:x"`) / `node` (`"ada/n03"`, + `pin` 0..1 on its image) / `use` (`"ada/sc02"`: the asset in a scene);
   storyboard `stage` / `scene` / `shot` (+ `scene`); final `stage` / `shot`; timeline `time` (`t` ms, `line`). `absorbed` =
   handled (the agent did what it asks, or the director marked it done); `dismissed` = dropped (only the director dismisses
-  the director's notes); `round` is the review round (B6 builds on it). **Migration:** the first read (`notesDoc`, or the
+  the director's notes); `round` is the review round being collected (a note's `round`: the one it was written in);
+  `absorbed_in` = the revision a round's note was absorbed in, `change` = what the agent changed for it (`round_absorb`). **Migration:** the first read (`notesDoc`, or the
   page in memory on a static host) reads the old stores into it without loss: notes.json v1 (kept as `notes.v1.json`;
   a `reply_to` note becomes a reply), the `notes` of lyrics.json / scenes.json / breakdown.json / storyboard.json and every
   entity's `iter.notes` (ids kept; a clash gets `-2`). Those files are never written for notes again; a note added to one
@@ -182,7 +182,14 @@ relative to the media base; any other path is relative to the project folder. Fu
 - `sketches/<id>.json|.png|.mask.png`: sketches (vector strokes + pins + metadata, the flattened image, the edit mask),
   written by `sketch_save` and registered in `media.json` (kind `sketch`, links `scenes` / `entities` / `shots`);
   under `private/sketches/` when drawn over a private underlay. Not snapshotted (the script versions point at them).
-- `.snapshots/<stamp>-<slug>/`: durable snapshots of the small JSON files.
+- `.snapshots/<stamp>-<slug>/`: durable snapshots of the small JSON files (not revisions.json, settings.json, .history).
+- `revisions.json` (the server's only; the page reads it): review rounds and revisions, `{v: 1, rev, rounds[{n, status:
+  sent|finished|closed, sent_at, sent_by, notes[ids], ask, base (snapshot when sent), finished_at?, summary?, closed_at?,
+  revision?}], revisions[{id "R3", n, round, created, summary, notes_absorbed[], notes_replied[], files_changed[], cost_usd,
+  cost_delta, snapshot, base, by, via, git?}], restores[{at, revision, previous}]}`. A revision's snapshot (`.meta.json`
+  `revision`, `immutable`) is never changed; a restore snapshots the current state first and keeps notes.json. With
+  `settings.json` `revisions_git: true` and git on PATH each revision is also a commit in `.history/` (a repository of its
+  own). Logic: `js/revisions.js`, `lib/ops/rounds.mjs`.
 
 Editing by hand: read the file, change it, **bump `rev`** on the shared files, write it whole via temp file + rename.
 The server watches the folder and every open page reloads the changed file. Keep ids stable and `t0 < t1`.
@@ -293,6 +300,14 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <same export witho
    (a line + word range, a scene / beat, an item, an asset / node + pin, a shot, a time). You cannot dismiss the director's
    notes, nor reopen one they dismissed (403). The per-stage note tools (`lyrics_note_*`, `scene_note_*`,
    `breakdown_note_*`, `shot_note_*`, `asset_note_add`, `note_add` / `note_resolve`) still work: they write the same list.
+4c. **Review rounds.** The director collects notes, then sends a round from the page ("Send round to Claude": every open
+   note of theirs as ONE ask, `ask: "round"`; notes.json `round` + 1). `round_get` gives the round's notes by stage with
+   the content each points at; apply them with the stage tools (new versions, nothing approved), then per note
+   `round_absorb {note, change: {stage, file, version, summary}}` (absorbed, `absorbed_in` = the revision it becomes, the
+   change linked for the compare view) or `round_reply {note, text}` (it stays open for the director), and at the end
+   `round_finish {summary}`. The page shows your progress live. Closing the revision (R<n>: an immutable snapshot +
+   `revisions.json`), comparing and restoring are the director's (page only; no tool). `revisions_get {compare: [a, b]}`
+   ("R<n>", "R0" = before the first round, "now") reads the per-stage diff with the notes behind each change.
 5. **Snapshot before big edits** (`snapshot_save`); a restore snapshots the current state first, so it is undoable.
 6. Register every new file (`media_add`, or automatically on `request_update` done) so it shows up in the page.
 
@@ -315,6 +330,12 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <same export witho
   project's JSON scrubbed of private paths and items flagged private (`lib/store.mjs` `scrubPrivate`).
 - Paths with `..`, `.`, backslashes, NUL, `:` (NTFS streams) or `~<digit>` (8.3 short names) are rejected; dot-folders are never served; private files (by rule or
   `private: true` in `media.json`) live under `private/<kind>/` and are never exported or packaged.
+- Rounds and revisions: `round_send`, `revision_close` and `revision_restore` are page only (via "page" from this server's
+  Origin; no MCP tool; 403 to the agent surface and offline); `revisions.json` is not a page save (403); a page save of
+  `notes.json` keeps the server's `round`, a note's `round`, `absorbed_in` and `change`; `round_absorb` checks the note is
+  in the round in flight and its change (known stage, a project file without `..`, a version word, a summary); `/data/`
+  never serves a dot-folder or dot-file (`.snapshots`, `.history`); the git mirror is opt-in (`settings.json`
+  `revisions_git`) and always names its own repository (`--git-dir=data/<p>/.history/.git`).
 - Notes (`notes.json` v2): `notes_add` checks the target (known stage and kind; ids without `..`, `.`, `\` or markup;
   the row exists in the current version: 404; word ranges on the line, `t` inside the song, pins 0..1; text 1-8000
   characters; else 400). An agent may reply, absorb (with a reply) and reopen, and dismiss only its own notes: a director's
@@ -452,6 +473,9 @@ initial project. Tools:
 | `entities_list`, `entity_get`, `entity_upsert` | characters (with looks), locations, props |
 | `media_list`, `media_add` | the media index; add = thumbnails + links |
 | `notes_list`, `note_add`, `note_resolve` | the timeline's notes (pinned to time) in the old shape; resolve = absorbed, with a reply |
+| `round_get` | the review round the director sent: its notes by stage, each with the content it points at, the progress, the revision it becomes; "collecting" when none was sent |
+| `round_absorb`, `round_reply`, `round_finish` | a round's note done (linked to the change {stage, file, version, summary}), answered (stays open), the round done (a summary; approves nothing) |
+| `revisions_get` | the revisions R1, R2, … (summary, notes absorbed, files changed, cost delta, git), the round in flight; `compare: [a, b]` = per-stage diff (lyric lines, scenes / shots on the time line, breakdown items, asset heads A / B, cost) with the notes behind each change |
 | `approvals_get`, `approve`, `request_changes` | approval states |
 | `requests_list`, `request_create`, `request_update` | the generation queue and its lifecycle (`asset` links a stage-4 / 5 generation to an asset tree; `char` is deprecated: a warning, stored as `asset`); `recipe` builds the prompt from the photoreal blocks; `warnings[]` |
 | `request_run` | run APPROVED requests with the runner (the generator per kind from Settings > Generator): `dry_run` = the plan, nothing spent; refuses drafts; re-checks the cap; outputs in `gen/`, cost once, media + nodes; `wait` or `wait_for` |

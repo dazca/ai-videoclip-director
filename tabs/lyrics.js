@@ -39,7 +39,8 @@ class Workspace {
     this.loadDraft();
     this.wire();
     // the Notes column: one row per section tag and per line; the top row holds the notes on the whole poem
-    this.nc = new NotesColumn({ stage: 'lyrics', scroller: this.$('.lypoem'), active: () => !this.compare && !this.textMode && this.draft.length > 0,
+    // the poem keeps ~800 px, the Notes column takes the rest (up to 800 px; core/notescol.js width)
+    this.nc = new NotesColumn({ stage: 'lyrics', scroller: this.$('.lypoem'), width: (w) => w - 800, maxWidth: 800, active: () => !this.compare && !this.textMode && this.draft.length > 0,
       top: { label: 'notes on the whole poem', targets: [{ stage: 'lyrics', kind: 'stage', id: null }] },
       rows: () => [...this.el.querySelectorAll('.lypoem .lyhead, .lypoem .lyl')].map(e => e.classList.contains('lyl')
         ? { el: e, targets: [{ stage: 'lyrics', kind: 'line', id: e.dataset.line }], sub: (n) => n.target.quote ? `“${n.target.quote}”${n.target.w && !F.anchorWords(this.findLine(e.dataset.line)?.l.text || '', n.target) ? ' (text changed)' : ''}` : '' }

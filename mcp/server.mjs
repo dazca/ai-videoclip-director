@@ -24,6 +24,7 @@ import './tools/core.mjs';         // status, projects, snapshots, song / timeli
 import './tools/storyboard.mjs';   // shots.json shots / clip uses; stage 6 storyboard and gaps
 import './tools/assets.mjs';       // entities; stages 4-5 characters and assets
 import './tools/notes.mjs';        // notes pinned to time
+import './tools/rounds.mjs';       // review rounds (round_*) and revisions (revisions_get)
 import './tools/lyrics.mjs';       // stages; stage 1 lyrics
 import './tools/scenes.mjs';       // stage 2 script, intake, sketches
 import './tools/breakdown.mjs';    // stage 3 breakdown

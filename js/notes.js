@@ -5,9 +5,11 @@
 // notes.json v2  {v: 2, rev, round, notes: [Note], legacy_seen: ["<store>:<id>", ...], migrated?: {at, from: {...}}}
 //   Note    {id "ln03", target: Target, text, by, via: page | agent | import, status: open | absorbed | dismissed,
 //            round, replies: [{id "ln03.1", text, by, via, at}], absorbed_in: <revision id> | null, created,
-//            to?: "agent", ask?: request | fill_gaps | extract | storyboard (an ask for the agent), gaps?, version?
+//            to?: "agent", ask?: request | fill_gaps | extract | storyboard | round (an ask for the agent; "round" = the
+//            one ask a sent review round writes, js/revisions.js), gaps?, version?
 //            (the stage version it was written on), marker?: true (a timeline marker), about? (an item key),
-//            closed_by?, closed_via?, closed_at?, legacy?: {store, id} (where a migrated note came from)}
+//            closed_by?, closed_via?, closed_at?, legacy?: {store, id} (where a migrated note came from),
+//            change?: {stage, file?, version?, summary, at, by} (what the agent changed for it: round_absorb)}
 //   Target  {stage, kind, id, w?, quote?, t?, pin?, line?, scene?}
 //     stage  lyrics | script | breakdown | characters | scenery | storyboard | final | timeline
 //     kind   per stage (KINDS): "stage" = the whole stage (id null); lyrics line / section; script scene / beat
@@ -34,7 +36,7 @@ export const KINDS = {
   timeline: ['time'],
 };
 export const STATUSES = ['open', 'absorbed', 'dismissed'];
-export const ASKS = ['request', 'fill_gaps', 'extract', 'storyboard'];
+export const ASKS = ['request', 'fill_gaps', 'extract', 'storyboard', 'round'];
 export const PREFIX = { lyrics: 'ln', script: 'sn', breakdown: 'bn', characters: 'cn', scenery: 'an', storyboard: 'sbn', final: 'fn', timeline: 'n' };
 export const STAGE_TITLE = { lyrics: 'Lyrics', script: 'Script', breakdown: 'Breakdown', characters: 'Characters', scenery: 'Scenery', storyboard: 'Storyboard', final: 'Final', timeline: 'Timeline' };
 export const TEXT_MAX = 8000;
@@ -130,10 +132,11 @@ export const sameTarget = (a, b) => a.stage === b.stage && a.kind === b.kind && 
 export function notesOn(doc, { stage, kind, id, status } = {}) {
   return (doc?.notes || []).filter(n => (!stage || n.target.stage === stage) && (!kind || n.target.kind === kind) && (id === undefined || (n.target.id || null) === (id || null)) && (!status || status === 'all' || n.status === status));
 }
-// open notes per stage and in all: {total, stages: {lyrics: n, ...}, asks (open asks for the agent)}
+// open notes per stage and in all: {total, stages: {lyrics: n, ...}, asks (open asks for the agent)}; the ask a sent
+// round writes (ask "round") is counted as an ask only, never as a note on a stage
 export function openCounts(doc) {
   const stages = Object.fromEntries(STAGES.map(s => [s, 0])); let total = 0, asks = 0;
-  for (const n of doc?.notes || []) if (n.status === 'open') { stages[n.target.stage] = (stages[n.target.stage] || 0) + 1; total++; if (n.to === 'agent') asks++; }
+  for (const n of doc?.notes || []) if (n.status === 'open') { if (n.to === 'agent') asks++; if (n.ask === 'round') continue; stages[n.target.stage] = (stages[n.target.stage] || 0) + 1; total++; }
   return { total, asks, stages };
 }
 export const openAsks = (doc, stage) => (doc?.notes || []).filter(n => n.status === 'open' && n.to === 'agent' && n.target.stage === stage);

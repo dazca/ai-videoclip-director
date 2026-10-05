@@ -424,6 +424,20 @@ body.notop #rail, body.norail #rail { display: none; }
 #rail .next { flex: 1; min-width: 0; padding: 0 8px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; cursor: pointer; }
 #rail .next b { color: var(--fg); font-weight: 600; }
 #rail .next:hover { color: var(--fg); }
+/* the review round at the rail's right end (core/rail.js): Round N · K open notes [Send round to Claude] / progress [Close revision] [R2] */
+#rail .rnd { flex: none; display: flex; align-items: center; gap: 5px; padding: 0 0 0 8px; border-left: 1px solid var(--line2); color: var(--dim); white-space: nowrap; }
+#rail .rnd > b { color: var(--fg); font-weight: 600; }
+#rail .rnd[data-phase="sent"] > b, #rail .rnd[data-phase="finished"] > b { color: #d6c6f5; }
+#rail .rbtn { height: 15px; line-height: 13px; font-size: 10.5px; padding: 0 6px; background: #3a2c10; border-color: #7a5a14; color: #f3d9a6; cursor: pointer; }
+#rail .rbtn:hover { background: #4a3a14; color: #fff; }
+#rail .rbtn.sec { background: var(--bg3); border-color: var(--line); color: var(--dim); }
+#rail .rbtn.sec:hover { color: var(--fg); }
+#rail .rbtn[disabled] { opacity: .45; cursor: default; }
+#rail .rpb { display: inline-block; width: 46px; height: 5px; background: var(--bg3); box-shadow: inset 0 0 0 1px var(--line); position: relative; }
+#rail .rpb u { position: absolute; left: 0; top: 0; bottom: 0; background: #8a63c0; }
+#rail .rpg em { font-style: normal; color: var(--fg); } #rail .rpg em.ab { color: #7fd69c; } #rail .rpg em.rp { color: #d6c6f5; } #rail .rpg em.lf { color: #f0a090; }
+#rail .rvc { display: flex; align-items: center; height: 100%; padding: 0 7px; border-left: 1px solid var(--line2); color: #9db7d6; font-weight: 600; }
+#rail .rvc:hover { background: var(--bg3); text-decoration: none; }
 
 .stagews { display: flex; flex-direction: column; }
 .sgbar { flex: none; height: 20px; display: flex; align-items: center; gap: 6px; padding: 0 6px; border-bottom: 1px solid var(--line); background: var(--bg2); font-size: 11px; white-space: nowrap; overflow: hidden; }
@@ -1027,7 +1041,7 @@ button.on { color: var(--acc); }
 .fnrow .fnk { width: 70px; overflow: hidden; text-overflow: ellipsis; }
 .fnrow .fntx { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* the poem is narrow (sections up to 780 px): its notes sit right next to it */
-.lypoem > .nclayer { right: auto; left: min(790px, calc(100% - var(--ncw))); }
+.lypoem.nchost .lysec { max-width: none; }   /* the notes take what the poem leaves (core/notescol.js width), up to 800 px; beyond that the poem widens */
 .ncn { position: relative; padding: 1px 4px; border-left: 2px solid #b8913a; overflow-wrap: anywhere; white-space: pre-wrap; cursor: default; }
 .ncn.ag { border-left-color: #8a63c0; }
 .ncn.ask { background: #1c1826; }
@@ -1054,3 +1068,52 @@ button.on { color: var(--acc); }
 .nced.rep { border: 0; box-shadow: inset 0 0 0 1px var(--acc); margin-top: 1px; }
 .nc-grown { align-items: flex-start !important; }
 .nc-hl { background: #2a2416 !important; }
+
+/* ---------------- Review › Compare (tabs/compare.js): revisions A → B per stage, each change with its notes */
+.cmp { display: flex; padding: 0; overflow: hidden; height: 100%; }
+.cmpl { flex: none; width: 250px; overflow: auto; border-right: 1px solid var(--line); background: var(--bg2); font-size: 11px; }
+.cmplh { position: sticky; top: 0; background: var(--bg2); padding: 2px 6px; border-bottom: 1px solid var(--line); }
+.cmpr0 { padding: 3px 6px 3px 8px; border-bottom: 1px solid var(--line2); cursor: pointer; line-height: 14px; }
+.cmpr0:hover { background: var(--bg3); }
+.cmpr0.on { box-shadow: inset 3px 0 0 var(--acc); background: var(--bg); }
+.cmpr0.isa { box-shadow: inset 3px 0 0 #6fb3d9; }
+.cmpr0.live { cursor: default; color: #d6c6f5; }
+.cmpr0 .rst { float: right; font-size: 10px; color: var(--dim); }
+.cmpr0 .rst:hover { color: var(--acc); }
+.cmps { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmpl p { padding: 4px 8px; margin: 0; }
+.cmpr { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.cmph { flex: none; display: flex; align-items: center; gap: 5px; padding: 2px 8px; border-bottom: 1px solid var(--line); font-size: 11px; white-space: nowrap; overflow: hidden; }
+.cmph select { height: 17px; font-size: 11px; max-width: 260px; }
+.cmpsum { color: var(--dim); overflow: hidden; text-overflow: ellipsis; } .cmpsum b { color: var(--fg); font-weight: 600; }
+.cmpb { flex: 1; overflow: auto; padding: 0 10px 30px 8px; font-size: 11.5px; }
+.cmpb h4 { margin: 8px 0 2px; font-size: 11px; color: var(--fg); font-weight: 600; border-bottom: 1px solid var(--line2); }
+.cmpb h4 .dim { font-weight: normal; }
+.cmprow { padding: 1px 0 1px 2px; line-height: 15px; border-bottom: 1px solid #1a1c20; }
+.cmprow .sy { display: inline-block; width: 13px; text-align: center; color: var(--dim); }
+.cmprow.st-added .sy, .cmprow.opa .sy { color: #7fd69c; } .cmprow.st-removed .sy, .cmprow.st-dropped .sy, .cmprow.opr .sy { color: #f08080; }
+.cmprow.st-moved .sy { color: #e8c88a; } .cmprow.st-changed .sy, .cmprow.opc .sy { color: #9db7d6; }
+.cmpb ins { text-decoration: none; background: #1f4a2c; color: #c9f2d4; padding: 0 1px; }
+.cmpb del { text-decoration: line-through; background: #4a1f22; color: #f2c9cc; padding: 0 1px; }
+.cmpdf { margin: 0 0 1px 15px; color: var(--dim); font-size: 11px; }
+.cmpdf span { color: #8a9099; }
+.cmpn { display: inline-block; margin-left: 5px; padding: 0 3px; font-size: 10px; line-height: 12px; background: #2a2140; color: #d6c6f5; border-radius: 2px; }
+.cmpn:hover { background: #3c2f5c; text-decoration: none; }
+.cmpnote.flash { animation: lyflash 1.2s; }
+.cmpnote i { color: #c9f2d4; font-style: normal; }
+.cmptl { margin: 2px 0 3px; }
+.cmpln { position: relative; height: 15px; margin: 1px 0 1px 14px; background: var(--bg2); }
+.cmpln > i { position: absolute; left: -13px; top: 0; font-style: normal; font-size: 9px; line-height: 15px; color: var(--dim); }
+.cmpln .tb { position: absolute; top: 1px; bottom: 1px; overflow: hidden; white-space: nowrap; font-size: 9.5px; line-height: 13px; padding: 0 2px; background: #2c3038; color: #9aa0a8; box-shadow: inset -1px 0 0 var(--bg); }
+.cmpln .tb.st-added { background: #1f4a2c; color: #c9f2d4; } .cmpln .tb.st-removed { background: #4a1f22; color: #f2c9cc; }
+.cmpln .tb.st-moved { background: #4a3a14; color: #f3d9a6; } .cmpln .tb.st-changed { background: #1f3550; color: #c6dcf5; }
+.cmpab { display: flex; flex-wrap: wrap; gap: 6px; }
+.cmpas { border: 1px solid var(--line2); background: var(--bg2); padding: 2px 4px 4px; }
+.cmpat { font-size: 11px; line-height: 15px; }
+.cmpim { display: flex; align-items: center; gap: 4px; }
+.cmpim figure { margin: 0; }
+.cmpim .im { width: 160px; height: 100px; display: flex; align-items: center; justify-content: center; background: #0b0c0e; }
+.cmpim img { max-width: 100%; max-height: 100%; display: block; }
+.cmpim figcaption { font-size: 10px; color: var(--dim); line-height: 12px; }
+.cmpim .ar { color: var(--dim); }
+.cmpup { color: #f0a090; }

@@ -197,6 +197,7 @@ export async function verifyCharacters({ browser, BASE, DATA, OUT, post, writeHe
   const editFrom = async (nid, text, out, choice) => {
     await pg.evaluate((id) => window.WB.characters.node(id, 'view'), nid); await wait(150);
     await click('.chnp [data-a=edit]'); await until(() => !!window.WB.characters.ws.sk?.api); await wait(200);
+    await until(() => !!document.querySelector('.chedtext'));   // the editor's side panel renders after the sketch (a race under load otherwise)
     await pg.evaluate(() => document.querySelector('.chedtext').focus()); await pg.keyboard.type(text);
     const before = reqs().length; await click('.chedside [data-a=reqedit]');
     const R = (await fileUntil('requests.json', (j) => j.items.length > before)).items.at(-1);
