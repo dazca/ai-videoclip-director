@@ -25,6 +25,7 @@ import { inFlight } from './revisions.js';
 import { currentVersion, flatLines, assetApproval } from './flow.js';
 import { takesChecklist } from './takes.js';
 import { gateCheck } from './surfaces.js';
+import { chaptersView } from './chapters.js';
 
 export const GROUPS = [
   { id: 'lyrics', title: 'Lyrics', n: 1 }, { id: 'script', title: 'Script', n: 2 }, { id: 'breakdown', title: 'Breakdown', n: 3 },
@@ -173,6 +174,9 @@ export function finalView(I) {
     lg.gaps.map(g => { const sh = shots.find(x => x.t0 <= g.t0 && g.t0 < x.t1); return { label: g.label, jump: sh ? { stage: 'storyboard', focus: sh.id } : { stage: 'storyboard', t: g.t0 } }; }));
   add('assets', 'every asset the shots need is approved', !gaps.assets.length, gaps.assets.length ? `${pl(gaps.assets.length, 'asset')} not approved` : 'all approved',
     gaps.assets.map(a => ({ label: `${a.name}${a.variant ? ' · ' + a.variant_name : ''}: ${a.why || 'not approved'}`, jump: { stage: A.TYPE[a.type]?.stage || 'characters', focus: a.id } })));
+  // E6, looks per context: a cast character of a shot with a world wears its look for that world
+  add('looks', "every character wears the look of the shot's world", !gaps.looks.length, gaps.looks.length ? `${pl(gaps.looks.length, 'look')} off their world` : 'every look matches its world',
+    gaps.looks.map(l => ({ label: `${l.shot} · ${l.name}: ${l.why}`, jump: { stage: 'storyboard', focus: l.shot } })));
   const oc = N.openCounts(notes), live = inFlight(I.revisions);
   add('notes', 'no open notes', !oc.total, oc.total ? `${pl(oc.total, 'open note')}${oc.asks ? ` (${pl(oc.asks, 'ask')} for the agent)` : ''}` : 'none open',
     Object.entries(oc.stages).filter(([, n]) => n).map(([s, n]) => ({ label: `${N.STAGE_TITLE[s] || s}: ${n}`, jump: s === 'timeline' ? { view: 'notes' } : { stage: s } })));
@@ -189,7 +193,9 @@ export function finalView(I) {
   const groups = GROUPS.map(g => ({ ...g, rows: rows.filter(r => r.group === g.id) })).filter(g => g.rows.length);
   const counts = { total: rows.length, ...Object.fromEntries(ST.map(s => [s, rows.filter(r => r.st === s).length])), notes: rows.filter(r => r.notes_open).length,
     by_group: Object.fromEntries(groups.map(g => [g.id, g.rows.length])) };
-  return { rows, groups, counts, checklist: C, ready: C.every(c => c.ok), failing: C.filter(c => !c.ok).map(c => c.id), costs: costView, lock: lockOf(I.revisions) };
+  // E3: the chapters with their derived build status (planned / generating / built / approved)
+  const chapters = chaptersView(I.board, { scenes, shots, approvals: I.approvals, requests: reqs }).map(({ shot_ids: _s, ...c }) => c);
+  return { rows, groups, counts, checklist: C, ready: C.every(c => c.ok), failing: C.filter(c => !c.ok).map(c => c.id), costs: costView, lock: lockOf(I.revisions), chapters };
 }
 
 // what approving a set of rows commits: drafts become approved requests (their estimate is committed); the rest spend nothing

@@ -40,8 +40,13 @@ mcp.registerTool('look_create', {
   title: 'Propose a look (costume) for a character',
   description: 'Add a look to a character\'s looks[] with status "review" (only the director approves looks, in the page). name, garments, colors, description; from_item = the breakdown wardrobe item it comes from. Its tree "look:<id>" starts from the approved identity: then propose the look sheet with request_create (kind "look-sheet", char {id, tree: "look:<id>", from: <approved identity node>, kind: "look"}, refs = the identity image + garment refs).',
   inputSchema: { project, id: charId, name: z.string(), look_id: z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/).optional(), garments: z.array(z.string()).optional(), colors: z.array(z.string()).optional(),
-    description: z.string().optional(), from_item: z.string().optional(), by },
+    description: z.string().optional(), from_item: z.string().optional(), world: z.string().optional().describe('E6: the world this look is for ("on screen", "off screen", "dancing"): shots in that world then wear it.'), by },
 }, wrap((a) => op('look_create', a)));
+mcp.registerTool('look_world_propose', {
+  title: 'Propose the world a look is for (E6)',
+  description: 'LOOKS_PLAN as data: one look per world (on the screen / out of the screen / dancing) for each character. A look\'s world (`context`) decides which shots wear it: a shot in world W (its own context, else its scene\'s) dresses each cast character in their look tagged W, unless the shot overrides it. The world of an existing look is the director\'s: this writes a PROPOSAL on the look (world_proposal {world, why}) they accept or dismiss in the page (Characters stage, the look). world null proposes "no world". A new look gets its world directly with look_create world. Set a scene\'s world with scenes_update (context) and a shot\'s with shots_update (context); mismatches show in gaps_get (looks) and Final\'s checklist (looks).',
+  inputSchema: { project, id: charId, look: z.string(), world: z.string().nullable(), why: z.string().optional(), by },
+}, wrap((a) => op('look_world_propose', a)));
 
 // ------------------------------------------------------------------ stages 4 and 5: every asset (characters, locations, props) on one code path
 

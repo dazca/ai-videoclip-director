@@ -47,7 +47,10 @@ time.
    "variants": {"desk": "dusk"}                                              // the variant per location / prop (null = base)
  }, {
    "id": "sh08", "t0": 22800, "t1": 25200, "status": "placeholder",
-   "placeholder": {"reason": "unpicked", "label": "webcam: his face"},       // unpicked | private | missing | unmapped
+   "placeholder": {"reason": "unpicked", "label": "webcam: his face",       // unpicked | private | missing | unmapped
+                   "id": "sh08", "kind": "close", "time": "0:22.8–0:25.2", "text": "…", "cast": ["Dani"], "world": "on screen",
+                   "svg": "<svg …>…</svg>"},   // E5: the neutral placeholder FRAME the workbench draws (js/placeholder.js), escaped
+   "world": "on screen",                                                     // E6: the shot's world (its own, else its scene's), when it has one
    "uses": ["G08@25200"], "looks": {}, "variants": {}
  }],
  "warnings": [],
@@ -204,3 +207,15 @@ Nothing else moves:
 2. Should edl.json be linked live (a junction to the workbench's exports folder) or copied by hand per render?
 3. Should a missing or invalid edl.json fail the render, or fall back silently to today's code? The proposal falls
    back silently, and `window.AZ_EDL` stays null.
+
+## E3 / E5 / E6 additions (still version 1: new optional fields only)
+
+- `chapters` (top level): `[{id, name, scenes, t0, t1, owner, file, status, shots, picked, placeholders}]`, the chapters of the
+  storyboard with their build status DERIVED from the picks and approvals (planned / generating / built / approved). A chapter is
+  "built" when no shot of it renders as a placeholder.
+- `placeholder.svg` (and `id`, `kind`, `time`, `text`, `cast`, `world`) on every placeholder row: the neutral 16:9 frame with the
+  shot's id that the workbench draws on its cards and timeline. It is made from the shot's own text only, so a private take never
+  leaks through it. The reader exposes it as `placeholder_src` (a `data:` URI for `<img src>`), so a chapter can be built before
+  its footage lands and picks the take up when it does.
+- `world` on a shot row (its own world, else its scene's), and `looks` resolved through it: a cast character wears the look tagged
+  with the shot's world unless the shot overrides it.

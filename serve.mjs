@@ -51,6 +51,7 @@ import { checkLyrics } from './js/flow.js';
 import { checkScenes, SCENE_STATUSES } from './js/scenes.js';
 import { checkBreakdown, ITEM_STATUSES } from './js/breakdown.js';
 import { checkBoard } from './js/storyboard.js';
+import { cleanChapters } from './js/chapters.js';
 import { checkNotes } from './js/notes.js';
 import * as BT from './js/batches.js';
 
@@ -380,6 +381,12 @@ function stampPage(name, data, cur, fromPage = true) {
     const picks = new Map(curShots.filter(x => x.clip).map(x => [x.id, x.clip])), surf = new Map(curShots.filter(x => x.lyrics?.length).map(x => [x.id, x.lyrics]));
     const keepPicks = (shots) => shots.map(x => { const { clip: _c, lyrics: _l, ...r } = x; return { ...r, ...(picks.has(x.id) ? { clip: picks.get(x.id) } : {}), ...(surf.has(x.id) ? { lyrics: surf.get(x.id) } : {}) }; });
     data.versions = data.versions.map(v => cv.get(v.id) || { ...v, shots: keepPicks(v.shots), created: at, ...(v.via === 'import' && !cur.versions ? {} : { ...W }) });
+    // E3 chapters (outside the versions): cleaned (a `status` is dropped: the build status is derived); a changed one is stamped
+    if (data.chapters != null || cur.chapters != null) {
+      let ch; try { ch = cleanChapters(data.chapters ?? cur.chapters ?? []); } catch (e) { throw new S.WbError(400, `storyboard.json: ${e.message}`); }
+      const old = new Map((cur.chapters || []).map(c => [c.id, c])), body = (c) => JSON.stringify({ ...c, by: 0, via: 0, at: 0 });
+      data.chapters = ch.map(c => { const o = old.get(c.id); return o && body(o) === body(c) ? { ...o } : { ...c, ...W, at }; });
+    }
     data.notes = (data.notes || []).filter(n => n && typeof n === 'object').map(n => {
       const c = cn.get(n.id), cr = new Map((c?.replies || []).map(r => [r.id, r]));
       const replies = (Array.isArray(n.replies) ? n.replies : []).filter(r => r && typeof r === 'object').map(r => cr.get(r.id) ? { ...r, by: cr.get(r.id).by, via: cr.get(r.id).via, at: cr.get(r.id).at } : { ...r, ...W, at });

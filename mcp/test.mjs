@@ -17,7 +17,8 @@
 // refuses agent writes, proposals included), the review fixes (a failed request back to draft in a duplicate / restore,
 // private refs uploaded only with the director's tick),
 // refuses agent writes, proposals included), take selection (takes_get / take_propose; the pick is the page's, on the shot),
-// the lyric gate (surfaces_get / surface_propose; accepting a surface is the page's, on the shot),
+// the lyric gate (surfaces_get / surface_propose; accepting a surface is the page's, on the shot), chapters, placeholder frames and
+// looks per world (chapters_update, look_world_propose, the worlds of scenes / shots, the gaps, Final, edl.json; E3 / E5 / E6),
 // resources, the director-session prompt, the guard rules (edit voids approval, director-only approvals, media kind,
 // CSRF / Host / token checks, path traversal and the PRIVATE rule) and the offline (files only) mode. The temp folder
 // is removed at the end, whatever happens; data/demo must be byte-identical afterwards.
@@ -1809,6 +1810,54 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
     { upd: upd.status, rem: rem.status, imp: imp.body, impA: impA.status });
 }
 // ==================== 25. (E1) named sync points and the re-time: END ====================
+// ==================== 26. (E3 / E5 / E6) chapters, placeholder frames, looks per world: BEGIN ====================
+// On its own project copy (mcp-worlds): js/chapters.js, js/placeholder.js, js/worlds.js, chapters_update and look_world_propose
+// (lib/ops/storyboard.mjs, lib/ops/assets.mjs). look_create gives a new look its world; look_world_propose only proposes (the
+// page accepts: asset_act, 403 to the agent surface and offline); scenes / shots carry a world and the cast chips wear the
+// world's look (storyboard_get source "world"), a character without one is a gap (gaps_get looks, final_get's line `looks`);
+// chapters_update writes chapters with a derived status (a status sent: ignored), storyboard_get / final_get / edl.json list
+// them; the export's placeholders carry the frame (placeholder.svg) and the world; offline the same rules hold.
+{
+  const WP = 'mcp-worlds';
+  S.duplicateProject(PROJECT, WP, true);
+  const pageOp = (name, body = {}) => post(`/api/op/${name}?project=${WP}`, body, { origin: URL_ });
+  const agentOp = (name, body = {}) => post(`/api/op/${name}?project=${WP}`, body);
+  const tools = (await mcp.listTools()).tools;
+  const tl = (n) => tools.find(t => t.name === n);
+  const lc = await call(mcp, 'look_create', { project: WP, id: 'bo', name: 'Dance kit', world: 'dancing' });
+  const lp = await call(mcp, 'look_world_propose', { project: WP, id: 'ada', look: 'base', world: 'on screen', why: 'LOOKS_PLAN: the hoodie is on screen' });
+  const agentAcc = await agentOp('asset_act', { type: 'character', id: 'ada', act: 'look_world_accept', look: 'base', via: 'page' });
+  const pageAcc = await pageOp('asset_act', { type: 'character', id: 'ada', act: 'look_world_accept', look: 'base' });
+  const sc = await call(mcp, 'scenes_update', { project: WP, upsert: [{ id: 'sc01', context: 'on screen' }, { id: 'sc02', context: 'dancing' }] });
+  const sb = await call(mcp, 'storyboard_get', { project: WP }), shots = sb.scenes.flatMap(x => x.shots);
+  const s1 = shots.find(x => x.id === 's1-intro'), s4 = shots.find(x => x.id === 's4-chorus');
+  const g = await call(mcp, 'gaps_get', { project: WP }), f = await call(mcp, 'final_get', { project: WP }), fl = f.checklist.find(c => c.id === 'looks');
+  check('E6 tools: look_create world (a new look), look_world_propose (a proposal the page accepts: the agent surface 403 even with via "page"); scenes_update context; storyboard_get dresses Bo in "Dance kit" on the dancing shots (source world) and lists the worlds + the look matrix; Ada has no dancing look: gaps_get looks + final_get\'s line',
+    !lc.error && lc.world === 'dancing' && !lp.error && lp.proposal?.world === 'on screen' && agentAcc.status === 403 && pageAcc.status === 200 && pageAcc.body?.world === 'on screen'
+    && !sc.error && s1?.world === 'on screen' && s4?.assets.find(a => a.id === 'bo')?.variant === 'dance-kit' && s4.assets.find(a => a.id === 'bo').source === 'world'
+    && sb.worlds.includes('dancing') && g.counts.looks >= 2 && g.looks.every(l => l.id === 'ada') && fl && !fl.ok && fl.gaps.length === Math.min(12, g.counts.looks)
+    && /world/.test(tl('look_create')?.description + JSON.stringify(tl('look_create')?.inputSchema)) && /PROPOSAL/.test(tl('look_world_propose')?.description || ''),
+    { lc: lc.error || lc.world, agentAcc: agentAcc.status, pageAcc: pageAcc.status, s4: s4?.assets.map(a => [a.id, a.variant, a.source]), looks: g.counts?.looks });
+  const cu = await call(mcp, 'chapters_update', { project: WP, upsert: [{ name: 'One', scenes: ['sc01', 'sc02'], owner: 'agent-a', status: 'built' }, { name: 'Two', scenes: ['sc03'] }] });
+  const mv = await call(mcp, 'chapters_update', { project: WP, upsert: [{ id: 'c2', scenes: ['sc02', 'sc03'] }] });
+  const rm = await call(mcp, 'chapters_update', { project: WP, remove: ['c9'] });
+  const ex = await call(mcp, 'composition_export', { project: WP }), edl = JSON.parse(fs.readFileSync(path.join(DATA, WP, 'exports', 'composition', 'edl.json'), 'utf8'));
+  const r4 = edl.shots.find(x => x.id === 's4-chorus');
+  const sb2 = await call(mcp, 'storyboard_get', { project: WP }), f2 = await call(mcp, 'final_get', { project: WP });
+  check('E3 / E5 tools: chapters_update (upsert; a status sent ignored with a warning; a scene moved to c2 leaves c1; an unknown id 404); storyboard_get / final_get / edl.json list the chapters with their DERIVED status; every unpicked shot exports its placeholder frame (svg with its id) and its world',
+    !cu.error && /status ignored/.test(JSON.stringify(cu.warnings || [])) && cu.chapters.length === 2 && cu.chapters.every(c => ['planned', 'generating'].includes(c.status))
+    && !mv.error && mv.chapters.find(c => c.id === 'c1').scenes.join() === 'sc01' && mv.chapters.find(c => c.id === 'c2').scenes.join() === 'sc02,sc03' && /error 404/.test(rm.error || '')
+    && sb2.chapters.length === 2 && sb2.scenes.find(x => x.id === 'sc02').chapter === 'c2' && f2.chapters.length === 2 && !ex.error && edl.chapters.length === 2
+    && r4?.status === 'placeholder' && r4.world === 'dancing' && /<svg[^>]*>.*s4-chorus/.test(r4.placeholder.svg) && edl.shots.every(x => x.status !== 'placeholder' || x.placeholder.svg),
+    { cu: cu.error || cu.chapters?.map(c => [c.id, c.status]), mv: mv.error || mv.chapters?.map(c => [c.id, c.scenes]), rm: rm.error, ex: ex.error || ex.counts });
+  // offline (no server): the same rules on the files
+  const off = await connect({ WORKBENCH_URL: 'http://localhost:9' });
+  const oc = await call(off, 'chapters_update', { project: WP, upsert: [{ id: 'c1', owner: 'offline' }] }), ow = await call(off, 'look_world_propose', { project: WP, id: 'ada', look: 'base', world: '<b>' });
+  let offAct = null; try { S.ops.asset_act(WP, { type: 'character', id: 'ada', act: 'look_world', look: 'base', world: 'dancing' }); offAct = 'allowed'; } catch (e) { offAct = e.code; }
+  await off.close();
+  check('E3 / E6 offline: chapters_update works on the files; a bad world is 400; the look\'s world without the page is 403', !oc.error && oc.chapters.find(c => c.id === 'c1')?.owner === 'offline' && /error 400/.test(ow.error || '') && offAct === 403, { oc: oc.error, ow: ow.error, offAct });
+}
+// ==================== 26. (E3 / E5 / E6) chapters, placeholder frames, looks per world: END ====================
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {
   // ---------------------------------------------------------------- clean up whatever happened

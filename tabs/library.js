@@ -1,5 +1,6 @@
-// Characters / Locations / Props (SPEC v2 section 8): images do the talking. Characters = cards with a big face, the
-// full body and a strip of head angles / expressions cropped from the 3x3 sheets; click = character page (identity
+// Characters / Locations / Props (SPEC v2 section 8): images do the talking. Characters (F2: compact) = one dense row per
+// lead, 1 px separators, no gutters: face, body, name / status / role, its LOOKS as small cards (name, world, status) with
+// "+ New look" as a card of its own, then a strip of head angles / expressions cropped from the 3x3 sheets; click = character page (identity
 // sheet, LOOKS as cards with "+ New look", expressions, motion clips, lives). Locations = establishing image + angles /
 // times of day + clips shot there + "+ New angle / time of day". Props = hero image + "+ New variant".
 // Every image carries data-media (hover = dock preview, right-click = media menu); cards carry data-ent (entity menu).
@@ -8,6 +9,7 @@ import { fmt } from '../js/timeline.js';
 import { openLookForm } from '../core/partb.js';
 import { esc, mediaAttr, hexColor } from '../core/esc.js';
 import { assetApproval } from '../js/flow.js';
+import { lookWorld } from '../js/worlds.js';
 
 const M = (p) => store.mediaByPath[p];
 const lock = (p) => isPrivatePath(p) ? '<i class="lock" title="private: crop of a real photo; local only, never exported">🔒</i>' : '';
@@ -46,10 +48,14 @@ const clipMedia = (g) => { const take = store.uses.find(u => u.clip === g)?.take
 function charGrid() {
   const C = store.entities.filter(e => e.kind === 'character');
   const leads = C.filter(e => !e.life_of), lives = C.filter(e => e.life_of && e.id.startsWith('avatar')), dancers = C.filter(e => /^[dh]\d$/.test(e.id));
+  // a look as a small card: its sheet, name, world (E6) and status; "+ New look" is a card of its own (F2)
+  const lk = (e, l) => { const hero = arr(l.images).find(p => /b_variations|H0/.test(p)) || arr(l.images)[0];
+    return `<div class="lk" data-look="${esc(e.id)}/${esc(l.id)}" data-dock="look:${esc(e.id)}/${esc(l.id)}" title="${esc(`${l.name || l.id}${arr(l.garments).length ? ': ' + arr(l.garments).join(', ') : ''}${lookWorld(l) ? ' · world ' + l.context : ''} · ${l.status || 'draft'}`)}">${im(hero, 'lki')}<span class="lkn">${esc(l.name || l.id)}</span><span class="lkm"><i class="lks s-${l.status === 'approved' ? 'approved' : 'draft'}"></i>${lookWorld(l) ? esc(l.context) : '<em>no world</em>'}</span></div>`; };
   const lead = (e) => `<div class="cc card lead" data-ent="${esc(e.id)}" data-open="${esc(e.id)}">
-      <div class="ch">${achip(e)}<b>${esc(e.name)}</b> <span class="dim">${(e.looks || []).length} looks · ${(e.motion || []).length} dances${e.lives ? ' · ' + e.lives.length + ' lives' : ''}</span>${e.private_refs?.length ? ' <i class="lock" title="has private identity refs (local only)">🔒</i>' : ''}</div>
-      <div class="cb">${im(e.face, 'face')}${im(e.body, 'body')}<div class="strip">${cells(e.sheets?.angles?.[0])}${cells(e.sheets?.expressions?.[0])}${!e.sheets?.angles ? (e.sheets?.['full body'] || []).map(p => im(p, 'sq')).join('') + (e.looks || []).flatMap(l => arr(l.images).slice(2, 4)).map(p => im(p, 'sq')).join('') : ''}</div></div>
-      <div class="cr">${esc(e.role || '')}</div></div>`;
+      <div class="ci"><div class="ch">${achip(e)}<b>${esc(e.name)}</b>${e.private_refs?.length ? ' <i class="lock" title="has private identity refs (local only)">🔒</i>' : ''}</div><div class="cm dim">${(e.looks || []).length} looks · ${(e.motion || []).length} dances${e.lives ? ' · ' + e.lives.length + ' lives' : ''}</div><div class="cr">${esc(e.role || '')}</div></div>
+      <div class="cb">${im(e.face, 'face')}${im(e.body, 'body')}</div>
+      <div class="clooks">${(e.looks || []).filter(l => l && l.id).map(l => lk(e, l)).join('')}<div class="lk add" data-newlook="${esc(e.id)}" title="design a new costume for ${esc(e.name)}: a draft generation request with a cost estimate"><span class="plus">+</span><b>New look</b></div></div>
+      <div class="strip">${cells(e.sheets?.angles?.[0])}${cells(e.sheets?.expressions?.[0])}${!e.sheets?.angles ? (e.sheets?.['full body'] || []).map(p => im(p, 'sq')).join('') + (e.looks || []).flatMap(l => arr(l.images).slice(2, 4)).map(p => im(p, 'sq')).join('') : ''}</div></div>`;
   const life = (e) => `<div class="cc card life" data-ent="${esc(e.id)}" data-open="${esc(e.id)}"><div class="ch">${achip(e)}<b>${esc(e.name)}</b></div>${im(e.face, 'wide')}<div class="cu">${used(e.looks?.[0]?.used, 4)}</div></div>`;
   const dancer = (e) => { const mo = e.motion?.[0]; return `<div class="cc card life" data-ent="${esc(e.id)}"><div class="ch">${achip(e)}<b>${esc(e.name)}</b> <span class="dim">${esc(mo?.name || '')}</span></div>${im(mo?.dancer || mo?.clip, 'wide fit')}<div class="cu">${used(mo?.used, 4)}</div></div>`; };
   return `<div class="lib"><div class="sec">leads</div><div class="cgrid">${leads.map(lead).join('')}</div>

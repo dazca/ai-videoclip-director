@@ -5,7 +5,7 @@ import { mcp, op, wrap, project, time, by } from './_shared.mjs';
 
 // ------------------------------------------------------------------ stage 2: the script draft (intake, scenes, beats, sketches)
 const beat = z.object({ id: z.string().optional(), t: time, text: z.string() });
-const scene = z.object({ id: z.string().optional().describe('Scene id (sc01…). Leave out for a new scene.'), t0: time.optional(), t1: time.optional(), title: z.string().optional(), text: z.string().optional().describe('What happens: the visual description.'),
+const scene = z.object({ id: z.string().optional().describe('Scene id (sc01…). Leave out for a new scene.'), t0: time.optional(), t1: time.optional(), title: z.string().optional(), context: z.string().nullable().optional().describe('E6: the scene\'s WORLD ("on screen", "off screen", "dancing"): every character in its shots wears the look tagged with that world (unless a shot overrides it). null = none.'), text: z.string().optional().describe('What happens: the visual description.'),
   beats: z.array(beat).optional().describe('Timed actions inside the scene (t between t0 and t1).'), sketches: z.array(z.string()).optional().describe('Sketch ids (sketch_list / sketch_save).'),
   anchors: z.object({ t0: z.string().optional(), t1: z.string().optional() }).optional().describe('E1: tie a boundary to a named event (events_get ids): {t0?: "her_hi_there"}; it takes the time of the event and follows it when the director re-times after the take') }).passthrough();
 mcp.registerTool('script_get', {

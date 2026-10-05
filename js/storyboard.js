@@ -10,7 +10,9 @@
 //          clip?: the director's picked take {request, take, file, media, kind, in_ms, out_ms, note, alt[], by, via, at}
 //          (js/takes.js; written only by the page's take_act, carried forward by every other save),
 //          lyrics?: [{line, w?: [first, last], where}] the lyric gate's surfaces: where each lyric line / word range of the
-//          shot's time appears on screen (js/surfaces.js; written only by the page's surface_act, carried forward the same way)}
+//          shot's time appears on screen (js/surfaces.js; written only by the page's surface_act, carried forward the same way),
+//          context?: the shot's WORLD when it differs from its scene's (E6, js/worlds.js: a cast chip then wears the look
+//          tagged with that world)}
 //          t0 < t1 are integer ms of the song; the shots of a scene TILE it (the first starts with the scene, each next one
 //          where the previous ends, the last ends with the scene); boundaries snap to the beat grid (song.json grid).
 //          kind: wide | medium | close | insert | performance | xp-desktop (or any short lower-case word: older shots.json
@@ -18,6 +20,8 @@
 //          chips name entities; the variant each needs is the scene's (the director's pick in the Scenery / Characters
 //          stage, entity `uses`), unless the shot overrides it in `variants` (null = the root: identity / base).
 //          gen = what the shot needs generated (default from the kind: insert / xp-desktop = a still, else a video).
+//   chapters: [{id "c1", name, scenes[], owner?, file?, note?}] (E3, js/chapters.js: outside the versions; the build status
+//          is derived)
 //   Note  {id "sbn01", shot: id | null, scene?: id, text, by, via, to?: "agent", kind?: request | storyboard | fill_gaps,
 //          gaps?: {...}, status: open | resolved, at, version, replies: [{id, text, by, via, at}]}
 //   A version is immutable: a save appends one and moves `current`; a restore appends a copy. A project without the file
@@ -31,6 +35,8 @@ import * as P from './prices.js';
 import { shapeClip } from './takes.js';
 import { cleanSurfaces } from './surfaces.js';
 import { snapToEvent, anchorsOf, checkAnchors, settleAnchors } from './events.js';
+import { cleanWorld, shotWorld, worldLook, lookWorld } from './worlds.js';
+import { cleanChapters } from './chapters.js';
 
 export const SHOT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 export const SCENE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
@@ -142,10 +148,11 @@ export function cleanShot(s, song, { snap, events, warnings } = {}) {
   const thumb = typeof s.thumb === 'string' && THUMB_RE.test(s.thumb) && !s.thumb.split('/').includes('..') ? s.thumb : null;
   let clip = null; if (s.clip != null) { try { clip = shapeClip(s.clip, `shot ${id}: clip`); } catch (e) { throw new Error(e.message); } }
   let lyrics = []; try { lyrics = cleanSurfaces(s.lyrics); } catch (e) { throw new Error(`shot ${id}: ${e.message}`); }
+  let context = null; try { context = cleanWorld(s.context); } catch (e) { throw new Error(`shot ${id}: ${e.message}`); }
   return { id, scene, t0, t1, kind, title: String(s.title ?? '').slice(0, 300), text: String(s.text ?? '').slice(0, 8000), camera: String(s.camera ?? '').slice(0, 2000), sketch,
     beats: list('beats', BEAT_RE, 200), cast: list('cast', ENT_ID, 40), locations: list('locations', ENT_ID, 40), props: list('props', ENT_ID, 40), variants, gen,
     clips: list('clips', CLIP_RE, 100), ...(thumb ? { thumb } : {}), ...(s.section ? { section: String(s.section).slice(0, 60) } : {}), ...(clip ? { clip } : {}), ...(lyrics.length ? { lyrics } : {}),
-    ...(anchors ? { anchors } : {}) };
+    ...(anchors ? { anchors } : {}), ...(context ? { context } : {}) };
 }
 // the shots of each scene tile it: sorted by start; the first starts with the scene, each one ends where the next starts,
 // the last ends with the scene. Shots of an unknown scene (or none) are left as they are. Returns warnings; throws when a
@@ -193,8 +200,10 @@ export function checkBoard(d) {
       if (s.clip != null) shapeClip(s.clip, `storyboard.json: ${v.id}/${s.id}: clip`);
       if (s.lyrics != null) { try { cleanSurfaces(s.lyrics); } catch (e) { throw new Error(`storyboard.json: ${v.id}/${s.id}: ${e.message}`); } }
       checkAnchors(s.anchors, `storyboard.json: ${v.id}/${s.id}`);
+      if (s.context != null) { let w; try { w = cleanWorld(s.context); } catch (e) { throw new Error(`storyboard.json: ${v.id}/${s.id}: ${e.message}`); } if (w !== s.context) throw new Error(`storyboard.json: ${v.id}/${s.id}: context must be a world name in lower case`); }
     }
   }
+  if (d.chapters != null) { try { cleanChapters(d.chapters); } catch (e) { throw new Error(`storyboard.json: ${e.message}`); } }
   if (d.versions.length && !vids.has(d.current)) throw new Error('storyboard.json: current must name a version');
   return d;
 }
@@ -228,25 +237,33 @@ export function useFor(ent, sceneId) {
 }
 const DONE = ['approved', 'locked'];
 // one asset of a shot, resolved: the variant (the shot's override, else the scene's), its image, approved or not
-export function resolveAsset(ent, shot, approvals) {
+// E6: a character in a shot with a world (the shot's context, else its scene's) wears its look for that world unless the shot
+// overrides it; `world` / `look_world` / `mismatch` say how the look sits with the world (scene = the shot's scene, optional)
+export function resolveAsset(ent, shot, approvals, scene = null) {
   const T = A.TYPE[ent.kind];
   const ov = shot?.variants && Object.hasOwn(shot.variants, ent.id) ? shot.variants[ent.id] : undefined;
+  const W = ent.kind === 'character' ? shotWorld(shot, scene) : { world: null }, wl = W.world ? worldLook(ent, W.world) : null;
   let variant, source;
-  if (ov !== undefined) { variant = ov && A.variants(ent, ent.kind).some(v => v.id === ov) ? ov : null; source = 'shot'; } else ({ variant, source } = useFor(ent, shot?.scene));
+  if (ov !== undefined) { variant = ov && A.variants(ent, ent.kind).some(v => v.id === ov) ? ov : null; source = 'shot'; }
+  else if (wl) { variant = wl.id; source = 'world'; }
+  else ({ variant, source } = useFor(ent, shot?.scene));
   const it = A.normIter(ent.iter), tree = variant ? A.variantTree(ent.kind, variant) : T.root, v = variant ? A.variants(ent, ent.kind).find(x => x.id === variant) : null;
   const apN = A.approvedNode(it, tree), head = A.headNode(it, tree);
   const legacy = !variant && (ent.status === 'approved' || DONE.includes(approvals?.items?.[`${ent.kind}:${ent.id}`]?.state));
   const approved = !!apN || (v ? v.status === 'approved' && !!(v.images || []).length : legacy);
   const image = apN?.image || head?.image || (v ? (v.images || [])[0] : ent.identity_sheet || ent.sheet || ent.face || ent.establishing || ent.hero || (typeof ent.thumb === 'string' ? ent.thumb : null)) || null;
   const why = approved ? null : !image ? `no ${variant ? T.vWord + ' sheet' : T.sheetWord} yet` : `${variant ? T.vWord : T.rootWord} not approved`;
-  return { type: ent.kind, id: ent.id, name: ent.name || ent.id, variant, variant_name: variant ? v?.name || variant : T.rootWord, source, approved, image, ...(why ? { why } : {}) };
+  const lw = v ? lookWorld(v) : null;
+  const mismatch = W.world && lw !== W.world ? (wl ? `wears “${v?.name || variant || T.rootWord}”${lw ? ` (world “${lw}”)` : ''} in a “${W.world}” shot: its look for “${W.world}” is “${wl.name || wl.id}”` : `has no look for the world “${W.world}”${variant ? ` (wears “${v?.name || variant}”${lw ? `, world “${lw}”` : ''})` : ''}`) : null;
+  return { type: ent.kind, id: ent.id, name: ent.name || ent.id, variant, variant_name: variant ? v?.name || variant : T.rootWord, source, approved, image, ...(why ? { why } : {}),
+    ...(W.world ? { world: W.world, world_source: W.source, look_world: lw, ...(wl ? { world_look: wl.id } : {}), ...(mismatch ? { mismatch } : {}) } : {}) };
 }
 // every asset chip of a shot, resolved (an id that is no entity: a location letter of an old shots.json, else missing)
-export function shotAssets(shot, entities, approvals) {
-  const out = [];
+export function shotAssets(shot, entities, approvals, scenes = null) {
+  const out = [], scene = shot?.scene && Array.isArray(scenes) ? scenes.find(x => x.id === shot.scene) || null : null;
   for (const [type, f] of Object.entries(FIELD)) for (const id of shot?.[f] || []) {
     const e = (entities || []).find(x => x.id === id && x.kind === type) || (type === 'location' ? (entities || []).find(x => x.kind === 'location' && x.letter === id) : null);
-    out.push(e ? resolveAsset(e, shot, approvals) : { type, id, name: id, variant: null, variant_name: '', source: 'default', approved: false, image: null, missing: true, why: `no ${type} "${id}"` });
+    out.push(e ? resolveAsset(e, shot, approvals, scene) : { type, id, name: id, variant: null, variant_name: '', source: 'default', approved: false, image: null, missing: true, why: `no ${type} "${id}"` });
   }
   return out;
 }
@@ -341,15 +358,17 @@ export function shotProposal(shot, scene, assets, { sketchPng = null, haveStill 
 }
 
 // ------------------------------------------------------------------ gaps: what is still missing, across the stages
-// -> {unscripted, no_shots, no_frame, assets, no_request, counts, estimate {shots, usd}}; each row says where to go
+// -> {unscripted, no_shots, no_frame, assets, looks, no_request, counts, estimate {shots, usd}}; each row says where to go;
+// looks (E6) = a cast character of a shot with a world whose look is not for that world (or who has none for it)
 export function boardGaps({ song, scenes = [], shots = [], entities = [], approvals, requests }) {
   const dur = song?.duration_ms || 0, sc = new Map(scenes.map(s => [s.id, s]));
   const unscripted = scriptGaps(scenes, dur).map(([t0, t1]) => ({ t0, t1, time: span(t0, t1) }));
   const no_shots = scenes.filter(s => !shots.some(x => x.scene === s.id)).map(s => ({ scene: s.id, title: s.title, time: span(s.t0, s.t1), beats: (s.beats || []).length }));
   const no_frame = shots.filter(s => !s.sketch && !s.thumb).map(s => ({ shot: s.id, scene: s.scene, time: span(s.t0, s.t1) }));
-  const am = new Map(), no_request = [];
+  const am = new Map(), no_request = [], looks = [];
   for (const s of shots) {
-    for (const a of shotAssets(s, entities, approvals)) {
+    for (const a of shotAssets(s, entities, approvals, scenes)) {
+      if (a.mismatch) looks.push({ shot: s.id, scene: s.scene, time: span(s.t0, s.t1), id: a.id, name: a.name, world: a.world, world_source: a.world_source, variant: a.variant, variant_name: a.variant_name, look_world: a.look_world, world_look: a.world_look || null, source: a.source, why: a.mismatch });
       if (a.approved) continue;
       const k = `${a.type}:${a.id}:${a.variant || ''}`;
       (am.get(k) || am.set(k, { type: a.type, id: a.id, name: a.name, variant: a.variant, variant_name: a.variant_name, why: a.why, missing: !!a.missing, shots: [] }).get(k)).shots.push(s.id);
@@ -358,14 +377,14 @@ export function boardGaps({ song, scenes = [], shots = [], entities = [], approv
     if (!(s.clips || []).length && !reqs.length) { const e = shotEstimate(s); no_request.push({ shot: s.id, scene: s.scene, time: span(s.t0, s.t1), kind: s.kind, gen: e.gen, usd: e.usd, scene_title: sc.get(s.scene)?.title || null }); }
   }
   const assets = [...am.values()];
-  const counts = { unscripted: unscripted.length, no_shots: no_shots.length, no_frame: no_frame.length, assets: assets.length, no_request: no_request.length };
-  return { unscripted, no_shots, no_frame, assets, no_request, counts, total: Object.values(counts).reduce((a, b) => a + b, 0), estimate: { shots: no_request.length, usd: sum(no_request.map(x => x.usd)) } };
+  const counts = { unscripted: unscripted.length, no_shots: no_shots.length, no_frame: no_frame.length, assets: assets.length, looks: looks.length, no_request: no_request.length };
+  return { unscripted, no_shots, no_frame, assets, looks, no_request, counts, total: Object.values(counts).reduce((a, b) => a + b, 0), estimate: { shots: no_request.length, usd: sum(no_request.map(x => x.usd)) } };
 }
 
 // ------------------------------------------------------------------ text (for word diffs of two versions)
 const clock = (ms) => { const s = Math.max(0, ms) / 1000, m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(1).padStart(4, '0')}`; };
 export function boardText(v) {
-  return [...(v?.shots || [])].sort(byTime).map(s => [`[${s.scene || '-'} ${s.id} ${clock(s.t0)}–${clock(s.t1)} ${s.kind}${s.gen ? ' ' + s.gen : ''}] ${s.title || ''}`, ...(s.text ? [s.text] : []), ...(s.camera ? [`camera: ${s.camera}`] : []),
+  return [...(v?.shots || [])].sort(byTime).map(s => [`[${s.scene || '-'} ${s.id} ${clock(s.t0)}–${clock(s.t1)} ${s.kind}${s.gen ? ' ' + s.gen : ''}${s.context ? ' world:' + s.context.replace(/ /g, '_') : ''}] ${s.title || ''}`, ...(s.text ? [s.text] : []), ...(s.camera ? [`camera: ${s.camera}`] : []),
     ...([...s.cast || [], ...s.locations || [], ...s.props || []].length ? [`with: ${[...s.cast || [], ...s.locations || [], ...s.props || []].map(x => x + (s.variants && Object.hasOwn(s.variants, x) ? `(${s.variants[x] || 'root'})` : '')).join(', ')}`] : []),
     ...(s.sketch ? [`frame: ${s.sketch}`] : []), ...(s.clip?.file ? [`take: ${s.clip.request || s.clip.file.split('/').pop()}.${s.clip.take ?? '?'}${s.clip.out_ms != null ? ` ${(s.clip.in_ms / 1000).toFixed(2)}–${(s.clip.out_ms / 1000).toFixed(2)} s` : ''}`] : [])].join('\n')).join('\n\n');
 }

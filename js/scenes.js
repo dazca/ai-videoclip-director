@@ -4,7 +4,8 @@
 // scenes.json  {rev, current: "v3", versions: [{id, n, created, by, via, message, from?, scenes: [Scene]}],
 //               states: {<scene id>: {status, by, via, at}}, notes: [Note], intake: {<question id>: Answer}}
 //   Scene   {id "sc03", t0, t1, title, text, line_ids[], beats: [{id "b1", t, text}], sketches: [sketch ids],
-//            anchors?: {t0?: event id, t1?: event id}}   anchors: the boundary follows a named event (js/events.js, E1)
+//            anchors?: {t0?: event id, t1?: event id}, context?: world}   anchors: the boundary follows a named event
+//            (js/events.js, E1); context: the scene's WORLD (E6, js/worlds.js): its shots' cast wear their look for it
 //           t0 < t1 are integer ms of the song; beats lie inside [t0, t1]; line_ids = the song.json lines that start
 //           inside the scene; sketches name files in sketches/<id>.json|.png|.mask.png (see lib/store.mjs sketch_*)
 //   states  per-scene status outside the versions: draft | needs_you | ok; only the page sets ok (the director)
@@ -15,6 +16,7 @@
 //   file reads as v1 derived from the old script.json (its `stages` become scenes, its `lines` their beats), so a
 //   project scripted before the guided flow opens with its script; script.json itself is never rewritten.
 import { snapToEvent, anchorsOf, checkAnchors, settleAnchors } from './events.js';
+import { cleanWorld } from './worlds.js';
 export const INTAKE = [
   { id: 'mood', q: 'Genre and mood', hint: 'e.g. dream-pop, melancholic but warm; what should it feel like' },
   { id: 'kind', q: 'Story, performance or concept?', hint: 'or a mix: which one carries the video' },
@@ -123,7 +125,8 @@ export function cleanScene(s, song, { snap, events, warnings } = {}) {
   const sketches = [...new Set((Array.isArray(s.sketches) ? s.sketches : []).map(String))];
   for (const k of sketches) if (!SKETCH_ID.test(k)) throw new Error(`scene ${s.id}: sketch id "${k}" (lower-case letters, digits, _ and -)`);
   const lines = song?.lines ? linesIn(song, t0, t1).map(l => l.id) : (Array.isArray(s.line_ids) ? s.line_ids.map(String) : []);
-  return { id: String(s.id), t0, t1, title: String(s.title ?? '').slice(0, 300), text: String(s.text ?? '').slice(0, 20000), line_ids: lines, beats, sketches, ...(anchors ? { anchors } : {}) };
+  let context = null; try { context = cleanWorld(s.context); } catch (e) { throw new Error(`scene ${s.id}: ${e.message}`); }
+  return { id: String(s.id), t0, t1, title: String(s.title ?? '').slice(0, 300), text: String(s.text ?? '').slice(0, 20000), line_ids: lines, beats, sketches, ...(anchors ? { anchors } : {}), ...(context ? { context } : {}) };
 }
 // a scenes.json from the page or an agent: the shape the tools rely on (throws a message on a bad file)
 export function checkScenes(d) {
@@ -142,6 +145,7 @@ export function checkScenes(d) {
       for (const b of s.beats) if (!b || typeof b.id !== 'string' || !Number.isFinite(b.t) || typeof b.text !== 'string') throw new Error(`scenes.json: ${v.id}/${s.id}: every beat needs id, t, text`);
       for (const k of s.sketches) if (typeof k !== 'string' || !SKETCH_ID.test(k)) throw new Error(`scenes.json: ${v.id}/${s.id}: bad sketch id`);
       checkAnchors(s.anchors, `scenes.json: ${v.id}/${s.id}`);
+      if (s.context != null) { let w; try { w = cleanWorld(s.context); } catch (e) { throw new Error(`scenes.json: ${v.id}/${s.id}: ${e.message}`); } if (w !== s.context) throw new Error(`scenes.json: ${v.id}/${s.id}: context must be a world name in lower case`); }
     }
   }
   if (d.versions.length && !ids.has(d.current)) throw new Error('scenes.json: current must name a version');
@@ -153,7 +157,7 @@ export const intakeOpen = (doc) => INTAKE.filter(q => !String(doc?.intake?.[q.id
 
 // the whole script as text (for word diffs of two versions)
 export function scriptText(v) {
-  return (v?.scenes || []).map(s => [`[${span(s.t0, s.t1)}] ${s.title || '(untitled)'}`, ...(s.text ? [s.text] : []), ...s.beats.map(b => `· ${clock(b.t)} ${b.text}`), ...(s.sketches.length ? [`sketches: ${s.sketches.join(', ')}`] : [])].join('\n')).join('\n\n');
+  return (v?.scenes || []).map(s => [`[${span(s.t0, s.t1)}] ${s.title || '(untitled)'}`, ...(s.text ? [s.text] : []), ...(s.context ? [`world: ${s.context}`] : []), ...s.beats.map(b => `· ${clock(b.t)} ${b.text}`), ...(s.sketches.length ? [`sketches: ${s.sketches.join(', ')}`] : [])].join('\n')).join('\n\n');
 }
 // which scenes were added / removed / changed between two versions
 export function sceneChanges(a, b) {

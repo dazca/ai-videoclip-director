@@ -11,10 +11,13 @@
  *   EDL.atSeconds(s)     at(s * 1000), for compositions that count in seconds
  *   EDL.shotAt(t)        the raw shot row (no resolution)
  *   EDL.song             the song's timing anchors (duration_ms, bpm, beat_ms, bar_ms, first_beat_ms, sections, lines)
+ *   EDL.chapters         the chapters with their derived build status (planned | generating | built | approved), E3
  * A resolution: {shot, t0, t1, inside, status: "picked" | "placeholder", file (relative to the composition, or null),
  *   kind: "video" | "image" | null, take, request, in_ms, out_ms, media_ms, media_s (the take's time to show at t:
  *   in_ms + (t - t0), clamped to [in_ms, out_ms); a still: 0), placeholder {reason: unpicked | private | missing |
- *   unmapped, label} | null, looks {character: look id | null}, variants {location / prop: variant id | null}, alt []}.
+ *   unmapped, label, id, kind, time, text, cast, world, svg} | null, placeholder_src (E5: the placeholder frame as a data:
+ *   URI for <img src>, or null), world (E6: the shot's world, or null), looks {character: look id | null}, variants
+ *   {location / prop: variant id | null}, alt []}.
  * Docs: docs/COMPOSITION_ROUNDTRIP.md in the Director Workbench. */
 (function (root) {
   "use strict";
@@ -40,7 +43,8 @@
       if (!s) return null;
       var tt = t == null ? s.t0 : Number(t), k = s.take || null;
       var r = { shot: s.id, t0: s.t0, t1: s.t1, inside: tt >= s.t0 && tt < s.t1, status: s.status, file: null, kind: null, take: null, request: null,
-        in_ms: null, out_ms: null, media_ms: null, media_s: null, placeholder: s.placeholder || null, looks: s.looks || {}, variants: s.variants || {}, alt: s.alt || [] };
+        in_ms: null, out_ms: null, media_ms: null, media_s: null, placeholder: s.placeholder || null, looks: s.looks || {}, variants: s.variants || {}, alt: s.alt || [],
+        placeholder_src: s.placeholder && s.placeholder.svg ? "data:image/svg+xml;charset=utf-8," + encodeURIComponent(s.placeholder.svg) : null, world: s.world || null };
       if (s.status !== "picked" || !k) return r;
       r.file = k.file; r.kind = k.kind; r.take = k.take; r.request = k.request; r.in_ms = k.in_ms; r.out_ms = k.out_ms;
       if (k.kind === "video") {
@@ -51,7 +55,7 @@
       return r;
     }
     return {
-      doc: doc, version: doc.version, checksum: doc.checksum || null, project: doc.project, song: doc.song || null, shots: shots,
+      doc: doc, version: doc.version, checksum: doc.checksum || null, project: doc.project, song: doc.song || null, shots: shots, chapters: doc.chapters || [],
       shotAt: shotAt,
       at: function (t) { return resolve(shotAt(Number(t)), t); },
       atSeconds: function (s) { var t = Number(s) * 1000; return resolve(shotAt(t), t); },

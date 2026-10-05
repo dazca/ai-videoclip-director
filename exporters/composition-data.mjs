@@ -11,7 +11,11 @@
 //   - one row per storyboard shot (the current version), in time order: id, t0 / t1 (song ms), scene, kind, title, the
 //     clip-use ids it covers (shots.json `uses`, e.g. "G05@20158"), the picked take (file mapped under the composition's
 //     assets, its workbench source, request / take, kind, in_ms / out_ms) or a placeholder {reason: unpicked | private |
-//     missing}, the alternatives, and the look / variant of every asset chip (js/storyboard.js resolveAsset)
+//     missing | unmapped, label, and (E5) the placeholder FRAME: id, kind, time, text, cast, world and `svg`, the same neutral
+//     16:9 frame the workbench draws (js/placeholder.js), so the composition can show it until the take lands}, the
+//     alternatives, and the look / variant of every asset chip (js/storyboard.js resolveAsset; E6: the look of the shot's
+//     world) with `world` when the shot has one; E3: `chapters` [{id, name, scenes, owner, file, status, shots, picked,
+//     placeholders}] with their derived build status
 //   - the song's timing anchors: duration, bpm, beat / bar length, first beat / downbeat, sections, line ids and times
 //   - PRIVATE media is never written: a picked take that is private (the PRIVATE path rule, or private:true in
 //     media.json) exports as a placeholder with reason "private" and no file name; a private alternative is dropped
@@ -25,6 +29,10 @@ import { fileURLToPath } from 'node:url';
 import * as SB from '../js/storyboard.js';
 import { cleanRel, fail, inside, isFlaggedPrivate, isPrivate, projDir, read, readJSON, writeAtomic } from '../lib/ops/_shared.mjs';
 import { boardDoc } from '../lib/ops/storyboard.mjs';
+import { scenesDoc } from '../lib/ops/scenes.mjs';
+import { currentScript } from '../js/scenes.js';
+import { placeholderFor } from '../js/placeholder.js';
+import { chaptersView } from '../js/chapters.js';
 
 export const FORMAT = 'director-workbench/composition-edl', VERSION = 1;
 export const DEFAULT_OUT = 'composition/edl.json', DEFAULT_MAP = [{ from: '', to: 'assets/' }];
@@ -59,7 +67,7 @@ export function mapFile(file, map) {
 const sortKeys = (o) => Object.fromEntries(Object.keys(o).sort().map(k => [k, o[k]]));
 export const checksumOf = (doc) => { const { checksum: _c, ...body } = doc; return 'sha256:' + createHash('sha256').update(JSON.stringify(body)).digest('hex'); };
 // input: {project, title, song, board (storyboard doc), entities, approvals, media (media.json items), isPrivate(path)}
-export function buildEdl({ project, title = null, song, board, entities = [], approvals = null, media = [], isPrivate: priv = () => false }, { map = DEFAULT_MAP } = {}) {
+export function buildEdl({ project, title = null, song, board, scenes = [], entities = [], approvals = null, requests = null, media = [], isPrivate: priv = () => false }, { map = DEFAULT_MAP } = {}) {
   const v = SB.currentBoard(board), shots = [...(v?.shots || [])].sort(SB.byTime);
   const byPath = new Map(media.filter(m => typeof m?.path === 'string').map(m => [m.path.replace(/\\/g, '/').toLowerCase(), m]));
   const mediaOf = (f) => byPath.get(String(f).replace(/\\/g, '/').toLowerCase()) || null;
@@ -67,8 +75,10 @@ export function buildEdl({ project, title = null, song, board, entities = [], ap
   const warnings = [], counts = { shots: shots.length, picked: 0, placeholders: 0, private: 0, unmapped: 0 };
   const rows = shots.map((s) => {
     const looks = {}, variants = {};
-    for (const a of SB.shotAssets(s, entities, approvals)) (a.type === 'character' ? looks : variants)[a.id] = a.missing ? null : a.variant;
-    const row = { id: s.id, t0: s.t0, t1: s.t1, scene: s.scene ?? null, kind: s.kind, title: s.title || '', uses: [...(s.clips || [])] };
+    let world = null;
+    for (const a of SB.shotAssets(s, entities, approvals, scenes)) { (a.type === 'character' ? looks : variants)[a.id] = a.missing ? null : a.variant; if (a.world) world = a.world; }
+    world ||= s.context || scenes.find(x => x.id === s.scene)?.context || null;
+    const row = { id: s.id, t0: s.t0, t1: s.t1, scene: s.scene ?? null, kind: s.kind, title: s.title || '', uses: [...(s.clips || [])], ...(world ? { world } : {}) };
     const c = s.clip, label = s.title || s.id;
     let reason = null;
     if (!c?.file) reason = 'unpicked';
@@ -79,7 +89,9 @@ export function buildEdl({ project, title = null, song, board, entities = [], ap
       counts.placeholders++; if (reason === 'private') counts.private++; if (reason === 'unmapped') counts.unmapped++;
       if (reason === 'missing') warnings.push(`${s.id}: the picked take is no longer in media.json: a placeholder`);
       if (reason === 'unmapped') warnings.push(`${s.id}: no map rule covers the picked take: a placeholder`);
-      Object.assign(row, { status: 'placeholder', placeholder: { reason, label } });
+      // E5: the placeholder frame (made from the shot's own text: never a file name, so a private take does not leak)
+      const ph = placeholderFor(s, { entities, scenes, reason });
+      Object.assign(row, { status: 'placeholder', placeholder: { reason, label, id: ph.id, kind: ph.kind, time: ph.time, text: ph.text, cast: ph.cast, world: ph.world, svg: ph.svg } });
     } else {
       counts.picked++;
       Object.assign(row, { status: 'picked', take: { file: mapFile(c.file, map), source: c.file, media: c.media ?? null, request: c.request ?? null, take: c.take ?? null,
@@ -102,6 +114,7 @@ export function buildEdl({ project, title = null, song, board, entities = [], ap
       sections: (song?.sections || []).map(x => ({ id: x.id, label: x.label ?? x.id, t0: x.t0, t1: x.t1 })),
       lines: (song?.lines || []).map(x => ({ id: x.id, t0: x.t0, t1: x.t1 })) },
     counts, shots: rows, warnings,
+    chapters: chaptersView(board, { scenes, shots, approvals, requests }).map(c => ({ id: c.id, name: c.name, scenes: c.scenes, t0: c.t0, t1: c.t1, owner: c.owner || null, file: c.file || null, status: c.status, shots: c.shots, picked: c.picked, placeholders: c.placeholders })),
   };
   doc.checksum = checksumOf(doc);
   return doc;
@@ -117,7 +130,7 @@ export function settingsOf(p) {
 export function edlOf(p, { map } = {}) {
   const st = settingsOf(p), M = checkMap(map ?? st.map) || DEFAULT_MAP;
   const meta = readJSON(path.join(projDir(p), 'project.json'), {}) || {};
-  return buildEdl({ project: p, title: meta.title || null, song: read(p, 'song.json'), board: boardDoc(p), entities: entitiesOf(p), approvals: read(p, 'approvals.json'),
+  return buildEdl({ project: p, title: meta.title || null, song: read(p, 'song.json'), board: boardDoc(p), scenes: currentScript(scenesDoc(p))?.scenes || [], entities: entitiesOf(p), approvals: read(p, 'approvals.json'), requests: read(p, 'requests.json'),
     media: read(p, 'media.json').items || [], isPrivate: (x) => isPrivate(x) || isFlaggedPrivate(x, [p]) }, { map: M });
 }
 // writes data/<p>/exports/<out> only; returns {path, abs, checksum, bytes, changed, counts, warnings}

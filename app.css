@@ -397,8 +397,24 @@ body.dockwin { background: #000; }
 .lib .ch { font-size: 11.5px; line-height: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 3px; position: relative; }
 .lib .cr, .lib .cu, .lib .lu, .lib .lg { font-size: 10.5px; line-height: 13px; padding: 0 3px; color: var(--dim); overflow-wrap: anywhere; }
 .lib .lu a, .lib .cu a { margin-right: 3px; }
-.cgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 1px; background: var(--line); }
-.cgrid.sm { grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); }
+/* F2: Assets › Characters is compact: one dense row per lead, 1 px separators, no gutters, no empty grid tracks */
+.cgrid { display: flex; flex-direction: column; gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
+.cgrid.sm { flex-direction: row; flex-wrap: wrap; gap: 0; background: none; border-bottom: 0; }
+.cgrid.sm > .cc { width: 176px; box-shadow: 1px 1px 0 var(--line); }
+.cc.lead { display: flex; gap: 1px; background: var(--line); height: 112px; overflow: hidden; }
+.cc.lead > * { background: var(--bg); flex: none; }
+.cc.lead .cb { display: flex; gap: 1px; background: var(--line); }
+.cc.lead .face { width: 112px; height: 112px; } .cc.lead .body { width: 56px; height: 112px; }
+.cc.lead .ci { width: 180px; overflow: hidden; } .cc.lead .ci .ch { padding-top: 1px; white-space: normal; } .cc.lead .cm { font-size: 10.5px; line-height: 13px; padding: 0 3px; }
+.cc.lead .clooks { display: flex; gap: 1px; background: var(--line); }
+.cc.lead .strip { flex: 1 1 0; min-width: 0; height: 112px; grid-auto-rows: 37px; }
+.lk { width: 80px; background: var(--bg); display: flex; flex-direction: column; min-width: 0; cursor: pointer; }
+.lk .lki { width: 80px; height: 82px; } .lk .lki img { object-position: center 20%; }
+.lk .lkn, .lk .lkm { font-size: 10.5px; line-height: 14px; padding: 0 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lk .lkm { font-size: 9.5px; line-height: 13px; color: #d9a86c; } .lk .lkm em { font-style: normal; color: var(--dim); }
+.lk .lks { display: inline-block; width: 6px; height: 6px; margin-right: 3px; background: #6b7078; vertical-align: 1px; } .lk .lks.s-approved { background: #46a758; }
+.lk.add { align-items: center; justify-content: center; color: var(--dim); box-shadow: inset 0 0 0 1px #3a3d42; }
+.lk.add:hover { color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); } .lk.add .plus { font-size: 34px; line-height: 34px; font-weight: 200; } .lk.add b { font-size: 11px; color: var(--fg); }
 .cc { background: var(--bg); min-width: 0; cursor: pointer; }
 .cc .cb { display: flex; gap: 1px; background: var(--line); }
 .cc .face { width: 168px; height: 168px; } .cc .body { width: 84px; height: 168px; } .cc .body img { object-fit: contain; background: #09a14a; }
@@ -975,6 +991,24 @@ button.on { color: var(--acc); }
 .sbch em { font-style: normal; color: #b0a27a; } .sbch em::before { content: '\00b7'; padding: 0 1px; }
 .sbch.ok { background: #18301f; color: #b8f0c8; } .sbch.ok i { background: #2e6b45; color: #d8f6e0; } .sbch.ok em { color: #8fc49f; }
 .sbch.miss { background: #3a1f1f; color: #f0b4b0; } .sbch.miss i { background: #8a3030; }
+/* E6 worlds: a chip dressed by the shot's world; a look off its world (a gap) */
+.sbch.wld em { color: #d9a86c; } .sbch.wmis { box-shadow: inset 0 0 0 1px #e5484d; } .sbch.wmis em { color: #f08080; }
+.sbwld { font-size: 10px; line-height: 12px; padding: 0 3px; border: 1px solid #6b5330; color: #d9a86c; white-space: nowrap; }
+.sbia.wmis { box-shadow: inset 2px 0 0 #e5484d; } .sbwrow select { max-width: 180px; } .sbwrow .bad { font-size: 10.5px; }
+/* E5 placeholder frames (js/placeholder.js): the frame fills the card; "draw" sits in its corner */
+.sbfr img.sbph { object-fit: contain; background: #2a2c30; }
+.sbfr img.sbph + .sbnofr { position: absolute; right: 2px; bottom: 2px; padding: 0 4px; line-height: 13px; background: rgba(0,0,0,.6); border-style: solid; z-index: 1; }
+.tl .shot img.ph { object-fit: contain; background: #2a2c30; opacity: 1; }
+/* E3 chapters: the band on the first scene of a chapter (its DERIVED build status), the scene's chapter picker */
+.sbchap { display: flex; align-items: center; gap: 6px; height: 17px; padding: 0 6px; font-size: 11px; white-space: nowrap; overflow: hidden; border-top: 2px solid var(--chc, #8a8f98); background: color-mix(in srgb, var(--chc, #8a8f98) 12%, var(--bg)); }
+.sbchap .sp { flex: 1; } .sbchap a { cursor: pointer; font-size: 10.5px; } .sbchap .sbchn { font-weight: 600; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.sbchap.st-planned, .sbchs.st-planned { --chc: #8a8f98; } .sbchap.st-generating, .sbchs.st-generating { --chc: #f5a524; } .sbchap.st-built, .sbchs.st-built { --chc: #5aa9e6; } .sbchap.st-approved, .sbchs.st-approved { --chc: #46a758; }
+.sbchs { font-size: 10px; line-height: 12px; padding: 0 4px; color: #000; background: var(--chc); text-transform: uppercase; letter-spacing: .4px; }
+.sbcho { font-size: 10px; color: var(--acc); }
+.aswrow { gap: 6px; } .aswrow select { max-width: 170px; } .aswp { display: inline-flex; gap: 4px; align-items: center; }
+.aswt { font-size: 10px; color: #d9a86c; } .aswt .chpq { font-weight: normal; }
+.sbsh .sbchsel { font-size: 10.5px; height: 16px; max-width: 150px; padding: 0; background: var(--bg); color: var(--dim); border: 1px solid var(--line); }
+.sblist.tmode .sbchap, .sblist.tmode .sbchsel { display: none; }
 .sbft { padding: 0 3px 2px; font-size: 10px; }
 .sbrq { color: var(--dim); } .sbrq.none { color: #e0a03a; } .sbrq.clip, .sbrq.s-done { color: #7fd69c; } .sbrq.s-draft { color: #e8c88a; } .sbrq.s-approved, .sbrq.s-queued, .sbrq.s-running { color: #9db7d6; } .sbrq.s-rejected { color: #f0a090; } .sbrq.s-withdrawn { color: var(--dim); }
 .sbgaprow { display: flex; gap: 8px; align-items: center; padding: 1px 8px; font-size: 11px; color: var(--acc); cursor: pointer; border-bottom: 1px solid var(--line); background: repeating-linear-gradient(135deg, transparent 0 6px, rgba(245,165,36,.05) 6px 12px); }
@@ -1417,7 +1451,7 @@ button.on { color: var(--acc); }
 .sblist.tmode .sbcard.tmsub .sbnofr { padding: 0 3px; font-size: 10px; line-height: 12px; white-space: nowrap; overflow: hidden; max-width: 100%; box-sizing: border-box; }
 .sblist.tmode .sbcard.tmsub > .sbcam, .sblist.tmode .sbcard.tmsub > .sbchips, .sblist.tmode .sbcard.tmsub > .sbft { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* a shot under two lines: one line (a small frame, id · time · length, the action), the rest in the tooltip / on hover */
-.sblist.tmode .sbcard.tmsub.tmshort { display: flex; align-items: flex-start; gap: 4px; white-space: nowrap; }
+.sblist.tmode .sbcard.tmsub.tmshort { display: flex; flex-direction: row; align-items: flex-start; gap: 4px; white-space: nowrap; }
 .sblist.tmode .sbcard.tmshort > .sbfr { flex: none; height: max(8px, calc(var(--tmh) - 2px)); }
 .sblist.tmode .sbcard.tmshort > .sbfr .sbnofr { font-size: 0; padding: 0; border: 0; width: 100%; height: 100%; background: repeating-linear-gradient(135deg, transparent 0 3px, #2a2e35 3px 5px); }
 .sblist.tmode .sbcard.tmshort > .sbfr > :not(img):not(.sbnofr) { display: none; }

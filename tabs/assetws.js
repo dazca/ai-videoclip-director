@@ -33,6 +33,7 @@ import { stripHtml, register as registerProposals } from '../core/proposals.js';
 import * as CK from '../js/checks.js';
 import { nodeBadge, wireCheckPopover } from '../core/checkbadge.js';
 import { help } from '../core/helptip.js';
+import * as WD from '../js/worlds.js';
 
 const WB = () => window.WB;
 const OPENVERSE = 'https://api.openverse.org/v1/images/';
@@ -229,6 +230,12 @@ export class AssetWorkspace {
     toast(`draft request ${r.id}: ${T.vWord} sheet “${v.name}” · est ${usd(est.usd)}`);
   }
   requestLook(vid) { return this.requestVariant(vid); }
+  // E6: the world a look is for (the director's; asset_act look_world, page only)
+  async setLookWorld(look, v) {
+    if (v === '__new') { v = await ui.prompt({ title: `The world of the look ${look} (e.g. dancing)`, placeholder: 'on screen, off screen, dancing…' }); if (v == null) return this.render(); }
+    let w; try { w = WD.cleanWorld(v); } catch (e) { toast(e.message); return this.render(); }
+    const r = await this.act('look_world', { look, world: w }); toast(`${look}: ${r.world ? 'world ' + r.world : 'no world'}`);
+  }
   async setUse(scene, variant) { if (variant === '__clear') await this.act('use', { scene, clear: true }); else await this.act('use', { scene, variant: variant || null }); toast(`${scene}: ${variant === '__clear' ? 'pick cleared' : variant ? this.vlist().find(v => v.id === variant)?.name || variant : this.T.rootWord}`); }
   // ---------------------------------------------------------------- base sources
   async loadCatalog() { if (this.cat) return; try { this.cat = await (await fetch('/catalog/catalog.json')).json(); } catch (e) { this.cat = { kinds: [], items: [] }; } this.render(); }
@@ -530,7 +537,7 @@ export class AssetWorkspace {
       const t = A.variantTree(e.kind, l.id), h = A.headNode(it, t), ap = A.treeState(it, t).approved, sc = uses.filter(u => u.variant === l.id).map(u => u.scene);
       const sub = isC ? esc((l.garments || []).join(', ')) : l.name === A.axesName(l.axes) ? '' : Object.entries(l.axes || {}).map(([k, v]) => `<i class="asax-${esc(k)}" title="${esc(A.AXES[k]?.label || k)}">${esc(v)}</i>`).join('');
       const from = l.from === 'breakdown' || l.breakdown ? 'from the breakdown' : l.from === 'agent' ? 'proposed by the agent' : '';
-      return `<div class="chlook${l.id === this.vid ? ' on' : ''}" data-look="${esc(l.id)}">${h ? `${lock(h.image, h.private)}<img src="${esc(imgUrl(h.image))}" alt="">` : (l.images || [])[0] ? `<img src="${esc(imgUrl(l.images[0]))}" alt="">` : '<div class="chnoimg">no sheet yet</div>'}<span class="chln"><b>${esc(l.name || l.id)}</b> <span class="bdst s-${l.status === 'approved' ? 'ok' : l.status === 'review' ? 'review' : 'draft'}"><i></i>${esc(l.status || 'draft')}</span></span><span class="dim chlg">${[sub, from].filter(Boolean).join(' · ')}</span><span class="dim">${nn(A.treeNodes(it, t).length, 'node')}${ap ? ' · ✓' : ''}${(it.proposals || []).some(x => x.status === 'open' && x.tree === t) ? ' · <b class="chpq">proposal</b>' : ''}${sc.length ? ` · ${sc.map(s => esc(s.replace(/^sc/, '#'))).join(' ')}` : ''}</span></div>`;
+      return `<div class="chlook${l.id === this.vid ? ' on' : ''}" data-look="${esc(l.id)}">${h ? `${lock(h.image, h.private)}<img src="${esc(imgUrl(h.image))}" alt="">` : (l.images || [])[0] ? `<img src="${esc(imgUrl(l.images[0]))}" alt="">` : '<div class="chnoimg">no sheet yet</div>'}<span class="chln"><b>${esc(l.name || l.id)}</b> <span class="bdst s-${l.status === 'approved' ? 'ok' : l.status === 'review' ? 'review' : 'draft'}"><i></i>${esc(l.status || 'draft')}</span></span><span class="dim chlg">${[sub, from].filter(Boolean).join(' · ')}</span>${isC && (WD.lookWorld(l) || l.world_proposal) ? `<span class="aswt" title="the world this look is for (E6): shots in it wear it">${WD.lookWorld(l) ? esc(l.context) : ''}${l.world_proposal ? ` <b class="chpq" title="the agent proposes a world">→ ${esc(l.world_proposal.world || 'no world')}?</b>` : ''}</span>` : ''}<span class="dim">${nn(A.treeNodes(it, t).length, 'node')}${ap ? ' · ✓' : ''}${(it.proposals || []).some(x => x.status === 'open' && x.tree === t) ? ' · <b class="chpq">proposal</b>' : ''}${sc.length ? ` · ${sc.map(s => esc(s.replace(/^sc/, '#'))).join(' ')}` : ''}</span></div>`;
     };
     let ghosts = '';
     if (isC) {
@@ -545,6 +552,12 @@ export class AssetWorkspace {
     if (l) {
       const t = A.variantTree(e.kind, l.id), est = A.estimate(T.gen.variant, { type: e.kind }), nodes = A.treeNodes(it, t), reqs = this.reqs(e).filter(r => r.char.tree === t);
       const info = isC ? esc((l.garments || []).join(', ')) : esc(A.axesText(l.axes) || '');
+      if (isC) {
+        const ws = WD.worldsIn({ entities: store.entities, scenes: SC.currentScript(store.scenes)?.scenes || [] }), wp = l.world_proposal;
+        h += `<div class="chsh aswrow" data-look="${esc(l.id)}"><span class="dim" title="E6, one look per world (LOOKS_PLAN): a shot in this world dresses ${esc(e.name)} in this look">world</span><select class="aswld"><option value=""${WD.lookWorld(l) ? '' : ' selected'}>none</option>${[...new Set([...ws, ...(l.context ? [l.context] : [])])].map(w => `<option value="${esc(w)}"${l.context === w ? ' selected' : ''}>${esc(w)}</option>`).join('')}<option value="__new">+ new world…</option></select>`
+          + (wp ? `<span class="aswp"><span class="who ag">${esc(wp.by || 'agent')}</span> proposes <b>${esc(wp.world || 'no world')}</b>${wp.why ? ` <span class="dim">· ${esc(wp.why)}</span>` : ''} <button data-a="wldok" class="pri">Accept</button><button data-a="wldno">Dismiss</button></span>` : '')
+          + `<span class="dim">${esc(ws.filter(w => w !== l.context).map(w => { const o = WD.worldLook(e, w); return o ? `${w}: ${o.name || o.id}` : `${w}: no look`; }).join(' · '))}</span></div>`;
+      }
       h += `<div class="chsh lookh"><b>${esc(l.name)}</b><span class="dim">${info}${l.notes ? ' · ' + esc(l.notes) : ''}${!isC && l.scenes?.length ? ' · proposed for ' + esc(l.scenes.join(' ')) : ''}</span>${!nodes.length ? `<button data-a="reqlook" class="pri"${rn ? '' : ' disabled'} title="${esc(`a DRAFT request from the approved ${T.rootWord}: ${est.tool}, ${est.why}`)}">Request ${T.vWord} sheet · est ${usd(est.usd)}</button>` : ''}</div>`;
       h += this.proposalHtml(e, it, t) + this.reqsHtml(reqs) + this.treeHtml(it, t) + this.nodeHtml(e, it);
     }
@@ -610,6 +623,7 @@ export class AssetWorkspace {
       if (a === 'unlock') return this.unlock();
       if (a === 'newlook') return this.newVariant();
       if (a === 'vcreate') return this.createVariant();
+      if (a === 'wldok' || a === 'wldno') { const lk = t.closest('[data-look]').dataset.look; const r = await this.act(a === 'wldok' ? 'look_world_accept' : 'look_world_dismiss', { look: lk }); return toast(a === 'wldok' ? `${lk}: world ${r.world || 'none'}` : `${lk}: world proposal dismissed`); }
       if (a === 'vcancel') { this.vf = null; return this.render(); }
       if (a === 'mklook') return this.makeLookFromItem(t.dataset.i);
       if (a === 'reqlook') return this.requestVariant();
@@ -672,6 +686,7 @@ export class AssetWorkspace {
       if (t.matches('.ccchk')) { const c = this.cdraft(undefined, true)[Number(t.closest('[data-ci]').dataset.ci)]; if (c) c.check = t.checked; return this.render(); }
       if (t.matches('.ccask')) return this.setIdentityChecks(t.checked);
       if (t.matches('.asusesel')) { t.blur(); return this.setUse(t.dataset.scene, t.value); }
+      if (t.matches('.aswld')) { t.blur(); return this.setLookWorld(t.closest('[data-look]').dataset.look, t.value); }
       if (t.matches('.asuseadd') && t.value) { t.blur(); return this.setUse(t.value, ''); }
       if (t.matches('.asaxc') && this.vf) { t.blur(); return this.render(); }
     });

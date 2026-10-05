@@ -12,7 +12,12 @@
 // in a draft (kept in this browser) until "Save version" (Ctrl+Enter): every save is a new version in storyboard.json.
 // Takes (D6, tabs/takes.js): the Shot panel shows the shot's takes; the director picks one with in / out, a note and
 // alternatives (take_act, page only: a new version on the saved shot; the draft carries the saved picks along).
-// MCP: storyboard_get, shots_update, shot_note_add / shot_note_resolve, gaps_get, takes_get / take_propose. Format: js/storyboard.js.
+// E3 chapters: a scene header's chapter picker groups scenes into chapters (chapters_update, page or agent); the first scene of
+// a chapter carries its band (name, owner, the DERIVED build status planned / generating / built / approved, picked / shots).
+// E5: a shot with no frame or take shows its placeholder frame (js/placeholder.js). E6 worlds: the scene's world (the script)
+// or the shot's own (Shot panel) dresses each cast chip in the look for that world; a look off its world is a gap.
+// MCP: storyboard_get, shots_update, shot_note_add / shot_note_resolve, gaps_get, takes_get / take_propose, chapters_update.
+// Format: js/storyboard.js.
 import { store, prefs, toast, esc, PROJECT, postJSON, mediaUrl } from '../js/store.js';
 import { fmt } from '../js/timeline.js';
 import { commands } from '../core/commands.js';
@@ -32,6 +37,10 @@ import { mountTakes } from './takes.js';
 import { mountSurfaces } from './surfaces.js';
 import { coverage } from '../js/surfaces.js';
 import { help } from '../core/helptip.js';
+import { placeholderFor, placeholderUri } from '../js/placeholder.js';
+import * as CH from '../js/chapters.js';
+import * as WD from '../js/worlds.js';
+const op = async (name, body) => { const r = await postJSON('/api/op/' + name, body), j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; };
 
 const WB = () => window.WB;
 const visible = () => WB()?.app?.active() === 'stage' && WB().stages?.current() === 'storyboard';
@@ -280,6 +289,36 @@ class Board {
   addAsset(id, type, eid) { const s = this.shot(id), f = SB.FIELD[type]; if (!s || !f || (s[f] || []).includes(eid)) return; this.edit(() => { s[f] = [...(s[f] || []), eid]; }); }
   removeAsset(id, type, eid) { const s = this.shot(id), f = SB.FIELD[type]; if (!s) return; this.edit(() => { s[f] = (s[f] || []).filter(x => x !== eid); if (s.variants) delete s.variants[eid]; }); }
   setVariant(id, eid, v) { const s = this.shot(id); if (!s) return; this.edit(() => { s.variants ||= {}; if (v === '') delete s.variants[eid]; else s.variants[eid] = v === '__root' ? null : v; }); }
+  // E6: the shot's own world ('' = its scene's); a new one is typed
+  async setWorld(id, v) {
+    const s = this.shot(id); if (!s) return;
+    if (v === '__new') { v = await ui.prompt({ title: `The world of ${id} (e.g. dancing)`, placeholder: 'on screen, off screen, dancing…' }); if (v == null) return this.render(); }
+    let w; try { w = WD.cleanWorld(v); } catch (e) { toast(e.message); return this.render(); }
+    this.undoable(`world of ${id}: ${w || 'the scene\'s'}`, () => this.edit(() => { if (w) s.context = w; else delete s.context; }));
+  }
+  worlds() { return WD.worldsIn({ entities: store.entities, scenes: this.scenes, shots: this.draft }); }
+  // ---------------------------------------------------------------- chapters (E3; storyboard.json chapters, outside the versions)
+  get chapters() { return CH.chaptersOf(this.doc); }
+  chapterViews() { return CH.chaptersView(this.doc, { scenes: this.scenes, shots: this.cur?.shots || [], approvals: store.approvals, requests: store.requests }); }
+  async chapterOp(body, what) { try { await op('chapters_update', { ...body, by: 'director', via: 'page' }); if (what) toast(what); } catch (e) { toast('not done: ' + e.message); } }
+  async setChapter(sceneId, chId) {
+    const cur = CH.chapterOfScene(this.chapters, sceneId);
+    if (chId === '__new') {
+      const name = await ui.prompt({ title: `New chapter from ${sceneId}`, placeholder: 'name, e.g. Chapter 1 · the desk' }); if (name == null) return this.render();
+      return this.chapterOp({ upsert: [{ name: name.trim() || CH.nextChapterId(this.chapters), scenes: [sceneId] }] }, `${sceneId}: a new chapter`);
+    }
+    if (!chId) { if (!cur) return; return this.chapterOp({ upsert: [{ id: cur.id, scenes: cur.scenes.filter(x => x !== sceneId) }] }, `${sceneId} left ${cur.id}`); }
+    const ch = this.chapters.find(c => c.id === chId); if (!ch) return;
+    return this.chapterOp({ upsert: [{ id: ch.id, scenes: [...ch.scenes, sceneId] }] }, `${sceneId} is in ${ch.id} ${ch.name}`);
+  }
+  async editChapter(chId, field) {
+    const ch = this.chapters.find(c => c.id === chId); if (!ch) return;
+    if (field === 'remove') { if (!(await ui.confirm(`Remove chapter ${ch.id} “${ch.name}”? (its scenes stay)`))) return; return this.chapterOp({ remove: [ch.id] }, `${ch.id} removed`); }
+    const label = { name: 'Chapter name', owner: 'Who builds it (an agent, "lead")', file: 'Where it is built (e.g. xp/ch1.js)' }[field];
+    const v = await ui.prompt({ title: `${ch.id}: ${label}`, value: ch[field] || '' }); if (v == null) return;
+    return this.chapterOp({ upsert: [{ id: ch.id, [field]: v.trim() }] });
+  }
+  focusChapter(id) { const ch = this.chapterViews().find(c => c.id === id); if (ch?.scenes[0]) this.focusScene(ch.scenes.find(s => this.scene(s)) || ch.scenes[0]); }
   // ---------------------------------------------------------------- "Shots from beats" (the page's heuristic: js/storyboard.js)
   async fromBeats(sceneIds) {
     const targets = sceneIds || this.scenes.filter(sc => !this.inScene(sc.id).length).map(s => s.id);
@@ -460,23 +499,28 @@ class Board {
   }
   groupHtml(sc, g) {
     if (!sc) return `<div class="sbscene outside" data-scene=""><div class="sbsh"><b>Outside the script</b><span class="dim">shots whose scene is not in the current script (${g.length}): move them or remove them</span></div><div class="sbstrip">${g.map(s => this.cardHtml(s, null)).join('')}</div><div class="sbskslot"></div></div>`;
-    const st = SC.sceneStatus(store.scenes, sc.id), nb = (sc.beats || []).length;
-    return `<div class="sbscene" data-scene="${esc(sc.id)}"><div class="sbsh"><span class="scid">${esc(sc.id)}</span><b class="sct" title="${esc(sc.text || '')}">${esc(sc.title) || '<i class="dim">untitled</i>'}</b><span class="sctime">${SC.span(sc.t0, sc.t1)} · ${secs(sc.t1 - sc.t0)} · ${SB.bars(this.song, sc.t0, sc.t1)} bars · ${nn(nb, 'beat')}</span><span class="scst s-${st}" title="scene: ${SC.SCENE_STATUS_LABEL[st]}"><i></i></span><span class="sp"></span><span class="dim">${nn(g.length, 'shot')}</span><a data-a="frombeats" title="${g.length ? 'redo this scene\'s shots from its beats' : 'one shot per beat or group of beats'}">from beats</a><a data-a="addshot" title="${g.length ? 'split the last shot on the beat grid' : 'one shot for the whole scene'}">+ shot</a></div>`
+    const st = SC.sceneStatus(store.scenes, sc.id), nb = (sc.beats || []).length, chs = this.chapters, mych = CH.chapterOfScene(chs, sc.id);
+    const chv = mych && this.scenes.find(x => mych.scenes.includes(x.id))?.id === sc.id ? this.chapterViews().find(c => c.id === mych.id) : null;
+    const band = chv ? `<div class="sbchap st-${esc(chv.status)}" data-chapter="${esc(chv.id)}"><b>${esc(chv.id)}</b><span class="sbchn">${esc(chv.name)}</span><span class="sbchs st-${esc(chv.status)}" title="${esc(`derived from the shots: ${chv.why}`)}">${esc(CH.STATUS_LABEL[chv.status])}</span><span class="dim">${chv.picked}/${chv.shots} picked · ${chv.approved} approved${chv.placeholders ? ` · ${chv.placeholders} placeholder${chv.placeholders === 1 ? '' : 's'}` : ''} · ${chv.scenes.length} scene${chv.scenes.length === 1 ? '' : 's'}</span>${chv.owner ? `<span class="sbcho" title="who builds it">${esc(chv.owner)}</span>` : ''}${chv.file ? `<span class="dim" title="where it is built">${esc(chv.file)}</span>` : ''}<span class="sp"></span><a data-cha="name">rename</a><a data-cha="owner">owner</a><a data-cha="file">file</a><a data-cha="remove">×</a></div>` : '';
+    const chsel = `<select class="sbchsel" title="the chapter this scene belongs to (E3)"><option value="">no chapter</option>${chs.map(c => `<option value="${esc(c.id)}"${mych?.id === c.id ? ' selected' : ''}>${esc(c.id)} ${esc(c.name)}</option>`).join('')}<option value="__new">+ new chapter…</option></select>`;
+    return `<div class="sbscene" data-scene="${esc(sc.id)}">${band}<div class="sbsh"><span class="scid">${esc(sc.id)}</span><b class="sct" title="${esc(sc.text || '')}">${esc(sc.title) || '<i class="dim">untitled</i>'}</b><span class="sctime">${SC.span(sc.t0, sc.t1)} · ${secs(sc.t1 - sc.t0)} · ${SB.bars(this.song, sc.t0, sc.t1)} bars · ${nn(nb, 'beat')}</span><span class="scst s-${st}" title="scene: ${SC.SCENE_STATUS_LABEL[st]}"><i></i></span>${sc.context ? `<span class="sbwld" title="the scene's world (set it in the script): its cast wear their look for it">${esc(sc.context)}</span>` : ''}<span class="sp"></span>${chsel}<span class="dim">${nn(g.length, 'shot')}</span><a data-a="frombeats" title="${g.length ? 'redo this scene\'s shots from its beats' : 'one shot per beat or group of beats'}">from beats</a><a data-a="addshot" title="${g.length ? 'split the last shot on the beat grid' : 'one shot for the whole scene'}">+ shot</a></div>`
       + this.railHtml(sc, g)
       + `<div class="sbstrip">${g.length ? g.map(s => this.cardHtml(s, sc)).join('') : `<div class="sbempty">no shots yet · <a data-a="frombeats">shots from the ${nn(nb, 'beat')}</a> · <a data-a="addshot">one shot for the scene</a>${sc.text ? `<span class="dim"> · ${esc(sc.text.slice(0, 160))}</span>` : ''}</div>`}</div><div class="sbskslot"></div></div>`;
   }
   cardHtml(s, sc) {
-    const st = store.state('shot:' + s.id), assets = SB.shotAssets(s, store.entities, store.approvals), est = SB.shotEstimate(s), reqs = this.reqs(s.id);
+    const st = store.state('shot:' + s.id), assets = SB.shotAssets(s, store.entities, store.approvals, this.scenes), est = SB.shotEstimate(s), reqs = this.reqs(s.id);
     const saved = this.cur?.shots.find(x => x.id === s.id), chg = !saved || JSON.stringify(saved) !== JSON.stringify(s);
-    const frame = s.sketch ? `<img src="${esc(this.skUrl(s.sketch))}" alt="" loading="lazy">` : s.thumb ? `<img src="${esc(mediaUrl(s.thumb))}" alt="" loading="lazy">` : `<span class="sbnofr" data-a="draw" title="draw the frame">no frame · draw</span>`;
-    const chips = assets.map(a => `<span class="sbch k-${a.type}${a.approved ? ' ok' : ''}${a.missing ? ' miss' : ''}" title="${esc(`${a.type} ${a.name}${a.variant ? ' · ' + a.variant_name : ''}${a.source === 'shot' ? ' (this shot)' : ''} · ${a.approved ? 'approved' : a.why}`)}"><i>${TL[a.type]}</i>${esc(a.name)}${a.variant ? `<em>${esc(a.variant_name)}</em>` : ''}</span>`).join('');
+    const tk = !s.sketch && !s.thumb && s.clip?.media ? store.mediaById?.[s.clip.media] : null;
+    const frame = s.sketch ? `<img src="${esc(this.skUrl(s.sketch))}" alt="" loading="lazy">` : s.thumb ? `<img src="${esc(mediaUrl(s.thumb))}" alt="" loading="lazy">` : tk?.thumb ? `<img src="${esc(mediaUrl(tk.thumb))}" alt="" loading="lazy">`
+      : `<img class="sbph" src="${esc(placeholderUri(placeholderFor(s, { entities: store.entities, scenes: this.scenes }).svg))}" alt="placeholder ${esc(s.id)}" title="placeholder: no frame or take yet (the export draws the same frame)"><span class="sbnofr" data-a="draw" title="draw the frame">draw</span>`;
+    const chips = assets.map(a => `<span class="sbch k-${a.type}${a.approved ? ' ok' : ''}${a.missing ? ' miss' : ''}${a.mismatch ? ' wmis' : ''}${a.source === 'world' ? ' wld' : ''}" title="${esc(`${a.type} ${a.name}${a.variant ? ' · ' + a.variant_name : ''}${a.source === 'shot' ? ' (this shot)' : a.source === 'world' ? ` (the look for “${a.world}”)` : ''} · ${a.approved ? 'approved' : a.why}${a.mismatch ? '\n⚠ ' + a.mismatch : ''}`)}"><i>${TL[a.type]}</i>${esc(a.name)}${a.variant ? `<em>${esc(a.variant_name)}</em>` : ''}</span>`).join('');
     const last = reqs[reqs.length - 1];
     const pk = s.clip?.file ? `<span class="sbrq pick" title="${esc(`picked take ${s.clip.file}${s.clip.out_ms != null ? ` ${(s.clip.in_ms / 1000).toFixed(2)}–${(s.clip.out_ms / 1000).toFixed(2)} s` : ''}${s.clip.note ? ' · ' + s.clip.note : ''}`)}">★ ${esc(s.clip.request || store.mediaById?.[s.clip.media]?.job || 'take')}.${esc(s.clip.take ?? '?')}${s.clip.out_ms != null ? ` ${((s.clip.out_ms - s.clip.in_ms) / 1000).toFixed(1)}s` : ''}</span>` : '';
     const rq = (s.clips || []).length ? `<span class="sbrq clip" title="${esc(s.clips.join(' '))}">clip ${esc(String(s.clips[0]).split('@')[0])}${s.clips.length > 1 ? ' +' + (s.clips.length - 1) : ''}</span>`
       : last ? `<span class="sbrq s-${esc(last.status)}" title="${esc(`${last.id} ${last.kind} · ${last.status} · est ${usd(last.est_cost)}`)}">${esc(String(last.kind).replace('shot-', ''))} · ${esc(last.status)}</span>`
       : `<span class="sbrq none" title="no generation request or clip yet">no request · ${est.gen} ~${usd(est.usd)}</span>`;
     return `<div class="sbcard${s.id === this.sel ? ' on' : ''}${chg ? ' chg' : ''}" data-shot="${esc(s.id)}">`
-      + `<div class="sbc1"><b>${esc(s.id)}</b><span class="sbt">${clk(s.t0)}</span><span class="dim">${secs(s.t1 - s.t0)}</span><span class="sbk">${esc(s.kind)}</span><span class="chip s-${esc(st)}" title="shot:${esc(s.id)}: ${esc(st)} (the director's: Shot panel)">${esc({ draft: '', approved: '✓', locked: 'lock', review: 'review', changes: 'changes' }[st] ?? st)}</span></div>`
+      + `<div class="sbc1"><b>${esc(s.id)}</b><span class="sbt">${clk(s.t0)}</span><span class="dim">${secs(s.t1 - s.t0)}</span><span class="sbk">${esc(s.kind)}</span>${s.context ? `<span class="sbwld" title="this shot's world">${esc(s.context)}</span>` : ''}<span class="chip s-${esc(st)}" title="shot:${esc(s.id)}: ${esc(st)} (the director's: Shot panel)">${esc({ draft: '', approved: '✓', locked: 'lock', review: 'review', changes: 'changes' }[st] ?? st)}</span></div>`
       + `<div class="sbfr${s.sketch ? ' skf' : ''}">${frame}<span class="sbg" title="${est.gen === 'video' ? 'a video shot' : 'a still'}">${est.gen === 'video' ? '▶' : '▣'}</span>${(() => { const ps = PR.setsFor(store.proposals, { stage: 'storyboard', kind: 'shot', id: s.id }), it = ps.flatMap(x => x.items).filter(i => i.status !== 'dismissed'), pk = it.find(PR.isPicked); return it.length ? `<span class="ppbadge${pk ? ' pk' : ''}" title="${esc(`${it.length} frame proposal(s)${pk ? ` · picked “${pk.title}”` : ''}: select the shot to choose`)}">◇${pk ? '✓' : it.filter(i => i.status === 'open').length}</span>` : ''; })()}</div>`
       + `<div class="sbtx">${esc(s.title && s.text && !s.text.startsWith(s.title) ? `${s.title}: ${s.text}` : s.text || s.title) || '<i class="dim">no action yet</i>'}</div>`
       + (s.camera ? `<div class="sbcam" title="${esc(s.camera)}">⌖ ${esc(s.camera)}</div>` : '')
@@ -519,7 +563,7 @@ class Board {
     if (!s) return this.overviewHtml();
     const sc = this.scene(s.scene), { prev, next } = this.neighbours(s), st = store.state('shot:' + s.id);
     const first = sc && (!prev || prev.scene !== s.scene), lastS = sc && (!next || next.scene !== s.scene);
-    const assets = SB.shotAssets(s, store.entities, store.approvals), haveStill = this.haveStill(s.id), est = SB.shotEstimate(s, { haveStill: !!haveStill }), gen = s.gen || SB.defaultGen(s.kind);
+    const assets = SB.shotAssets(s, store.entities, store.approvals, this.scenes), haveStill = this.haveStill(s.id), est = SB.shotEstimate(s, { haveStill: !!haveStill }), gen = s.gen || SB.defaultGen(s.kind);
     const stb = (x, l, t) => `<button data-st="${x}" class="${st === x ? 'on s-' + x : ''}" title="${esc(t)}">${l}</button>`;
     let h = `<div class="sbih"><b>${esc(s.id)}</b>${sc ? `<a data-go="scene:${esc(sc.id)}" title="${esc(sc.text || '')}">${esc(sc.id)} ${esc(sc.title || '')}</a>` : '<span class="dim">outside the script</span>'}<span class="sp"></span>${stb('draft', 'draft', 'not reviewed')}${stb('review', 'review', 'ready for a look')}${stb('changes', 'changes', 'needs changes')}${stb('approved', 'approve', 'the director signs this shot off (page only)')}</div>`;
     h += `<div class="sbif"><label>from <input class="sbin-t0" value="${fmt(s.t0, true)}" spellcheck="false"${first ? ' disabled title="the first shot starts with its scene"' : ''}></label>${first ? '' : '<b data-nudge="t0:-1" title="one beat (bar) earlier">◂</b><b data-nudge="t0:1" title="later">▸</b>'}<label>to <input class="sbin-t1" value="${fmt(s.t1, true)}" spellcheck="false"${lastS ? ' disabled title="the last shot ends with its scene"' : ''}></label>${lastS ? '' : '<b data-nudge="t1:-1">◂</b><b data-nudge="t1:1">▸</b>'}<span class="dim">${secs(s.t1 - s.t0)} · ${SB.bars(this.song, s.t0, s.t1)} bars</span></div>`;
@@ -527,6 +571,8 @@ class Board {
     h += `<div class="sbif sbancs">${first ? (sc?.anchors?.t0 ? `<span class="dim">start ⚓ ${esc(sc.anchors.t0)} (the scene's)</span>` : '') : EV.anchorSelect(s, 't0', store.events, esc, 'sbanc')}${lastS ? (sc?.anchors?.t1 ? `<span class="dim">end ⚓ ${esc(sc.anchors.t1)} (the scene's)</span>` : '') : EV.anchorSelect(s, 't1', store.events, esc, 'sbanc')}</div>`;
     h += `<div class="sbopts">${SB.KINDS.map(k => `<a data-kind="${k}" class="${s.kind === k ? 'on' : ''}">${k}</a>`).join('')}${SB.KINDS.includes(s.kind) ? '' : `<a class="on">${esc(s.kind)}</a>`}<input class="sbin-kind" placeholder="other kind" spellcheck="false"></div>`;
     h += `<div class="sbopts gen"><a data-gen="still" class="${gen === 'still' ? 'on' : ''}" title="one generated frame">▣ still</a><a data-gen="video" class="${gen === 'video' ? 'on' : ''}" title="a start frame, then image-to-video">▶ video</a><span class="dim" title="${esc(est.items.map(x => `${x.kind}: ${usd(x.usd)} ${x.tool} (${x.why})`).join('\n'))}">est ${usd(est.usd)} · ${esc(est.items.map(x => x.kind.replace('shot-', '') + ' ' + usd(x.usd)).join(' + '))}</span></div>`;
+    const ws = this.worlds();
+    h += `<div class="sbopts sbwrow"><span class="dim" title="the world dresses the cast: each character wears its look for it (E6)">world</span><select class="sbin-world"><option value=""${s.context ? '' : ' selected'}>${sc?.context ? `the scene's: ${esc(sc.context)}` : 'the scene\'s (none)'}</option>${ws.map(w => `<option value="${esc(w)}"${s.context === w ? ' selected' : ''}>${esc(w)}</option>`).join('')}<option value="__new">+ new world…</option></select>${assets.some(a => a.mismatch) ? `<span class="bad" title="${esc(assets.filter(a => a.mismatch).map(a => `${a.name} ${a.mismatch}`).join('\n'))}">⚠ ${assets.filter(a => a.mismatch).length} look${assets.filter(a => a.mismatch).length === 1 ? '' : 's'} off the world</span>` : ''}</div>`;
     h += `<input class="sbin-title" value="${esc(s.title)}" placeholder="title (short)" spellcheck="false"><textarea class="sbin-text" rows="3" placeholder="the action: what we see in this shot" spellcheck="false">${esc(s.text)}</textarea><textarea class="sbin-cam" rows="2" placeholder="camera / motion: slow push in, handheld, locked-off, whip pan, rack focus…" spellcheck="false">${esc(s.camera)}</textarea>`;
     h += `<div class="scbh">frame <a data-a="draw">${s.sketch ? 'edit' : '+ draw'}</a>${s.sketch ? '<a data-a="drawwin">window</a><a data-a="skcopy" title="copy: paste it into another shot">copy</a>' : ''}<a data-a="skpaste" title="paste the copied frame">paste</a>${s.sketch ? '<a data-a="skrm" title="the shot loses its frame (the file stays)">remove</a>' : ''}</div>`
       + (s.sketch ? `<img class="sbiframe" src="${esc(this.skUrl(s.sketch))}" alt="" data-a="draw" title="${esc(s.sketch)} (click: edit)">` : s.thumb ? `<img class="sbiframe" src="${esc(mediaUrl(s.thumb))}" alt="" title="the render frame (shots.json)">` : '')
@@ -537,13 +583,14 @@ class Board {
       const e = ents.find(x => x.id === a.id && x.kind === a.type) || (a.type === 'location' ? ents.find(x => x.kind === 'location' && x.letter === a.id) : null);
       let sel = '';
       if (e) {
-        const T = A.TYPE[e.kind], vs = A.variants(e, e.kind), has = Object.hasOwn(s.variants || {}, e.id), ov = has ? s.variants[e.id] : undefined, u = SB.useFor(e, s.scene);
-        const sname = u.variant ? vs.find(v => v.id === u.variant)?.name || u.variant : T.rootWord;
+        const T = A.TYPE[e.kind], vs = A.variants(e, e.kind), has = Object.hasOwn(s.variants || {}, e.id), ov = has ? s.variants[e.id] : undefined;
+        const { variants: _v, ...bare } = s, d = SB.resolveAsset(e, { ...bare, variants: {} }, store.approvals, sc);   // what it wears without this shot's pick
+        const sname = d.variant ? vs.find(v => v.id === d.variant)?.name || d.variant : T.rootWord;
         sel = `<select class="sbin-var" title="the ${T.vWord} this shot needs">`
-          + `<option value=""${has ? '' : ' selected'}>scene's: ${esc(sname)}</option><option value="__root"${has && ov === null ? ' selected' : ''}>${esc(T.rootWord)}</option>`
-          + vs.map(v => `<option value="${esc(v.id)}"${has && ov === v.id ? ' selected' : ''}>${esc(v.name || v.id)}${v.status === 'approved' ? ' ✓' : ''}</option>`).join('') + '</select>';
+          + `<option value=""${has ? '' : ' selected'}>${d.source === 'world' ? `world's (${esc(d.world)})` : 'scene\'s'}: ${esc(sname)}</option><option value="__root"${has && ov === null ? ' selected' : ''}>${esc(T.rootWord)}</option>`
+          + vs.map(v => `<option value="${esc(v.id)}"${has && ov === v.id ? ' selected' : ''}>${esc(v.name || v.id)}${WD.lookWorld(v) ? ` · ${esc(v.context)}` : ''}${v.status === 'approved' ? ' ✓' : ''}</option>`).join('') + '</select>';
       }
-      return `<div class="sbia${a.approved ? ' ok' : ''}" data-type="${esc(a.type)}" data-eid="${esc(a.id)}"><i class="sbat k-${esc(a.type)}">${TL[a.type]}</i>${a.image ? `<img src="${esc(imgUrl(a.image))}" alt="" loading="lazy">` : '<span class="sbnoimg"></span>'}<span class="sban" title="${esc(a.name)}">${esc(a.name)}</span>${sel}<span class="sbaok${a.approved ? '' : ' no'}" title="${esc(a.approved ? 'approved' : a.why || '')}">${a.approved ? '✓' : esc(a.why || '')}</span><b data-a="rmasset" title="remove from the shot">×</b>${a.approved ? '' : `<a data-go="asset:${esc(a.type)}:${esc(a.id)}:${esc(a.variant || '')}" title="open it">›</a>`}</div>`;
+      return `<div class="sbia${a.approved ? ' ok' : ''}${a.mismatch ? ' wmis' : ''}"${a.mismatch ? ` title="${esc('⚠ ' + a.mismatch)}"` : ''} data-type="${esc(a.type)}" data-eid="${esc(a.id)}"><i class="sbat k-${esc(a.type)}">${TL[a.type]}</i>${a.image ? `<img src="${esc(imgUrl(a.image))}" alt="" loading="lazy">` : '<span class="sbnoimg"></span>'}<span class="sban" title="${esc(a.name)}">${esc(a.name)}</span>${sel}<span class="sbaok${a.approved ? '' : ' no'}" title="${esc(a.approved ? 'approved' : a.why || '')}">${a.approved ? '✓' : esc(a.why || '')}</span><b data-a="rmasset" title="remove from the shot">×</b>${a.approved ? '' : `<a data-go="asset:${esc(a.type)}:${esc(a.id)}:${esc(a.variant || '')}" title="open it">›</a>`}</div>`;
     };
     const need = sc ? SB.sceneAssets(sc.id, store.breakdown, store.entities).filter(x => !(s[SB.FIELD[x.type]] || []).includes(x.id)) : [];
     const avail = ents.filter(e => !(s[SB.FIELD[e.kind]] || []).includes(e.id));
@@ -563,7 +610,7 @@ class Board {
     const shots = SB.boardShots(this.doc), cov = coverage(this.song, shots), g = this.gapsNow();
     const more = '<p>Each scene of the script is a strip of shots that <b>tile</b> it: the thin rail above a strip shows the cuts, the bars (ticks) and the beats (dots).</p><p><b>Shots from beats</b> proposes one shot per beat or group of beats; edit, split, merge and reorder them, draw a frame for each, then <b>Save version</b>.</p><p>Chips: green = approved; the variant is the scene\'s unless the shot sets one. The <b>Gaps</b> tab lists what is still missing and what filling it would cost.</p>';
     const runs = cov.uncovered.slice(0, 40).map(u => { const sh = shots.find(x => x.t0 <= u.t0 && u.t0 < x.t1); return `<div class="sbgap"${sh ? ` data-pick="${esc(sh.id)}"` : ''}><span class="sbgt">${esc(u.line)}</span><span class="sbgx sfun">“${esc(u.text)}”</span><span class="dim sbgc">${esc(clk(u.t0))}${sh ? ' · ' + esc(sh.id) : ''}</span>${sh ? '<a>shot ›</a>' : ''}</div>`; }).join('');
-    const counts = [['unscripted', 'unscripted stretches'], ['no_shots', 'scenes without shots'], ['no_frame', 'shots without a frame'], ['assets', 'assets not approved'], ['no_request', 'shots without a request']].map(([k, l]) => `<span class="${g.counts[k] ? 'bad' : 'okc'}">${g.counts[k]} ${l}</span>`).join('');
+    const counts = [['unscripted', 'unscripted stretches'], ['no_shots', 'scenes without shots'], ['no_frame', 'shots without a frame'], ['assets', 'assets not approved'], ['looks', 'looks off their world'], ['no_request', 'shots without a request']].map(([k, l]) => `<span class="${g.counts[k] ? 'bad' : 'okc'}">${g.counts[k]} ${l}</span>`).join('');
     return `<div class="lyvh sbov">${help('<span class="dim">no shot selected · click a card (← / → step)</span>', more)}</div>`
       + `<div class="sbgh"><b>Lyric gate</b><i>${cov.covered}/${cov.total}</i><span class="dim">every sung word on a surface at its time</span></div>`
       + (cov.ok ? '<div class="sbgok">✓ every word is on a surface</div>' : runs + (cov.uncovered.length > 40 ? `<div class="dim sbpad">+${cov.uncovered.length - 40} more (timeline: the surface column)</div>` : ''))
@@ -585,6 +632,7 @@ class Board {
       + grp('Scenes without shots', g.no_shots.map(x => R(`scene:${x.scene}`, esc(x.scene), esc(x.title || 'untitled'), nn(x.beats, 'beat'), 'board')), 'every scene has shots')
       + grp('Shots without a frame', g.no_frame.map(x => R(`shot:${x.shot}`, esc(x.shot), esc(x.time), esc(x.scene || ''), 'draw')), 'every shot has a frame')
       + grp('Assets not approved', g.assets.map(a => R(`asset:${a.type}:${a.id}:${a.variant || ''}`, `<i class="sbat k-${esc(a.type)}">${TL[a.type]}</i>${esc(a.name)}`, `${a.variant ? esc(a.variant_name) + ' · ' : ''}${esc(a.why || '')}`, `${nn(a.shots.length, 'shot')}`, a.missing ? 'fix' : a.type === 'character' ? 'characters' : 'scenery')), 'every asset the shots need is approved')
+      + (g.looks.length || this.worlds().length ? grp('Looks off their world', g.looks.map(l => R(`shot:${l.shot}`, esc(l.shot), `${esc(l.name)} · ${esc(l.why)}`, esc(l.world), 'shot')), 'every character wears the look of the shot\'s world') : '')
       + grp('Shots without a request or clip', g.no_request.map(x => R(`shot:${x.shot}`, esc(x.shot), `${esc(x.kind)} · ${x.gen === 'video' ? '▶ video' : '▣ still'}`, usd(x.usd), 'shot')), 'every shot has a request or a clip');
   }
   versionsHtml() {
@@ -613,6 +661,7 @@ class Board {
       if (act === 'skclose') { if (await this.closeSketch()) this.render(); return; }
       if (act === 'skwin' && this.sk) { const { id, shot } = this.sk; if (this.sk.api.dirty) await this.sk.api.save().catch(() => {}); await this.closeSketch(true); this.render(); return this.openSketchFor(shot, id, { window: true }); }
       if (grp && !card && (act === 'frombeats' || act === 'addshot')) { const scId = grp.dataset.scene; return act === 'frombeats' ? this.fromBeats([scId]) : this.addShot(scId); }
+      const cha = t.closest('[data-cha]'); if (cha) return this.editChapter(t.closest('[data-chapter]').dataset.chapter, cha.dataset.cha);
       const pick = t.closest('[data-pick]'); if (pick) return this.select(pick.dataset.pick);
       const go = t.closest('[data-go]'); if (go && !t.closest('button')) return this.go(go.dataset.go);
       const stg = t.closest('a[data-stage]'); if (stg) return WB().stages.open(stg.dataset.stage);
@@ -656,11 +705,13 @@ class Board {
     el.addEventListener('change', (e) => {
       const t = e.target;
       if (t.matches('.sbsnap')) { this.snap = t.value; prefs.set('boardSnap', t.value); return this.renderBar(); }
+      if (t.matches('.sbchsel')) { t.blur(); return this.setChapter(t.closest('[data-scene]').dataset.scene, t.value); }
       const sid = t.closest('.sbins')?.dataset.shot; if (!sid) return;
       if (t.matches('.sbanc')) return this.setAnchor(sid, t.dataset.edge, t.value);
       if (t.matches('.sbin-t0, .sbin-t1')) { const v = parseT(t.value); if (v == null) { toast('time: m:ss.mmm or seconds'); return this.render(); } return t.matches('.sbin-t0') ? this.setTimes(sid, v, null) : this.setTimes(sid, null, v); }
       if (t.matches('.sbin-kind')) { const k = t.value.trim().toLowerCase(); if (!SB.KIND_RE.test(k)) { toast('kind: a short lower-case word'); return this.render(); } return this.setField(sid, 'kind', k, true); }
       if (t.matches('.sbin-var')) { t.blur(); return this.setVariant(sid, t.closest('[data-eid]').dataset.eid, t.value); }
+      if (t.matches('.sbin-world')) { t.blur(); return this.setWorld(sid, t.value); }
       if (t.matches('.sbin-add') && t.value) { t.blur(); const [ty, id] = t.value.split(':'); return this.addAsset(sid, ty, id); }
     });
     el.addEventListener('focusout', () => setTimeout(() => { if (this.pending && !this.typing()) this.render(); else if (!this.typing()) this.refreshCard(); }, 0));
@@ -743,7 +794,7 @@ menus.contribute('sbscene', [ADD, 'storyboard.fromBeats', 'storyboard.askNote'])
 menus.contribute('shot', ['-', 'storyboard.openShot', 'storyboard.frame', 'storyboard.split', 'storyboard.merge', 'storyboard.moveLeft', 'storyboard.moveRight', 'storyboard.copyFrame', 'storyboard.pasteFrame', 'storyboard.request', 'storyboard.note', 'storyboard.delete']);
 
 export default {
-  mount(el, ctx) { S = new Board(el, ctx); window.WB.storyboard = { focus: (id) => S.focus(id), get ws() { return S; } }; },
+  mount(el, ctx) { S = new Board(el, ctx); window.WB.storyboard = { focus: (id) => S.focus(id), focusChapter: (id) => S.focusChapter(id), get ws() { return S; } }; },
   show() { if (S && !S.typing()) S.render(); },
   get ws() { return S; },
 };

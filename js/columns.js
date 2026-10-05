@@ -8,6 +8,8 @@ import { currentBreakdown, KINDS, KIND_COLOR } from './breakdown.js';
 import { shotEstimate } from './storyboard.js';
 import { noteTime, STAGE_TITLE } from './notes.js';
 import { coverage } from './surfaces.js';
+import { placeholderFor, placeholderUri } from './placeholder.js';   // E5: a shot without a frame or take
+import { chaptersColumn } from './chapterscol.js';   // E3: the chapters band
 
 const LH = 14;              // lyric visual line height (px), 12 px type
 const RAMP = Array.from({ length: 32 }, (_, i) => { const a = i / 31; const l = 14 + a * 70; return `hsl(210, ${12 + a * 20}%, ${l}%)`; });
@@ -26,7 +28,8 @@ export function makeColumns(tl, store) {
   const shotSpans = () => store.boardShots().map(s => ({ t0: s.t0, t1: s.t1, s }));
   const onBoard = (fn) => function (c, what) { if (what === 'board') { this.build(c); return true; } return fn ? fn(c, what) : false; };
   // a shot's frame: its frame sketch (the flattened PNG, cache-busted by its media entry), else the shots.json thumbnail
-  const frameSrc = (s) => { if (s.sketch) { const m = store.mediaById?.['sketch-' + s.sketch]; return `${mediaUrl(m?.path || `sketches/${s.sketch}.png`)}?v=${encodeURIComponent(m?.updated || '')}`; } return s.thumb ? mediaUrl(s.thumb) : ''; };
+  const frameSrc = (s) => { if (s.sketch) { const m = store.mediaById?.['sketch-' + s.sketch]; return `${mediaUrl(m?.path || `sketches/${s.sketch}.png`)}?v=${encodeURIComponent(m?.updated || '')}`; } if (s.thumb) return mediaUrl(s.thumb); const k = s.clip && store.mediaById?.[s.clip.media]; return k?.thumb ? mediaUrl(k.thumb) : ''; };
+  const phSrc = (s) => placeholderUri(placeholderFor(s, { entities: store.entities, scenes: currentScript(store.scenes)?.scenes || [] }).svg);
   const short = (id) => { const e = store.entityById?.[id] || store.entities.find(x => x.kind === 'location' && x.letter === id); return e?.letter || e?.short || (e ? String(e.name || id).split(/[\s·-]+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase() : id); };
 
   function addItems(c, list, html, cls = '') {
@@ -201,11 +204,12 @@ export function makeColumns(tl, store) {
       refresh(c, what) { if (what !== 'scenes' && what !== 'breakdown') return false; this.build(c); return true; },
       dblclick(c, t) { const s = currentScript(store.scenes)?.scenes.find(x => x.t0 <= t && t < x.t1); window.WB?.stages?.open('script').then(() => s && window.WB.script?.focus(s.id)); } },
 
+    chaptersColumn(tl, store),
     // ---------------------------------------------------------------- shots (the storyboard: frame sketch, else the render frame)
     { id: 'shots', title: 'shots', kind: 'text', w: 104, mode: 'follow', stripColor: '#c9ccd1',
       build(c) {
         addItems(c, store.boardShots(), (s) => { const src = frameSrc(s), g = s.gen || (s.thumb ? '' : shotEstimate(s).gen);
-          return `<div class="shot k-${esc(s.kind)}${s.sketch ? ' skf' : ''}" data-act="seek" data-sel="shot:${esc(s.id)}" data-t="${num(s.t0)}" title="${esc(s.id)}${s.scene ? ' · ' + esc(s.scene) : ''} · ${esc(s.kind)}${g ? ' · ' + g : ''} · ${fmt(s.t0, true)}–${fmt(s.t1, true)} · ${esc(s.title || s.text || '')}${s.camera ? '\ncamera: ' + esc(s.camera) : ''}"><div class="cap">${chip('shot:' + s.id, '')}<b>${esc(s.id)}</b> <i>${esc(s.kind)}</i></div>${src ? `<img loading="lazy" src="${esc(src)}" alt="">` : `<span class="nofr">${esc(s.title || s.text || 'no frame')}</span>`}</div>`; });
+          return `<div class="shot k-${esc(s.kind)}${s.sketch ? ' skf' : ''}" data-act="seek" data-sel="shot:${esc(s.id)}" data-t="${num(s.t0)}" title="${esc(s.id)}${s.scene ? ' · ' + esc(s.scene) : ''} · ${esc(s.kind)}${g ? ' · ' + g : ''} · ${fmt(s.t0, true)}–${fmt(s.t1, true)} · ${esc(s.title || s.text || '')}${s.camera ? '\ncamera: ' + esc(s.camera) : ''}"><div class="cap">${chip('shot:' + s.id, '')}<b>${esc(s.id)}</b> <i>${esc(s.kind)}</i></div>${src ? `<img loading="lazy" src="${esc(src)}" alt="">` : `<img class="ph" src="${esc(phSrc(s))}" alt="placeholder ${esc(s.id)}" title="placeholder: no frame or take yet">`}</div>`; });
       }, act: seekAct, refresh: onBoard(refreshChips),
       dblclick(c, t) { if (!tl.player.video) tl.player.toggleVideo(); tl.seek(t); } },
 

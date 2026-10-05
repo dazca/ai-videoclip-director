@@ -15,6 +15,7 @@ import { menus } from '../core/menus.js';
 import { ui } from '../core/palette.js';
 import * as F from '../js/flow.js';
 import * as SC from '../js/scenes.js';
+import * as WD from '../js/worlds.js';
 import * as EV from '../js/events.js';
 import { NotesColumn } from '../core/notescol.js';
 import { history } from '../core/history.js';
@@ -346,6 +347,7 @@ class Workspace {
       const sb = (x, l) => `<button data-st="${x}" class="${st === x ? 'on s-' + x : ''}" title="${x === 'ok' ? 'the director signs this scene off' : ''}">${l}</button>`;
       card = `<div class="sccard open s-${st}${chg ? ' chg' : ''}"><div class="sch">${head}<input class="scin-title" value="${esc(s.title)}" placeholder="title" spellcheck="false"><span class="scst s-${st}"><i></i></span>${sb('draft', 'draft')}${sb('needs_you', 'needs you')}${sb('ok', 'ok')}<b class="sctool" data-a="note" title="note on this scene, in the Notes column (Alt+N)">✉</b><b class="sctool" data-a="del" title="remove the scene from the draft">×</b><b class="sctool" data-a="close" title="close (Esc)">▴</b></div>
         <div class="scf"><label>from <input class="scin-t0" value="${fmt(s.t0, true)}" spellcheck="false"></label>${EV.anchorSelect(s, 't0', store.events, esc, 'scanc')}<label>to <input class="scin-t1" value="${fmt(s.t1, true)}" spellcheck="false"></label>${EV.anchorSelect(s, 't1', store.events, esc, 'scanc')}<span class="dim">${secs(s.t1 - s.t0)} · ${s.line_ids.length} line${s.line_ids.length === 1 ? '' : 's'} · snap ${esc(this.snap)}</span><a data-a="t0play" title="set from to the playhead">from = playhead</a><a data-a="t1play" title="set to to the playhead">to = playhead</a></div>
+        <div class="scf scwld"><label title="E6: the scene's world (on screen, off screen, dancing…): every character in its shots wears the look tagged with it">world <input class="scin-world" list="scworlds" value="${esc(s.context || '')}" placeholder="none" spellcheck="false"></label><datalist id="scworlds">${WD.worldsIn({ entities: store.entities, scenes: this.draft }).map(w => `<option value="${esc(w)}">`).join('')}</datalist></div>
         <textarea class="scin-text" rows="3" placeholder="what happens: the visual description (who, where, action, camera, mood)" spellcheck="false">${esc(s.text)}</textarea>
         <div class="scbh">beats <a data-a="addbeat">+ beat</a></div>
         ${s.beats.map(b => `<div class="scbr" data-beat="${esc(b.id)}"><input class="scin-bt" value="${fmt(b.t, true)}" spellcheck="false" title="time inside the scene"><input class="scin-btx" value="${esc(b.text)}" placeholder="action at this moment" spellcheck="false"><b data-a="delbeat" title="remove">×</b></div>`).join('')}
@@ -451,6 +453,7 @@ class Workspace {
       if (t.matches('.scq textarea')) { const k = t.closest('[data-q]').dataset.q; if ((this.doc.intake[k]?.text || '') !== t.value) this.setAnswer(k, t.value.trim()); return; }
       const sid = t.closest('.scrow')?.dataset.scene, s = sid && this.scene(sid); if (!s) return;
       if (t.matches('.scanc')) return this.setAnchor(sid, t.dataset.edge, t.value);
+      if (t.matches('.scin-world')) { let w; try { w = WD.cleanWorld(t.value); } catch (er) { toast(er.message); return this.render(); } return this.edit(() => { if (w) s.context = w; else delete s.context; }); }
       if (t.matches('.scin-t0, .scin-t1')) { const v = parseT(t.value); if (v == null) { toast('time: m:ss.mmm or seconds'); return this.render(); } return t.matches('.scin-t0') ? this.setTimes(sid, v, null) : this.setTimes(sid, null, v); }
       if (t.matches('.scin-bt')) {
         const b = s.beats.find(x => x.id === t.closest('[data-beat]').dataset.beat), v = parseT(t.value);
