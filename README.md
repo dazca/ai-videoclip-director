@@ -73,7 +73,9 @@ linked to the change) / `round_reply` / `round_finish`, and `revisions_get` (the
 of two); proposals: `proposals_add` (3 free choices on a scene, a shot, a lyric line, a look: SVG made with code, sanitised
 on the server, or a short text) / `proposals_get` (the sets, the director's picks and mix notes, the "3 more" asks); `final_get` (stage 7, read only: the ready-to-render checklist, everything not approved yet by stage with its cost,
 the costs against the cap, the lock); `takes_get` / `take_propose` (take selection: the takes of a shot or a request, and the agent's
-proposed take with in / out and why; the pick is the director's, in the page); `composition_export` (E9: the picks as `edl.json` for the
+proposed take with in / out and why; the pick is the director's, in the page); `surfaces_get` / `surface_propose` (the lyric gate, E2: every
+lyric word on a surface or not, and the agent's proposal of where a line shows on screen during a shot; accepting is the director's, in the
+page); `composition_export` (E9: the picks as `edl.json` for the
 HyperFrames composition; writes only that file); `approvals_get` / `request_changes` (approving is the page's), `requests_list` /
 proposed take with in / out and why; the pick is the director's, in the page); `check_add` / `checks_get` (D7 identity checks: the
 agent's vision check of a node or take against the character's approved identity and constants checklist; a badge for the director, never an
@@ -298,6 +300,15 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   **A/B** (the dock plays A and B side by side in lockstep over their ranges), unpick. The agent's proposals (◆, from
   `take_propose`) sit above the editor with a one-click **Pick**. The timeline **clips** column shows the pick (★ take,
   in–out) over its shot, and Final's checklist counts the shots with a picked take.
+- **The lyric gate** (E2; `js/surfaces.js`, `tabs/surfaces.js`): "every sung or spoken word appears on a desktop surface at its
+  time". The Shot panel's **lyrics on screen** section lists the lyric lines sung during the shot, each word red while it is on no
+  surface; click a word (Shift+click a second one for a range), pick where it shows (window title, chat, dialog, karaoke, taskbar,
+  other) and a detail, **+ surface**; × takes one off. The agent's proposals (`surface_propose`) sit there with **Accept** / ×. Each
+  change is a new storyboard version (`shot.lyrics[{line, w?, where}]`; page only). The timeline's **surface** column shows every
+  line's words (uncovered in red), the Lyrics stage a `covered/n` count per line (click: the shot), the storyboard's side panel
+  (no shot selected) the uncovered runs, and Final's checklist the line **every word on a surface**.
+- **Help** (F5, `core/helptip.js`): empty states and the storyboard's side panel are one line plus a **?** that opens the longer
+  explanation; a short poem spreads over the Lyrics stage's height, an empty breakdown shows the scenes it will read.
 - **Export composition data…** (File menu; E9, `core/compexport.js`): the picks as one JSON file for the HyperFrames
   composition, `data/<project>/exports/composition/edl.json` (versioned, deterministic, with a checksum): per shot the picked
   take (its file mapped under the composition's assets: one rule a line, `from => to`), in / out, the look per character,
@@ -340,7 +351,7 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
 - **Pages** (the NLE standard: a few pages like DaVinci Resolve's, asset kinds as bins like Premiere's Project panel;
   keys 1-4): **1 Timeline** (the synced vertical view, default) · **2 Assets** (left sub-nav: Characters, Locations,
   Props, Media, Clips, each with its count; a search box and a status filter at the top filter the cards / rows of the
-  visible bin; the character page opens inside it) · **3 Review** (Approvals, Queue = generation requests, Notes,
+  visible bin (Media keeps only its own status filter, F4); the character page opens inside it) · **3 Review** (Approvals, Queue = generation requests, Notes,
   Costs) · **4 Settings** (not a tab: Edit > Settings, `Ctrl+,`, or `⚙`). **Window > New page…** pins any sub-view
   (e.g. Media) as its own closable page (keys 5-9); Window also lists every sub-view (Assets > Characters…), and the
   palette has one command per sub-view ("Assets: Characters", "Review: Queue"…).
@@ -388,6 +399,7 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
 |---|---|---|---|
 | ruler | lane | on | bar number + mm:ss at downbeats, beat ticks, section colour band, amber density tint = local stretch |
 | sections | text, follow | on | label, energy, world %, overload target; click = loop |
+| surface | text, follow | on | the lyric gate (E2): per lyric line its words, read normally when they show on a surface (a storyboard shot's `lyrics[]` at the word's time), **red** when on none; `covered/n` per line; hover = shot · where; double-click = the shot in the storyboard |
 | lyrics | text, drive | on | one row per **visual line**; each visual line is a warp knot at its first word's onset; karaoke word highlight; dotted = low-confidence word; left stripe = voice (male/female/both/system) |
 | events | text, drive | on | stops, drops, counts, silences, beats, spoken cues |
 | wave | lane | on | mix waveform, faint downbeat lines (they spread apart where text is dense) |
@@ -434,8 +446,9 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `lyrics.json` | `{rev, current: "v3", seq, versions[{id, n, created, by, via, message, from?, sections[{id, label, lines[{id, text, t?}]}]}], notes[{id, line, w: [first, last word] \| null, quote, text, by, via, to?: "agent", kind?, status, at, version, replies[{id, text, by, via, at}]}]}`: stage 1. Versions are immutable (a save appends one and moves `current`; the server keeps its copy of every saved version); line ids are stable across versions and are the `song.json` line ids (a missing file reads as v1 derived from `song.json`). The server re-syncs `song.json` lines on every new current version |
 | `scenes.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, scenes[{id: "sc03", t0, t1, title, text, line_ids[], beats[{id: "b1", t, text}], sketches[ids]}]}], states{<scene>: {status: draft/needs_you/ok, by, via, at}}, notes[{id: "sn01", scene \| null, beat?, text, by, via, to?: "agent", kind?: request/fill_gaps, gaps?, status, at, version, replies[]}], intake{<question>: {text, by, via, at, asked?}}}`: stage 2, the script draft (shared with the page). Versions are immutable (a save appends; restore copies); statuses and intake answers live outside them; only the page sets a scene `ok`. A missing file reads as v1 derived from `script.json` (`stages` -> scenes, `lines` -> beats), which is never rewritten. Shapes and logic: `js/scenes.js` |
 | `breakdown.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, script?, items[{id: "bi03", kind: character/location/prop/wardrobe/fx, name, description, links[{scene, beats[], note?}], source: agent/director, aliases?, for? (wardrobe: the character item), dropped?}]}], states{<item>: {status: draft/review/ok, entity_id?, look_id?, by, via, at}}, notes[{id: "bn01", item \| null, scene?, text, by, via, to?: "agent", kind?: request/extract, status, at, version, replies[]}]}`: stage 3, the breakdown (shared with the page). Versions are immutable (a save appends; restore copies); statuses and entity links live outside them; only the page sets an item `ok` or links it to an entity ("Create entity": a draft entity in `entities/`, or a look on a character). Links name scene / beat ids of `scenes.json`. Shapes and logic: `js/breakdown.js` |
-| `storyboard.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, script?, shots[{id: "sh03", scene, t0, t1, kind: wide/medium/close/insert/performance/xp-desktop/…, title, text, camera, sketch, beats[], cast[], locations[], props[], variants{<entity>: <variant / look> \| null}, gen: still/video/null, clips[], thumb?, section?}]}], notes[{id: "sbn01", shot, scene?, text, by, via, to?: "agent", kind?: request/storyboard/fill_gaps, gaps?, status, at, version, replies[]}]}`: stage 6, the storyboard. A version is immutable (a save appends one); the shots of a scene tile it; the variant each asset needs is the scene's (entity `uses`) unless `variants` overrides it. The shot's approval is `approvals.json` `shot:<id>`. Missing = v1 derived from `shots.json` (never rewritten; its readers keep working). Logic: `js/storyboard.js` |
+| `storyboard.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, script?, shots[{id: "sh03", scene, t0, t1, kind: wide/medium/close/insert/performance/xp-desktop/…, title, text, camera, sketch, beats[], cast[], locations[], props[], variants{<entity>: <variant / look> \| null}, gen: still/video/null, clips[], thumb?, section?, clip?, lyrics?[{line, w?, where}] (the lyric gate, E2: page only)}]}], notes[{id: "sbn01", shot, scene?, text, by, via, to?: "agent", kind?: request/storyboard/fill_gaps, gaps?, status, at, version, replies[]}]}`: stage 6, the storyboard. A version is immutable (a save appends one); the shots of a scene tile it; the variant each asset needs is the scene's (entity `uses`) unless `variants` overrides it. The shot's approval is `approvals.json` `shot:<id>`. Missing = v1 derived from `shots.json` (never rewritten; its readers keep working). Logic: `js/storyboard.js` |
 | `takes.json` | the agent's take proposals (the server's; the page reads it): `{v: 1, rev, proposals[{id: "tp03", shot, request, job, take, file, media, kind, in_ms, out_ms, why, by, via: "agent", at, status: open/picked/dismissed}]}`. The pick itself is the storyboard shot's `clip{request, take, file, media, kind, in_ms, out_ms, note, alt[{take, file?, t, note}], by, via: "page", at, proposal?}` (written only by the page's `take_act`, carried forward by every other save) |
+| `surfaces.json` | the agent's lyric-surface proposals (E2; the server's, the page reads it): `{v: 1, rev, proposals[{id: "sp03", shot, line, w?, where, why, by, via: "agent", at, status: open/accepted/dismissed, decided_at?, decided_by?}]}`; an accepted surface lives on the storyboard shot as `lyrics[{line, w?: [first, last word], where: "<kind>[: detail]"}]` (kind window / chat / dialog / karaoke / taskbar / other; written by `surface_act`, page only) |
 | `checks.json` | identity checks (D7; the server's, the page reads it): `{v: 1, rev, checks[{id: "ck03", target{kind: node/take/media, id: "ada/n05" \| "<shot>/<media>" \| "<media>"}, against{entity, node, image}, by, via: "agent", verdict: ok/drift/fail, items[{constant, ok, note?}], note, score?{model, value, threshold?, metric?}, created}], asks[{note, entity, against, files[{file, media?, node?, request?, target, source}], source, at}]}`. A character's `constants[]` are strings or `{text, check, label?}` (D2). Never an approval or a pick. Logic: `js/checks.js` |
 | `sketches/<id>.json` / `.png` / `.mask.png` | a sketch: `{id, w, h, paper, underlay{src, opacity, fit}, strokes[], mask[], pins[{n, x, y, text}], title?, created, updated, by, via}` (format: `core/sketch/sketch.js`), the flattened image and the edit mask; written by `sketch_save`, registered in `media.json` (`kind: "sketch"`, `sketch`, `mask`, `scenes[]`, `pins`); under `private/sketches/` when drawn over a private image; not snapshotted |
 | `.snapshots/<yyyymmdd-hhmmss>-<slug>/` | copies of the small JSON files (no peaks, thumbs, `_src`, settings, revisions.json) + `.meta.json {id, at, message, auto, files, revision?, immutable?}` |
@@ -682,6 +695,11 @@ small files are served in one read so no handle stays open.
   or another shot's take: 400 / 404), with 0 <= in < out <= the take's duration (a still: no range) and alternatives inside
   the song; request / take / kind come from the media entry. A page save of `storyboard.json` keeps the server's picks and
   the agent's `shots_update` ignores `clip`; `takes.json` is not a page save.
+- The lyric gate (E2): accepting a proposal, adding or removing a surface (`surface_act`) is the page's act only (via "page" from
+  this server's Origin; no MCP tool; 403 to the agent surface, a claimed via "page", a foreign Origin and offline). A surface and a
+  `surface_propose` name a shot, a song line, a word range on it, a known kind (≤ 120 characters, no control characters) and words
+  sung during the shot (400 / 404). A page save of `storyboard.json` keeps the server's `lyrics` and the agent's `shots_update`
+  ignores them; `surfaces.json` is not a page save. `where` and `why` render escaped.
 - Identity checks (D7): `check_add` writes `checks.json` only, never approvals, requests, picks or takes.json, whatever the body
   says; its target (a node, a take of that shot, a registered image / video), the character and the node compared with must exist
   (404; ids checked by shape: 400); each item names one of the character's constants or `likeness`; `checks.json` is not a page

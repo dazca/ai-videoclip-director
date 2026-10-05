@@ -19,6 +19,7 @@ import { NotesColumn } from '../core/notescol.js';
 import { history } from '../core/history.js';
 import { stripHtml, register as registerProposals, offerPrepare } from '../core/proposals.js';
 import { TimeAxis } from '../core/timemode.js';
+import { help } from '../core/helptip.js';
 
 const WB = () => window.WB;
 const visible = () => WB()?.app?.active() === 'stage' && WB().stages?.current() === 'script';
@@ -302,7 +303,7 @@ class Workspace {
     const list = this.$('.sclist'), song = this.song, dur = song.duration_ms;
     const rows = [...this.draft.map(s => ({ t0: s.t0, t1: s.t1, s })), ...SC.gaps(this.draft, dur, 1).map(([a, b]) => ({ t0: a, t1: b, gap: true }))].sort((a, b) => a.t0 - b.t0 || (a.gap ? -1 : 1));
     if (!rows.length || (!this.draft.length && rows.length === 1)) {
-      list.innerHTML = `<div class="scempty"><b>No scenes yet.</b> Answer the intake (right), then draft the scenes here (<a data-a="addscene">+ scene</a>) or <a data-a="fill">ask the agent to fill the gaps</a>: every scene is bound to a stretch of the song.</div>`
+      list.innerHTML = `<div class="scempty">${help('<b>No scenes yet.</b> <a data-a="addscene">+ scene</a> · <a data-a="fill">ask the agent to fill the gaps</a>', '<p>Answer the intake (right) first: the agent drafts from it.</p><p>Every scene is bound to a stretch of the song; the gaps are the stretches no scene covers yet.</p>')}</div>`
         + (rows[0] ? this.rowHtml(rows[0]) : '');
       return this.placeSketch();
     }

@@ -28,6 +28,9 @@ import { history } from '../core/history.js';
 import { stripHtml, register as registerProposals, offerPrepare } from '../core/proposals.js';
 import * as PR from '../js/proposals.js';
 import { mountTakes } from './takes.js';
+import { mountSurfaces } from './surfaces.js';
+import { coverage } from '../js/surfaces.js';
+import { help } from '../core/helptip.js';
 
 const WB = () => window.WB;
 const visible = () => WB()?.app?.active() === 'stage' && WB().stages?.current() === 'storyboard';
@@ -81,7 +84,7 @@ class Board {
     // stacked down it at their own times; gaps as rows too; shots outside the script after the end
     this.ta = new TimeAxis({ stage: 'storyboard', scroller: this.$('.sblist'), nc: this.nc, rows: () => this.timeRows(), onApply: () => this.nc.schedule('place'), noSeek: '.sbcard, .sbsh, .sbskslot' });
     document.addEventListener('wb:timemode', (e) => { if (e.detail.stage === 'storyboard' && !this.typing()) this.render(); });
-    store.on((w) => { if (['board', 'scenes', 'all', 'approvals', 'requests', 'breakdown', 'costs', 'proposals', 'takes', 'checks'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
+    store.on((w) => { if (['board', 'scenes', 'all', 'approvals', 'requests', 'breakdown', 'costs', 'proposals', 'takes', 'surfaces', 'checks'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
     this.render();
   }
   // a draft edit from "+ Add" (a shot) and the other structural edits: one undo step (Ctrl+Z puts the draft back)
@@ -104,10 +107,12 @@ class Board {
     this.base = this.doc?.current || null;
   }
   // the picked takes (shot.clip) are the saved version's (take_act writes them): the draft always carries them as they are
-  syncPicks() { const m = new Map((this.cur?.shots || []).filter(x => x.clip).map(x => [x.id, x.clip])); for (const d of this.draft) { if (m.has(d.id)) d.clip = structuredClone(m.get(d.id)); else delete d.clip; } }
+  syncPicks() { const m = new Map((this.cur?.shots || []).filter(x => x.clip).map(x => [x.id, x.clip])); for (const d of this.draft) { if (m.has(d.id)) d.clip = structuredClone(m.get(d.id)); else delete d.clip; }
+    // the lyric surfaces (shot.lyrics, E2) are the saved version's too (surface_act writes them)
+    const l = new Map((this.cur?.shots || []).filter(x => x.lyrics?.length).map(x => [x.id, x.lyrics])); for (const d of this.draft) { if (l.has(d.id)) d.lyrics = structuredClone(l.get(d.id)); else delete d.lyrics; } }
   syncBase() {
     if (this.base === (this.doc?.current || null) || this.busy) return;
-    const strip = (l) => this.sorted(l).map(({ clip: _c, ...x }) => x), old = this.doc?.versions.find(v => v.id === this.base);
+    const strip = (l) => this.sorted(l).map(({ clip: _c, lyrics: _l, ...x }) => x), old = this.doc?.versions.find(v => v.id === this.base);
     if (!this.dirtyAgainst(this.base)) this.draft = structuredClone(this.cur?.shots || []);
     else {
       this.syncPicks();   // a pick (take_act) is its own version: the unsaved edits stay, with the new pick
@@ -487,11 +492,13 @@ class Board {
     list.innerHTML = this.side === 'gaps' ? this.gapsHtml(g) : this.side === 'versions' ? this.versionsHtml() : this.shotHtml();
     const th = this.side === 'shot' && this.sel && list.querySelector('.tkhost');
     if (th) mountTakes(th, { shot: this.sel });
+    const sh = this.side === 'shot' && this.sel && list.querySelector('.sfhost');
+    if (sh) mountSurfaces(sh, { shot: this.sel });
     list.scrollTop = keep;
   }
   shotHtml() {
     const s = this.shot(this.sel);
-    if (!s) return `<div class="lyvh"><span class="dim">no shot selected · click a card (← / → step)</span></div><div class="sbhelp"><p>Each scene of the script is a strip of shots that <b>tile</b> it: the thin rail above a strip shows the cuts (alternating), the bars (ticks) and the scene's beats (dots).</p><p><b>Shots from beats</b> proposes one shot per beat or group of beats; edit, split, merge and reorder them, draw a frame for each, then <b>Save version</b>.</p><p>Chips: <span class="sbch k-character ok"><i>C</i>approved</span> <span class="sbch k-location"><i>L</i>not yet</span>; the variant is the scene's unless the shot sets one.</p><p>The <b>Gaps</b> tab lists what is still missing across the stages and what filling it would cost against the cap.</p></div>`;
+    if (!s) return this.overviewHtml();
     const sc = this.scene(s.scene), { prev, next } = this.neighbours(s), st = store.state('shot:' + s.id);
     const first = sc && (!prev || prev.scene !== s.scene), lastS = sc && (!next || next.scene !== s.scene);
     const assets = SB.shotAssets(s, store.entities, store.approvals), haveStill = this.haveStill(s.id), est = SB.shotEstimate(s, { haveStill: !!haveStill }), gen = s.gen || SB.defaultGen(s.kind);
@@ -525,10 +532,22 @@ class Board {
     // requests (drafts approved here) and the next one this shot needs
     const reqs = this.reqs(s.id), openR = reqs.some(r => OPEN_REQ.includes(r.status)), saved = !!this.cur?.shots.some(x => x.id === s.id), q = est.items[0];
     h += `<div class="scbh">takes <span class="dim">pick one: in / out, a note, alternatives</span></div><div class="tkhost"></div>`;
+    h += `<div class="scbh">lyrics on screen <span class="dim">every sung word on a surface (E2)</span></div><div class="sfhost"></div>`;
     h += `<div class="scbh">generation</div>${(s.clips || []).length ? `<div class="sbreq s-done"><b>clip</b><span class="sbrqs">${esc(s.clips.join(' '))}</span><span class="dim">in the world clips column</span></div>` : ''}` + reqs.map(r => `<div class="sbreq s-${esc(r.status)}" data-r="${esc(r.id)}"><b>${esc(String(r.kind).replace('shot-', ''))}</b><span class="dim">${esc(r.id)}</span><span class="sbrqs">${esc(r.status)}</span><span class="dim">${usd(r.est_cost)}${r.actual_cost_usd != null ? ' / ' + usd(r.actual_cost_usd) : ''}</span>${r.status === 'draft' ? `<button data-a="reqok" class="pri" title="approve: the agent may run it and spend up to the estimate (page only)">Approve</button><button data-a="reqno">Reject</button>` : ''}</div>`).join('')
       + `<div class="sbiact"><button data-a="reqgen" class="pri"${openR || !saved ? ' disabled' : ''} title="${esc(!saved ? 'save the storyboard first' : openR ? 'a request is open' : `a DRAFT request (nothing runs or is paid until you approve it): ${q.tool}, ${q.why}`)}">Request ${esc(q.kind.replace('shot-', ''))} · est ${usd(q.usd)}</button>${est.items.length > 1 ? `<span class="dim">then the video ${usd(est.items[1].usd)}</span>` : ''}</div>`;
     h += `<div class="sbiact"><button data-a="split" title="cut on the beat grid at the playhead (inside the shot) or the middle">Split at beat</button><button data-a="merge"${next && next.scene === s.scene ? '' : ' disabled'}>Merge with next</button><button data-a="mvl"${prev && prev.scene === s.scene ? '' : ' disabled'} title="swap with the previous shot">◂ Move</button><button data-a="mvr"${next && next.scene === s.scene ? '' : ' disabled'} title="swap with the next shot">Move ▸</button><button data-a="note" title="a note on this shot (Alt+N)">✉ Note</button><button data-a="del">Delete</button></div>`;
     return `<div class="sbins" data-shot="${esc(s.id)}">${h}</div>`;
+  }
+  // F5: no shot selected: one line of help (+ "?"), then what is left: the lyric gate (E2) line by line and the gap counts
+  overviewHtml() {
+    const shots = SB.boardShots(this.doc), cov = coverage(this.song, shots), g = this.gapsNow();
+    const more = '<p>Each scene of the script is a strip of shots that <b>tile</b> it: the thin rail above a strip shows the cuts, the bars (ticks) and the beats (dots).</p><p><b>Shots from beats</b> proposes one shot per beat or group of beats; edit, split, merge and reorder them, draw a frame for each, then <b>Save version</b>.</p><p>Chips: green = approved; the variant is the scene\'s unless the shot sets one. The <b>Gaps</b> tab lists what is still missing and what filling it would cost.</p>';
+    const runs = cov.uncovered.slice(0, 40).map(u => { const sh = shots.find(x => x.t0 <= u.t0 && u.t0 < x.t1); return `<div class="sbgap"${sh ? ` data-pick="${esc(sh.id)}"` : ''}><span class="sbgt">${esc(u.line)}</span><span class="sbgx sfun">“${esc(u.text)}”</span><span class="dim sbgc">${esc(clk(u.t0))}${sh ? ' · ' + esc(sh.id) : ''}</span>${sh ? '<a>shot ›</a>' : ''}</div>`; }).join('');
+    const counts = [['unscripted', 'unscripted stretches'], ['no_shots', 'scenes without shots'], ['no_frame', 'shots without a frame'], ['assets', 'assets not approved'], ['no_request', 'shots without a request']].map(([k, l]) => `<span class="${g.counts[k] ? 'bad' : 'okc'}">${g.counts[k]} ${l}</span>`).join('');
+    return `<div class="lyvh sbov">${help('<span class="dim">no shot selected · click a card (← / → step)</span>', more)}</div>`
+      + `<div class="sbgh"><b>Lyric gate</b><i>${cov.covered}/${cov.total}</i><span class="dim">every sung word on a surface at its time</span></div>`
+      + (cov.ok ? '<div class="sbgok">✓ every word is on a surface</div>' : runs + (cov.uncovered.length > 40 ? `<div class="dim sbpad">+${cov.uncovered.length - 40} more (timeline: the surface column)</div>` : ''))
+      + `<div class="sbgh"><b>Gaps</b><i>${g.total}</i><a data-side="gaps">details ›</a></div><div class="sbcounts">${counts}</div>`;
   }
   gapsHtml(g) {
     const cv = SB.costView(store.costs, store.requests), est = g.estimate.usd, total = +(cv.spent + cv.committed + est).toFixed(2), over = total > cv.cap + 1e-9;

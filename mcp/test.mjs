@@ -17,6 +17,7 @@
 // refuses agent writes, proposals included), the review fixes (a failed request back to draft in a duplicate / restore,
 // private refs uploaded only with the director's tick),
 // refuses agent writes, proposals included), take selection (takes_get / take_propose; the pick is the page's, on the shot),
+// the lyric gate (surfaces_get / surface_propose; accepting a surface is the page's, on the shot),
 // resources, the director-session prompt, the guard rules (edit voids approval, director-only approvals, media kind,
 // CSRF / Host / token checks, path traversal and the PRIVATE rule) and the offline (files only) mode. The temp folder
 // is removed at the end, whatever happens; data/demo must be byte-identical afterwards.
@@ -134,7 +135,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve', 'character_get', 'character_iteration_add', 'character_note_add', 'look_create',
     'asset_get', 'asset_iteration_add', 'asset_note_add', 'variant_create',
     'storyboard_get', 'shots_update', 'shot_note_add', 'shot_note_resolve', 'gaps_get', 'notes_get', 'notes_add', 'notes_status', 'request_run', 'generators_get',
-    'round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get', 'proposals_add', 'proposals_get', 'final_get', 'takes_get', 'take_propose', 'media_scan', 'media_import', 'batches_get', 'waves_propose'];
+    'round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get', 'proposals_add', 'proposals_get', 'final_get', 'takes_get', 'take_propose', 'surfaces_get', 'surface_propose', 'media_scan', 'media_import', 'batches_get', 'waves_propose'];
   check('tools/list has every tool', EXPECT.every(t => tools.includes(t)), { count: tools.length, missing: EXPECT.filter(t => !tools.includes(t)) });
   const schemaOk = (await mcp.listTools()).tools.every(t => t.description?.length > 40 && t.inputSchema?.type === 'object');
   check('every tool has a description and a JSON schema', schemaOk);
@@ -1480,6 +1481,43 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
     && sg.scenes.flatMap(s => s.shots).concat(sg.outside_script || []).find(s => s.id === 's2-wall')?.clip?.take === 1
     && cur2.text === 'mcp: agent text' && cur2.clip?.file === clip.file && (up.warnings || []).some(w => /clip ignored/.test(w)) && tk && /^1 of \d+ shots picked/.test(tk.detail),
     { clip, version: sbj.current, picked: tg2.picked?.media, warnings: up.warnings, tk: tk?.detail });
+}
+// 20b. the lyric gate (ROADMAP_v4 E2): surfaces_get (read only: every lyric word covered or not, the uncovered runs, the
+// surfaces per shot, the proposals), surface_propose (checked: the shot, the line, the word range, the where kind, sung during the
+// shot); accepting / adding / removing is the page's (surface_act: no tool, 403 to the agent); a surface lands on the storyboard
+// shot as lyrics[{line, w?, where}] through a new version; the agent's shots_update carries it forward; Final counts the words
+{
+  const TP = 'mcp-gate';
+  S.duplicateProject(PROJECT, TP, true);
+  const TJ = (f) => JSON.parse(fs.readFileSync(path.join(DATA, TP, f), 'utf8'));
+  const pageOp = (name, body = {}) => post(`/api/op/${name}?project=${TP}`, body, { origin: URL_ });
+  const tools = (await mcp.listTools()).tools.map(t => t.name);
+  const g0 = await call(mcp, 'surfaces_get', { project: TP }), g0u = await call(mcp, 'surfaces_get', { project: TP, uncovered: true, line: 'verse/0' });
+  check('surfaces_get: every lyric word with covered false (57 words, 9 uncovered runs: one per line), the line filter, the where kinds; no surface_act tool',
+    tools.includes('surfaces_get') && tools.includes('surface_propose') && !tools.includes('surface_act') && g0.ok === false && g0.total === 57 && g0.covered === 0 && g0.uncovered?.length === 9
+    && g0.lines?.length === 9 && g0.lines[1].words.every(w => w.covered === false) && g0u.lines?.length === 1 && g0u.lines[0].id === 'verse/0' && g0.where_kinds?.includes('karaoke'),
+    { total: g0.total, runs: g0.uncovered?.length, err: g0.error });
+  const pr = await call(mcp, 'surface_propose', { project: TP, shot: 's4-chorus', line: 'chorus/0', where: 'karaoke: bouncing ball over the lyric', why: 'the chorus is sung along' });
+  const again = await call(mcp, 'surface_propose', { project: TP, shot: 's4-chorus', line: 'chorus/0', where: 'karaoke: bouncing ball over the lyric', why: 'updated why' });
+  const off = await call(mcp, 'surface_propose', { project: TP, shot: 's1-intro', line: 'chorus/0', where: 'chat', why: 'x' });
+  const rng = await call(mcp, 'surface_propose', { project: TP, shot: 's4-chorus', line: 'chorus/0', w: [2, 30], where: 'chat', why: 'x' });
+  const agentAct = await post(`/api/op/surface_act?project=${TP}`, { act: 'accept', proposal: 'sp01' });
+  let offAct = null; try { S.ops.surface_act(TP, { act: 'accept', proposal: 'sp01' }); offAct = 200; } catch (e) { offAct = e.code; }
+  check('surface_propose: an open proposal in surfaces.json; the same surface again only updates its why; a line not sung during the shot and a word range off the line are refused; the agent cannot accept (403 over HTTP and offline)',
+    pr.proposal?.id === 'sp01' && pr.proposal.status === 'open' && again.updated === true && TJ('surfaces.json').proposals.length === 1 && TJ('surfaces.json').proposals[0].why === 'updated why'
+    && /not sung during s1-intro/.test(off.error || '') && /has 8 words/.test(rng.error || '') && agentAct.status === 403 && offAct === 403,
+    { pr: pr.changed || pr.error, off: off.error?.slice(0, 80), rng: rng.error?.slice(0, 80), agentAct: agentAct.status, offAct });
+  const acc = await pageOp('surface_act', { act: 'accept', proposal: 'sp01' });
+  const add = await pageOp('surface_act', { act: 'add', shot: 's4-chorus', line: 'chorus/1', w: [0, 1], where: 'dialog: Every frame' });
+  const sbj = TJ('storyboard.json'), cur = sbj.versions.find(v => v.id === sbj.current), ly = cur.shots.find(s => s.id === 's4-chorus').lyrics;
+  const up = await call(mcp, 'shots_update', { project: TP, upsert: [{ id: 's4-chorus', camera: 'mcp: locked-off', lyrics: [] }] });
+  const cur2 = (() => { const d = TJ('storyboard.json'); return d.versions.find(v => v.id === d.current).shots.find(s => s.id === 's4-chorus'); })();
+  const g1 = await call(mcp, 'surfaces_get', { project: TP, shot: 's4-chorus' }), fg = await call(mcp, 'final_get', { project: TP }), line = fg.checklist?.find(c => c.id === 'lyrics');
+  check('the page accepts / adds (surface_act): a new storyboard version with shot.lyrics [{line, w?, where}] (via page); the proposal is "accepted"; the agent\'s shots_update keeps them (its lyrics ignored with a warning); surfaces_get counts the words; Final "every word on a surface" counts them too',
+    acc.status === 200 && add.status === 200 && cur.via === 'page' && ly?.length === 2 && ly[0].line === 'chorus/0' && ly[0].w === undefined && String(ly[1].w) === '0,1' && TJ('surfaces.json').proposals[0].status === 'accepted'
+    && cur2.camera === 'mcp: locked-off' && cur2.lyrics?.length === 2 && (up.warnings || []).some(w => /lyrics ignored/.test(w))
+    && g1.covered === 10 && g1.shots?.[0]?.lyrics?.length === 2 && line && !line.ok && /10 of 57 words/.test(line.detail),
+    { acc: acc.status, add: add.status, ly, covered: g1.covered, line: line?.detail, warnings: up.warnings });
 }
 // 21. (D8) import of existing images and video: a fake falgen tree under a media root (tools/fake-falgen.mjs; never fal)
 {

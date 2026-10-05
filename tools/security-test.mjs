@@ -798,6 +798,43 @@ try {
       { ok: ok.status, forged: forged.status, kept: vF.shots.find(s => s.id === 's2-wall').clip?.file, s3: vF.shots.find(s => s.id === 's3-grid').clip, agent: agentClip.status });
   }
 
+  // ---------------------------------------------------------------- the lyric gate (E2): a surface on a shot is the director's (page only);
+  // the agent only proposes; a page save of storyboard.json and the agent's shots_update keep the server's surfaces; a hostile
+  // "where" is stored as text and rendered escaped (browser below)
+  {
+    const XW = 'chat: <img src=x onerror="window.__sf=1"><script>window.__sf2=1</script>';
+    const add = { act: 'add', shot: 's2-wall', line: 'verse/0', w: [0, 1], where: 'dialog: Error' };
+    const sb0 = readP('storyboard.json');
+    const tries = [(await op('surface_act', add)).status, (await op('surface_act', { ...add, via: 'page' })).status, (await post(`/api/op/surface_act?project=${P}`, add, { origin: 'http://evil.example' })).status];
+    try { S.ops.surface_act(P, add); tries.push(200); } catch (e) { tries.push(e.code); }
+    try { S.ops.surface_act(P, { ...add, via: 'agent' }); tries.push(200); } catch (e) { tries.push(e.code); }
+    const prop = await op('surface_propose', { shot: 's2-wall', line: 'verse/0', w: [0, 3], where: XW, why: '<b onmouseover="window.__sf3=1">why</b>' });
+    const acceptAgent = [(await op('surface_act', { act: 'accept', proposal: prop.body?.proposal?.id })).status, (await op('surface_act', { act: 'accept', proposal: prop.body?.proposal?.id, via: 'page' })).status];
+    const noTool = !fs.readdirSync(path.join(WB, 'mcp', 'tools')).some(f => fs.readFileSync(path.join(WB, 'mcp', 'tools', f), 'utf8').includes("registerTool('surface_act'"));
+    check('lyric gate: an agent cannot put a surface on a shot nor accept a proposal (surface_act over the agent surface, with a claimed via "page", from a foreign Origin, offline: 403; no MCP tool); storyboard.json untouched; surfaces.json is not a page save (403)',
+      tries.every(x => x === 403) && acceptAgent.every(x => x === 403) && noTool && prop.status === 200 && readP('storyboard.json').rev === sb0.rev
+      && (await post(`/api/save/surfaces.json?project=${P}`, { base_rev: 0, data: { v: 1, proposals: [] } }, { origin: A.base })).status === 403, { tries, acceptAgent, noTool, prop: prop.status });
+    const asPage = (body) => post(`/api/op/surface_act?project=${P}`, body, { origin: A.base });
+    const bad = {
+      unknown_kind: (await asPage({ ...add, where: 'javascript: alert(1)' })).status, control: (await asPage({ ...add, where: 'chat: a\u0000b' })).status,
+      too_long: (await asPage({ ...add, where: 'chat: ' + 'x'.repeat(200) })).status, range: (await asPage({ ...add, w: [3, 99] })).status,
+      off_time: (await asPage({ ...add, shot: 's5-outro' })).status, traversal_line: (await asPage({ ...add, line: '../x' })).status, bad_shot: (await asPage({ ...add, shot: '<x>' })).status,
+      propose_kind: (await op('surface_propose', { shot: 's2-wall', line: 'verse/0', where: 'url(evil)', why: 'x' })).status,
+    };
+    check('lyric gate: a surface must name a known kind (window, chat, dialog, karaoke, taskbar, other), ≤ 120 printable characters, a word range on the line, a line sung during the shot, valid ids (else 4xx; surface_propose too)',
+      Object.values(bad).every(x => x === 400 || x === 404) && readP('storyboard.json').rev === sb0.rev, bad);
+    const acc = await asPage({ act: 'accept', proposal: prop.body.proposal.id }), sbA = readP('storyboard.json'), lyA = sbA.versions.find(v => v.id === sbA.current).shots.find(x => x.id === 's2-wall').lyrics;
+    const forged = await pageSave('storyboard.json', (d) => { const v = structuredClone(d.versions.find(x => x.id === d.current)); v.id = 'v98'; v.n = 98; v.shots.find(x => x.id === 's2-wall').lyrics = [{ line: 'verse/1', where: 'chat: forged' }]; v.shots.find(x => x.id === 's3-grid').lyrics = [{ line: 'verse/2', where: 'chat: forged' }]; d.versions.push(v); d.current = v.id; });
+    const sbF = readP('storyboard.json'), vF = sbF.versions.find(v => v.id === sbF.current);
+    const agentLy = await op('shots_update', { upsert: [{ id: 's3-grid', lyrics: [{ line: 'verse/2', where: 'chat' }] }] });
+    const sbG = readP('storyboard.json'), vG = sbG.versions.find(v => v.id === sbG.current);
+    check('lyric gate: the page accepts (a new version, the hostile where stored as text); a page save of storyboard.json cannot forge surfaces (the server\'s kept, a forged one on another shot dropped); the agent\'s shots_update ignores lyrics (warning)',
+      acc.status === 200 && lyA?.[0]?.where === XW.replace(/\s+/g, ' ') && forged.status === 200 && JSON.stringify(vF.shots.find(x => x.id === 's2-wall').lyrics) === JSON.stringify(lyA) && !vF.shots.find(x => x.id === 's3-grid').lyrics
+      && agentLy.status === 200 && !vG.shots.find(x => x.id === 's3-grid').lyrics && (agentLy.body?.warnings || []).some(w => /lyrics ignored/.test(w)), { acc: acc.status, where: lyA?.[0]?.where, forged: forged.status, agent: agentLy.status });
+    // a second proposal stays open (its hostile where and why render in the Shot panel)
+    await op('surface_propose', { shot: 's2-wall', line: 'verse/1', where: XW, why: '<img src=x onerror="window.__sf4=1">' });
+  }
+
   // ---------------------------------------------------------------- D4 batches (waves): only the director approves, reviews (unlocks), sets the
   // cap of or dismisses a batch (page only); a page save cannot forge batches or history; a locked batch never runs; the
   // per-batch cap holds; the job-book import is the page's
@@ -1190,6 +1227,25 @@ try {
     const tk = await tpg.evaluate(() => ({ inert: window.__tk === undefined && !document.querySelector('.tkw img[src="x"], .col-clips img[src="x"]'), note: document.querySelector('.tkw .tknote')?.value || '', cards: document.querySelectorAll('.tkw .tkc').length }));
     check('F02 take selection: a hostile note on the pick renders as text (the Shot panel\'s takes, the note field) and never runs', tk.inert && /onerror/.test(tk.note) && tk.cards >= 2, tk);
     await tpg.close();
+    // the lyric gate: a hostile "where" / why renders as text in the Shot panel, the timeline's surface column, the Lyrics stage,
+    // the storyboard overview and Final's checklist, and never runs
+    const spg = await browser.newPage(); const sfv = [];
+    spg.on('dialog', d => { sfv.push('dialog ' + d.message()); d.dismiss().catch(() => {}); });
+    await spg.goto(`${A.base}/?project=${P}`, { waitUntil: 'domcontentloaded' });
+    await spg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 });
+    await spg.evaluate(() => window.WB.stages.open('storyboard')); await wait(600);
+    await spg.evaluate(() => window.WB.storyboard.focus('s2-wall')); await wait(900);
+    const sfPanel = await spg.evaluate(() => ({ e: document.querySelector('.sbins .sfx .sfe b')?.textContent || '', p: document.querySelector('.sbins .sfx .sfp')?.textContent || '' }));
+    await spg.evaluate(() => window.WB.storyboard.ws.select(null, { seek: false })); await wait(300);
+    await spg.evaluate(() => window.WB.app.show('timeline')); await wait(900);
+    const sfCol = await spg.evaluate(() => [...document.querySelectorAll('.col-surface .sfw.on')].map(w => w.title).join(' '));
+    for (const st of ['lyrics', 'final']) { await spg.evaluate((x) => window.WB.stages.open(x), st); await wait(700); }
+    const sf = await spg.evaluate(() => ({ inert: window.__sf === undefined && window.__sf2 === undefined && window.__sf3 === undefined && window.__sf4 === undefined
+      && !document.querySelector('.sfx img, .sfx script, .col-surface img, .col-surface script, .lysfk img, .sfx b[onmouseover], .lypoem img[src="x"], .fnck img[src="x"]') }));
+    await spg.mouse.move(5, 5);
+    check('F02 lyric gate: a hostile "where" and why render as text (the Shot panel\'s surfaces and proposals, the timeline\'s surface column titles, the Lyrics stage, Final) and never run',
+      sf.inert && /<img src=x onerror/.test(sfPanel.e) && /<img src=x onerror/.test(sfPanel.p) && /onerror/.test(sfCol) && !sfv.length, { ...sf, panel: sfPanel.e.slice(0, 60), col: sfCol.slice(0, 80), sfv });
+    await spg.close();
   }
   // ==================== D7 identity checks + D2 constants: BEGIN (a separate section) ====================
   // check_add writes checks.json only (never an approval or a pick, whatever the body says); its targets must exist; checks.json
@@ -1272,13 +1328,14 @@ try {
       batch_act: { act: 'approve', id: bb?.id || 'b01' }, jobbooks_import: {}, asset_act: { type: 'character', id: 'ada', act: 'approve', tree: 'identity' }, character_act: { id: 'ada', act: 'approve' },
       ref_upload: { type: 'character', id: 'ada', name: 'x.png', data: tinyPngB64() }, round_send: {}, revision_close: { summary: 'x' }, revision_restore: { revision: 'R1' },
       final_lock: { force: true }, final_unlock: {}, proposal_act: { set: 'ps01', item: 'a', act: 'pick' }, breakdown_promote: { item: 'bi01' },
+      surface_act: { act: 'add', shot: 's2-wall', line: 'verse/0', where: 'chat' },
     };
     const actRes = {};
     for (const [name, body] of Object.entries(acts)) {
       actRes[name] = [];
       for (const h of [curl, noSfs, cross, agentForged]) actRes[name].push((await raw(`/api/op/${name}?project=${P}`, { ...body, via: 'page' }, h)).status);
     }
-    check('S9 every page act (take_act, media_use / media_upload, batch_act, jobbooks_import, asset_act / character_act, ref_upload, round send / close / restore, final lock / unlock, proposal pick, breakdown_promote) is 403 from curl with the page token and no Origin, with the Origin but no Sec-Fetch-Site, cross-site, and with the agent token and a forged Origin (even claiming via "page")',
+    check('S9 every page act (take_act, surface_act, media_use / media_upload, batch_act, jobbooks_import, asset_act / character_act, ref_upload, round send / close / restore, final lock / unlock, proposal pick, breakdown_promote) is 403 from curl with the page token and no Origin, with the Origin but no Sec-Fetch-Site, cross-site, and with the agent token and a forged Origin (even claiming via "page")',
       Object.values(actRes).every(a => a.every(s => s === 403)), actRes);
     // S9 saves: an agent's save (no page) cannot approve, lock, mark done, set ok or dismiss the director's note; it is stamped agent
     const dr = (await op('request_create', { kind: 'identity', prompt: 's9 draft', est_cost: 0.12, tool: 'fal-ai/nano-banana-2/edit' })).body;

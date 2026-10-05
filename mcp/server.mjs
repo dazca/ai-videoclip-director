@@ -27,6 +27,7 @@ import './tools/assets.mjs';       // entities; stages 4-5 characters and assets
 import './tools/notes.mjs';        // notes pinned to time
 import './tools/rounds.mjs';       // review rounds (round_*) and revisions (revisions_get)
 import './tools/proposals.mjs';    // proposals (proposals_add / proposals_get; picks are the page's)
+import './tools/surfaces.mjs';     // the lyric gate (surfaces_get / surface_propose; accepting is the page's)
 import './tools/takes.mjs';        // take selection (takes_get / take_propose; the pick is the page's)
 import './tools/lyrics.mjs';       // stages; stage 1 lyrics
 import './tools/scenes.mjs';       // stage 2 script, intake, sketches

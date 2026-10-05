@@ -82,6 +82,16 @@ another, with in / out, a note and alternatives); the pick lands on the storyboa
 You never pick (no tool) and never write `clip` (`shots_update` ignores it and keeps theirs). An imported file is a take
 once it is linked to the shot (`media_update {id, shots: ["sh03"]}`). Final's checklist counts the shots with a pick.
 
+**The lyric gate** (E2). "Every sung or spoken word appears on a desktop surface at its time." A surface is a lyric line (or a
+word range of it) on a storyboard shot plus where it shows: `window` (a window title), `chat`, `dialog`, `karaoke`, `taskbar` or
+`other`, with an optional detail (`"chat: Notepad, typed letter by letter"`). `surfaces_get` (read only) gives every line with each
+word covered or not (and on which shot / where), the uncovered runs and your proposals; `uncovered: true` lists only the gaps. Fill
+them with `surface_propose {shot, line, w?: [first, last], where, why}`: the shot must be on screen while the words are sung (else
+400). The director accepts it in the page (Storyboard › Shot › lyrics on screen) or adds their own; it lands on the shot as
+`lyrics[{line, w?, where}]` through a new version. You never write `lyrics` (`shots_update` ignores it and keeps theirs) and
+cannot accept (no tool). Final's checklist line "every word on a surface" counts the words; the timeline's surface column shows
+the uncovered ones in red.
+
 **The picks for the composition** (E9). When the director wants the render to follow the picks, `composition_export`
 (`{dry_run: true}` first to see the counts; `map` rules `{from, to}` turn workbench media paths into the composition's,
 e.g. `project/gen/out/` -> `assets/world/`) writes `data/<project>/exports/composition/edl.json` and nothing else (also while
@@ -101,7 +111,7 @@ on the node / take and decides; a check never approves, rejects or picks. Never 
 tool fills it: tools/face-score.md).
 
 `final_get` (read only) answers "what is left?": `ready`, `failing`, the **ready-to-render checklist** (every second
-scripted, every scene has shots, every shot an approved frame / take / clip, every shot a picked take, every asset approved, no open notes, no
+scripted, every scene has shots, every shot an approved frame / take / clip, every shot a picked take, every word on a surface (the lyric gate), every asset approved, no open notes, no
 open round, costs within the cap, an export is possible; derived from the files, each failing line with its gaps),
 `pending` (every row not approved yet, grouped: lyrics, script, breakdown, characters, scenery, storyboard, requests;
 with status, why, est / spent cost, open notes) and `costs` (spent from the merged ledger, committed, drafts, the shots
@@ -255,7 +265,8 @@ your times (`t0` / `t1` ms on scenes, beats, shots) are what places them, so kee
   review (unlock) or re-cap a batch, nor import the job books: those are the director's, in the page.
 - Never pick, mix or dismiss a proposal (the director's, in the page), and never write `proposals.json` or
   `proposals/*.svg` by hand: `proposals_add` sanitises and records them. Never pick a take or write a shot's `clip` (or
-  `takes.json`): propose with `take_propose`; the director picks in the page.
+  `takes.json`): propose with `take_propose`; the director picks in the page. Never write a shot's `lyrics` (or
+  `surfaces.json`): propose a surface with `surface_propose`; the director accepts in the page.
 - Never treat an identity check as a decision: `check_add` only informs the director (a badge); never approve, reject or pick
   because of it, and never write `checks.json` by hand.
 - Never try to work around a project locked for render (409): no hand edits of the files, no snapshot restores; ask the

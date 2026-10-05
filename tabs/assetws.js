@@ -32,6 +32,7 @@ import { NotesColumn } from '../core/notescol.js';
 import { stripHtml, register as registerProposals } from '../core/proposals.js';
 import * as CK from '../js/checks.js';
 import { nodeBadge, wireCheckPopover } from '../core/checkbadge.js';
+import { help } from '../core/helptip.js';
 
 const WB = () => window.WB;
 const OPENVERSE = 'https://api.openverse.org/v1/images/';
@@ -366,7 +367,7 @@ export class AssetWorkspace {
   renderBody() {
     const body = this.$('.chbody'), e = this.ent();
     const keep = body.scrollTop;
-    if (!e) { body.innerHTML = `<div class="scempty"><b>No ${this.types.join(' or ')} yet.</b> They come from the breakdown (stage 3): open it and use “Create entity” on an item${this.allRows().length ? ', or click “make…” on the left' : ''}.</div>`; return; }
+    if (!e) { body.innerHTML = `<div class="scempty">${help(`<b>No ${esc(this.types.join(' or '))} yet.</b> <a data-stage="breakdown">open the breakdown</a>`, `<p>They come from the breakdown (stage 3): “Create entity” on an item${this.allRows().length ? ', or “make…” on the left' : ''}.</p>`)}</div>`; return; }
     const U = this.U;
     body.innerHTML = this.tab === 'history' ? this.historyHtml(e) : this.tab === 'scenes' ? this.scenesHtml(e) : this.tab === U.vTab ? this.variantsHtml(e) : this.rootHtml(e);
     const slot = body.querySelector('.chskslot'); if (slot && this.sk) slot.appendChild(this.skHost);
@@ -597,6 +598,7 @@ export class AssetWorkspace {
     el.addEventListener('click', async (ev) => {
       const t = ev.target, a = t.closest('[data-a]')?.dataset.a;
       const row = t.closest('.chrow[data-ent]'); if (row) return this.select(row.dataset.ent);
+      const stg = t.closest('a[data-stage]'); if (stg) return WB().stages.open(stg.dataset.stage);
       if (a === 'toitem') { await WB().stages.open('breakdown'); return WB().breakdown?.focus(t.closest('[data-i]').dataset.i); }
       const tab = t.closest('.chtabs [data-tab]'); if (tab) return this.setTab(tab.dataset.tab);
       const src = t.closest('.chsrc [data-src]'); if (src) { this.src = src.dataset.src; prefs.set(this.pf + 'Src', this.src); return this.render(); }

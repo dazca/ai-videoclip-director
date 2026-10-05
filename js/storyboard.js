@@ -7,7 +7,9 @@
 //          cast: [entity ids], locations: [ids], props: [ids], variants: {<entity id>: <variant / look id> | null},
 //          gen: "still" | "video" | null, clips: [clip use ids], thumb?, section?,
 //          clip?: the director's picked take {request, take, file, media, kind, in_ms, out_ms, note, alt[], by, via, at}
-//          (js/takes.js; written only by the page's take_act, carried forward by every other save)}
+//          (js/takes.js; written only by the page's take_act, carried forward by every other save),
+//          lyrics?: [{line, w?: [first, last], where}] the lyric gate's surfaces: where each lyric line / word range of the
+//          shot's time appears on screen (js/surfaces.js; written only by the page's surface_act, carried forward the same way)}
 //          t0 < t1 are integer ms of the song; the shots of a scene TILE it (the first starts with the scene, each next one
 //          where the previous ends, the last ends with the scene); boundaries snap to the beat grid (song.json grid).
 //          kind: wide | medium | close | insert | performance | xp-desktop (or any short lower-case word: older shots.json
@@ -26,6 +28,7 @@ import { currentBreakdown } from './breakdown.js';
 import * as A from './assets.js';
 import * as P from './prices.js';
 import { shapeClip } from './takes.js';
+import { cleanSurfaces } from './surfaces.js';
 
 export const SHOT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 export const SCENE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
@@ -130,9 +133,10 @@ export function cleanShot(s, song, { snap } = {}) {
   if (gen && !GENS.includes(gen)) throw new Error(`shot ${id}: gen is still or video`);
   const thumb = typeof s.thumb === 'string' && THUMB_RE.test(s.thumb) && !s.thumb.split('/').includes('..') ? s.thumb : null;
   let clip = null; if (s.clip != null) { try { clip = shapeClip(s.clip, `shot ${id}: clip`); } catch (e) { throw new Error(e.message); } }
+  let lyrics = []; try { lyrics = cleanSurfaces(s.lyrics); } catch (e) { throw new Error(`shot ${id}: ${e.message}`); }
   return { id, scene, t0, t1, kind, title: String(s.title ?? '').slice(0, 300), text: String(s.text ?? '').slice(0, 8000), camera: String(s.camera ?? '').slice(0, 2000), sketch,
     beats: list('beats', BEAT_RE, 200), cast: list('cast', ENT_ID, 40), locations: list('locations', ENT_ID, 40), props: list('props', ENT_ID, 40), variants, gen,
-    clips: list('clips', CLIP_RE, 100), ...(thumb ? { thumb } : {}), ...(s.section ? { section: String(s.section).slice(0, 60) } : {}), ...(clip ? { clip } : {}) };
+    clips: list('clips', CLIP_RE, 100), ...(thumb ? { thumb } : {}), ...(s.section ? { section: String(s.section).slice(0, 60) } : {}), ...(clip ? { clip } : {}), ...(lyrics.length ? { lyrics } : {}) };
 }
 // the shots of each scene tile it: sorted by start; the first starts with the scene, each one ends where the next starts,
 // the last ends with the scene. Shots of an unknown scene (or none) are left as they are. Returns warnings; throws when a
@@ -178,6 +182,7 @@ export function checkBoard(d) {
       if (s.gen != null && !GENS.includes(s.gen)) throw new Error(`storyboard.json: ${v.id}/${s.id}: gen is still or video`);
       if (s.thumb != null && (typeof s.thumb !== 'string' || !THUMB_RE.test(s.thumb) || s.thumb.split('/').includes('..'))) throw new Error(`storyboard.json: ${v.id}/${s.id}: bad thumb path`);
       if (s.clip != null) shapeClip(s.clip, `storyboard.json: ${v.id}/${s.id}: clip`);
+      if (s.lyrics != null) { try { cleanSurfaces(s.lyrics); } catch (e) { throw new Error(`storyboard.json: ${v.id}/${s.id}: ${e.message}`); } }
     }
   }
   if (d.versions.length && !vids.has(d.current)) throw new Error('storyboard.json: current must name a version');

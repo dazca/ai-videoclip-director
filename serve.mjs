@@ -374,9 +374,11 @@ function stampPage(name, data, cur, fromPage = true) {
   if (name === 'storyboard.json') {
     try { checkBoard(data); } catch (e) { throw new S.WbError(400, e.message); }
     const cv = new Map((cur.versions || []).map(v => [v.id, v])), cn = new Map((cur.notes || []).map(n => [n.id, n]));
-    // the picked takes (shot.clip) are written only by take_act: a new version from a page save keeps the server's picks
-    const picks = new Map(((cur.versions || []).find(v => v.id === cur.current)?.shots || []).filter(x => x.clip).map(x => [x.id, x.clip]));
-    const keepPicks = (shots) => shots.map(x => { const { clip: _c, ...r } = x; return picks.has(x.id) ? { ...r, clip: picks.get(x.id) } : r; });
+    // the picked takes (shot.clip) are written only by take_act, the lyric surfaces (shot.lyrics, E2) only by surface_act: a
+    // new version from a page save keeps the server's picks and surfaces
+    const curShots = (cur.versions || []).find(v => v.id === cur.current)?.shots || [];
+    const picks = new Map(curShots.filter(x => x.clip).map(x => [x.id, x.clip])), surf = new Map(curShots.filter(x => x.lyrics?.length).map(x => [x.id, x.lyrics]));
+    const keepPicks = (shots) => shots.map(x => { const { clip: _c, lyrics: _l, ...r } = x; return { ...r, ...(picks.has(x.id) ? { clip: picks.get(x.id) } : {}), ...(surf.has(x.id) ? { lyrics: surf.get(x.id) } : {}) }; });
     data.versions = data.versions.map(v => cv.get(v.id) || { ...v, shots: keepPicks(v.shots), created: at, ...(v.via === 'import' && !cur.versions ? {} : { ...W }) });
     data.notes = (data.notes || []).filter(n => n && typeof n === 'object').map(n => {
       const c = cn.get(n.id), cr = new Map((c?.replies || []).map(r => [r.id, r]));
@@ -461,6 +463,8 @@ http.createServer(async (req, res) => {
         if (name === 'final_lock' || name === 'final_unlock') body.via = fromPage ? 'page' : 'agent';
         // take selection (D6): picking a take, its in / out and alternatives are the director's (page only)
         if (name === 'take_act') body.via = fromPage ? 'page' : 'agent';
+        // the lyric gate (E2): a surface on a shot is the director's (page only); a proposal is the agent's
+        if (name === 'surface_act' || name === 'surface_propose') body.via = fromPage ? 'page' : 'agent';
         // D8: uploading files and "use as" (a node, a shot's take / start frame) are the director's (page only); an import's provenance
         if (name === 'media_upload' || name === 'media_use' || name === 'media_import') body.via = fromPage ? 'page' : 'agent';
         // D4: approving / reviewing a batch and importing the job books are the director's (page only); a plan's provenance
@@ -514,7 +518,7 @@ http.createServer(async (req, res) => {
       // notes.json: the old note stores are migrated into it (v2) on its first read
       if (m[2] === 'notes.json' && fs.existsSync(path.join(pd, 'song.json'))) { try { S.notesDoc(m[1]); } catch (e) { /* a broken file is served as it is */ } }
       // a writable state file (or revisions.json / proposals.json / takes.json / checks.json, the server's) that does not exist yet reads as null (the page uses its default)
-      if ((S.WRITABLE.has(m[2]) || m[2] === 'revisions.json' || m[2] === 'proposals.json' || m[2] === 'takes.json' || m[2] === 'checks.json') && !fs.existsSync(f)) return json(res, 200, null);
+      if ((S.WRITABLE.has(m[2]) || m[2] === 'revisions.json' || m[2] === 'proposals.json' || m[2] === 'takes.json' || m[2] === 'surfaces.json' || m[2] === 'checks.json') && !fs.existsSync(f)) return json(res, 200, null);
       // a remote (LAN) client reads the project's JSON without private paths or items flagged private (media.json,
       // entities with private refs and iteration nodes, requests built on private photos)
       if (!isLocal(req) && /\.json$/i.test(f) && fs.existsSync(f)) {

@@ -19,6 +19,7 @@ import * as BD from '../js/breakdown.js';
 import { NotesColumn } from '../core/notescol.js';
 import { TimeAxis, isTime, setMode } from '../core/timemode.js';
 import { history } from '../core/history.js';
+import { help } from '../core/helptip.js';
 
 const WB = () => window.WB;
 const visible = () => WB()?.app?.active() === 'stage' && WB().stages?.current() === 'breakdown';
@@ -309,7 +310,11 @@ class Workspace {
   renderList() {
     const body = this.$('.bdbody'), items = this.shown();
     if (!this.draft.length) {
-      body.innerHTML = `<div class="scempty"><b>No breakdown yet.</b> ${this.scenes.length ? `The script has ${this.scenes.length} scene${this.scenes.length > 1 ? 's' : ''}: <a data-a="suggest">Suggest from script</a> (a first list, here and now) or <a data-a="extract">Ask the agent to extract</a> it; or add items by hand (<a data-a="add">+ item</a>).` : 'Write the script first (stage 2): every item is linked to the scenes that need it.'}</div>`;
+      // F5: one line (+ "?"), then what the breakdown will read: the script's scenes, so the empty stage is not empty
+      body.innerHTML = `<div class="scempty">${this.scenes.length ? help('<b>No breakdown yet.</b> <a data-a="suggest">Suggest from script</a> · <a data-a="extract">Ask the agent to extract</a> · <a data-a="add">+ item</a>',
+        `<p>The script has ${this.scenes.length} scene${this.scenes.length > 1 ? 's' : ''}. <b>Suggest from script</b> makes a first list here and now (free, local); the agent's extraction reads the scenes, beats, sketch pins and the intake.</p><p>Every item (character, location, prop, wardrobe, FX) is linked to the scenes and beats that need it.</p>`)
+        : help('<b>No breakdown yet.</b> Write the script first (stage 2).', '<p>Every item is linked to the scenes that need it, so the breakdown starts from the script.</p>')}</div>`
+        + (this.scenes.length ? `<div class="bdpre"><div class="bdpreh dim">what it reads: the script, ${this.scenes.length} scene${this.scenes.length > 1 ? 's' : ''}</div>${this.scenes.map(s => `<div class="bdpres"><b>${esc(s.id)}</b> <span class="dim">${esc(SC.span(s.t0, s.t1))}</span> <b>${esc(s.title || '')}</b> <span>${esc(s.text || '')}</span>${(s.beats || []).length ? `<div class="bdpreb">${s.beats.map(b => `<span>· ${esc(b.text)}</span>`).join('')}</div>` : ''}</div>`).join('')}</div>` : '');
       return;
     }
     const groups = BD.KINDS.filter(k => this.kind === 'all' || k === this.kind).map(k => [k, items.filter(i => i.kind === k)]).filter(([k, L]) => L.length || this.kind === k);

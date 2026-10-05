@@ -24,6 +24,7 @@ import * as N from './notes.js';
 import { inFlight } from './revisions.js';
 import { currentVersion, flatLines, assetApproval } from './flow.js';
 import { takesChecklist } from './takes.js';
+import { gateCheck } from './surfaces.js';
 
 export const GROUPS = [
   { id: 'lyrics', title: 'Lyrics', n: 1 }, { id: 'script', title: 'Script', n: 2 }, { id: 'breakdown', title: 'Breakdown', n: 3 },
@@ -166,6 +167,10 @@ export function finalView(I) {
   const tk = takesChecklist(shots);
   add('takes', 'every shot has a picked take', tk.ok, !shots.length ? 'no shots yet' : `${tk.done} of ${pl(tk.total, 'shot')} picked${tk.missing.length ? ` · ${tk.missing.length} to pick` : ''}`,
     tk.missing.map(id => ({ label: `${id} no take picked`, jump: { stage: 'storyboard', focus: id } })));
+  // E2, the lyric gate: every sung or spoken word on a desktop surface (a shot's lyrics[]) at its time
+  const lg = gateCheck(song, shots);
+  add('lyrics', 'every word on a surface', lg.ok, lg.detail,
+    lg.gaps.map(g => { const sh = shots.find(x => x.t0 <= g.t0 && g.t0 < x.t1); return { label: g.label, jump: sh ? { stage: 'storyboard', focus: sh.id } : { stage: 'storyboard', t: g.t0 } }; }));
   add('assets', 'every asset the shots need is approved', !gaps.assets.length, gaps.assets.length ? `${pl(gaps.assets.length, 'asset')} not approved` : 'all approved',
     gaps.assets.map(a => ({ label: `${a.name}${a.variant ? ' · ' + a.variant_name : ''}: ${a.why || 'not approved'}`, jump: { stage: A.TYPE[a.type]?.stage || 'characters', focus: a.id } })));
   const oc = N.openCounts(notes), live = inFlight(I.revisions);

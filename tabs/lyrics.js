@@ -18,6 +18,7 @@ import { menus } from '../core/menus.js';
 import { stripHtml, register as registerProposals, offerPrepare } from '../core/proposals.js';
 import { TimeAxis } from '../core/timemode.js';
 import { upperBound } from '../js/warp.js';
+import { coverage } from '../js/surfaces.js';
 
 const WB = () => window.WB;
 const visible = () => WB()?.app?.active() === 'stage' && WB().stages?.current() === 'lyrics';
@@ -54,9 +55,10 @@ class Workspace {
         : { el: e, targets: [{ stage: 'lyrics', kind: 'section', id: e.closest('.lysec').dataset.sec }] }),
       current: () => { const s = this.sel, f = this.el.querySelector('.lyl:focus')?.dataset.line; const L = s && this.findLine(s.line)?.l;
         return L ? { stage: 'lyrics', kind: 'line', id: s.line, w: [s.w0, s.w1], quote: F.words(L.text).slice(s.w0, s.w1 + 1).join(' ') } : f ? { stage: 'lyrics', kind: 'line', id: f } : null; } });
+    new ResizeObserver(() => { if (!this.editing) this.fill(); }).observe(this.$('.lypoem'));
     this.ta = new TimeAxis({ stage: 'lyrics', scroller: this.$('.lypoem'), nc: this.nc, rows: () => this.timeRows(), onApply: () => this.nc.schedule('place') });
     document.addEventListener('wb:timemode', (e) => { if (e.detail.stage === 'lyrics' && !this.editing) this.render(); });
-    store.on((w) => { if (['lyrics', 'all', 'stages', 'notes', 'proposals'].includes(w)) { if (this.editing) this.pending = true; else this.render(); } });
+    store.on((w) => { if (['lyrics', 'all', 'stages', 'notes', 'proposals', 'board'].includes(w)) { if (this.editing) this.pending = true; else this.render(); } });
     this.render();
   }
   get doc() { return store.lyrics; }
@@ -155,6 +157,20 @@ class Workspace {
     if (this.compare) this.renderDiff(); else if (this.textMode) this.renderText(); else this.renderPoem();
     this.renderSide();
     this.ta?.apply();
+    this.fill();
+  }
+  // F5: a short poem spreads its lines over the height of the stage (up to 3x their height) instead of leaving the bottom
+  // empty; a long one keeps the compact rows. Not in the Time view (rows sit on the timeline's axis there)
+  fill() {
+    const poem = this.$('.lypoem'); if (!poem) return;
+    poem.style.setProperty('--lyfill', '0px');
+    if (this.ta?.on || this.compare || this.textMode || !poem.clientHeight) return;
+    // the poem's own height (the Notes column's layer spans the whole scroller, so scrollHeight cannot tell)
+    const all = poem.querySelectorAll('.lyl, .lyhead'), rows = all.length, last = all[rows - 1];
+    const used = last ? last.getBoundingClientRect().bottom - poem.getBoundingClientRect().top + poem.scrollTop : 0, free = poem.clientHeight - used - 44;
+    const per = rows && free > 0 ? Math.min(28, Math.floor(free / rows)) : 0;
+    if (per) poem.style.setProperty('--lyfill', per + 'px');
+    this.nc?.schedule('place');
   }
   renderBar() {
     const v = this.cur, n = F.flatLines({ sections: this.draft }).length;
@@ -177,6 +193,13 @@ class Workspace {
       return;
     }
     const tm = songLines(), byLine = this.lineNotes();
+    // the lyric gate (E2): per line, how many of its words show on a surface (a shot's lyrics[]) at their time
+    const cov = new Map(coverage(store.song, store.boardShots()).lines.map(x => [x.id, x]));
+    const gate = (id) => { const c = cov.get(id); if (!c || !c.n) return ''; const un = c.words.filter(w => !w.by.length).map(w => w.w);
+      const kinds = [...new Set(c.words.flatMap(w => w.by.map(b => b.where.split(':')[0])))];
+      return kinds.map(k => `<i class="lysfk" title="${esc(c.words.flatMap(w => w.by).filter(b => b.where.split(':')[0] === k).map(b => `${b.shot} · ${b.where}`).filter((x, i, a) => a.indexOf(x) === i).join('\n'))}">${esc(k)}</i>`).join('') + `<b class="lysf${c.covered === c.n ? ' ok' : ''}" data-sfgo="${esc(id)}" title="${esc(`on a surface: ${c.covered} of ${c.n} words${un.length ? `
+not on screen: ${un.join(' ')}` : ''}
+(click: the shot in the storyboard)`)}">${c.covered}/${c.n}</b>`; };
     let k = 0;
     poem.innerHTML = this.draft.map((s, si) => `<div class="lysec" data-sec="${esc(s.id)}"><div class="lyhead"><span class="lytag" title="double-click to rename">[${esc(s.label)}]</span>
       <span class="lytools"><b data-s="up" title="move section up">↑</b><b data-s="down" title="move section down">↓</b><b data-s="add" title="add a line at the end">+</b><b data-s="ren" title="rename">✎</b><b data-s="del" title="delete the section">×</b></span></div>`
@@ -186,7 +209,7 @@ class Workspace {
         const ws = F.words(l.text).map((w, i) => `<span class="w${marks.has(i) ? ' nw' : ''}" data-i="${i}">${esc(w)}</span>`).join(' ');
         const changed = this.cur && !F.flatLines(this.cur).some(x => x.id === l.id && x.text === l.text);
         const pp = stripHtml({ stage: 'lyrics', kind: 'line', id: l.id }, { quiet: true, label: 'alternatives' });
-        return `<div class="lyl${ns.length ? ' hasn' : ''}${changed ? ' chg' : ''}${pp ? ' hasp' : ''}" data-line="${esc(l.id)}" tabindex="0"><span class="lyn">${k}</span><span class="lyt" ${t ? `data-t="${t.t0}" title="${t.timing === 'estimated' ? 'estimated: ' : ''}${fmt(t.t0, true)} – ${fmt(t.t1, true)} (click: show in the timeline)"` : 'title="no timing yet (saved versions get one)"'}>${t ? (t.timing === 'estimated' ? '~' : '') + fmt(t.t0) : '·'}</span><span class="lytx">${ws || '<span class="dim">(empty)</span>'}</span>
+        return `<div class="lyl${ns.length ? ' hasn' : ''}${changed ? ' chg' : ''}${pp ? ' hasp' : ''}" data-line="${esc(l.id)}" tabindex="0"><span class="lyn">${k}</span><span class="lyt" ${t ? `data-t="${t.t0}" title="${t.timing === 'estimated' ? 'estimated: ' : ''}${fmt(t.t0, true)} – ${fmt(t.t1, true)} (click: show in the timeline)"` : 'title="no timing yet (saved versions get one)"'}>${t ? (t.timing === 'estimated' ? '~' : '') + fmt(t.t0) : '·'}</span><span class="lytx">${ws || '<span class="dim">(empty)</span>'}</span>${gate(l.id)}
           <span class="lytools"><b data-l="up" title="move up (Alt+Up)">↑</b><b data-l="down" title="move down (Alt+Down)">↓</b><b data-l="add" title="add a line below (Shift+Enter)">+</b><b data-l="edit" title="edit (Enter, F2, double-click)">✎</b><b data-l="note" title="note on this line, in the Notes column (Alt+N; select words first to pin it to them)">✉</b><b data-l="propose" title="ask the agent for 3 alternatives to this line (proposals: you pick one)">◇</b><b data-l="del" title="delete the line">×</b></span>${pp}</div>`;
       }).join('') + `</div>`).join('');
     if (this.flash) { const e = poem.querySelector(`[data-line="${CSS.escape(this.flash)}"]`); e?.scrollIntoView({ block: 'center' }); e?.classList.add('flash'); setTimeout(() => e?.classList.remove('flash'), 1200); this.flash = null; }
@@ -297,6 +320,8 @@ class Workspace {
   wire() {
     const el = this.el;
     el.addEventListener('click', async (e) => {
+      const sfg = e.target.closest('[data-sfgo]');
+      if (sfg) { const L = store.song.lines.find(x => x.id === sfg.dataset.sfgo), sh = L && store.boardShots().find(x => x.t0 <= L.t0 && L.t0 < x.t1); return WB().stages.open('storyboard').then(() => sh && WB().storyboard?.focus(sh.id)); }
       const t = e.target;
       const act = t.closest('[data-a]')?.dataset.a;
       if (act === 'save') return this.save();

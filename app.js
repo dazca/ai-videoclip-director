@@ -83,9 +83,12 @@ function renderSubnav(p) {
   rec.nav.innerHTML = p.subs.map(s => { let n = ''; try { n = s.count?.(store) ?? ''; } catch (e) { /* data not loaded yet */ } return `<a data-sub="${esc(s.id)}" class="${s.id === cur ? 'on' : ''}" role="tab">${esc(s.title)}<i>${esc(n)}</i></a>`; }).join('');
 }
 // Assets search: hide the cards / rows of the visible view that do not match (text, ids, titles, status chip)
+// F4: a view with its own status filter (Media: on the timeline / picked / unused / private) hides the page's approval-status
+// select, so the bar shows ONE status filter; the page's is then ignored there
+const OWN_STATUS = new Set(['media']);
 const ITEM_SEL = '.cgrid > .card, .lgrid > .lc:not(.add), .lib > .lb.card, .pgrid > .pc, .mgrid > .mc, table.tbl tr[id^="clip-"]';
 function applyAssetFilter(rec) {
-  const q = (rec.el.querySelector('.asq')?.value || '').trim().toLowerCase(), st = rec.el.querySelector('.asst')?.value || '';
+  const sel = rec.el.querySelector('.asst'), q = (rec.el.querySelector('.asq')?.value || '').trim().toLowerCase(), st = sel && !sel.hidden ? sel.value : '';
   const v = [...rec.body.children].find(x => x.classList.contains('tabpane') && x.style.display !== 'none'); if (!v) return;
   let shown = 0, total = 0;
   for (const it of v.querySelectorAll(ITEM_SEL)) {
@@ -126,7 +129,7 @@ async function show(id) {
   const v = await mountView(viewOfPage(p), rec.body);
   if (active !== p.id || !v?.mod) return;
   v.mod.show?.(ctx);
-  if (p.search) applyAssetFilter(rec);
+  if (p.search) { const sel = rec.el.querySelector('.asst'); if (sel) sel.hidden = OWN_STATUS.has(viewOfPage(p)); applyAssetFilter(rec); }
 }
 const view = () => { const p = pageById(active); return p ? viewOfPage(p) : null; };
 function newPage(viewId) {

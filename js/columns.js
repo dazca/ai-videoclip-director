@@ -7,6 +7,7 @@ import { currentScript, sceneStatus } from './scenes.js';
 import { currentBreakdown, KINDS, KIND_COLOR } from './breakdown.js';
 import { shotEstimate } from './storyboard.js';
 import { noteTime, STAGE_TITLE } from './notes.js';
+import { coverage } from './surfaces.js';
 
 const LH = 14;              // lyric visual line height (px), 12 px type
 const RAMP = Array.from({ length: 32 }, (_, i) => { const a = i / 31; const l = 14 + a * 70; return `hsl(210, ${12 + a * 20}%, ${l}%)`; });
@@ -119,6 +120,18 @@ export function makeColumns(tl, store) {
         c.on = on;
       },
       act: seekAct, gap: 0 },
+
+    // ---------------------------------------------------------------- surface (E2, the lyric gate, js/surfaces.js): per lyric line,
+    // its words as they show on screen: a word on a surface (a shot's lyrics[] at the word's time) reads normally, a word
+    // on no surface is red. Hover: where it shows. Click a word: seek; double-click: the shot in the storyboard
+    { id: 'surface', title: 'surface', kind: 'text', w: 96, mode: 'follow', stripColor: '#e5484d',
+      build(c) {
+        const cov = coverage(song, store.boardShots()), next = (i) => cov.lines[i + 1]?.t0 ?? dur;
+        const list = cov.lines.map((l, i) => ({ t0: num(l.t0), t1: Math.max(num(l.t0) + 1, Math.min(next(i), dur)), l }));
+        addItems(c, list, ({ l }) => `<div class="sfl${l.covered === l.n ? ' ok' : ''}" data-line="${esc(l.id)}" title="${esc(`${l.id}: ${l.covered} of ${l.n} words on a surface`)}"><i class="sfn">${l.covered}/${l.n}</i>${l.words.map(w => `<span class="sfw ${w.by.length ? 'on' : 'un'}" data-act="seek" data-t="${num(w.t0)}" title="${esc(w.by.length ? `${w.w}: ${w.by.map(b => `${b.shot} · ${b.where}`).join('\n')}` : `${w.w}: on no surface${w.off ? ` (${w.off.map(b => b.shot).join(', ')} is not on screen then)` : ''}`)}">${esc(w.w)}</span>`).join(' ')}</div>`);
+      },
+      act: seekAct, refresh: onBoard(),
+      dblclick(c, t) { const s = store.boardShots().find(x => x.t0 <= t && t < x.t1); window.WB?.stages?.open('storyboard').then(() => s && window.WB.storyboard?.focus(s.id)); } },
 
     // ---------------------------------------------------------------- events
     { id: 'events', title: 'events', kind: 'text', w: 90, mode: 'drive', stripColor: '#f5a524',

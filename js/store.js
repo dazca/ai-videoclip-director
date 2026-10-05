@@ -16,6 +16,7 @@ import * as N from './notes.js';
 import { normRevisions } from './revisions.js';
 import { normProposals } from './proposals.js';
 import { normTakes } from './takes.js';
+import { normSurfaces } from './surfaces.js';
 import { normChecks } from './checks.js';
 const QP = new URLSearchParams(location.search).get('project');
 export const PROJECT = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/.test(QP || '') ? QP : 'demo';
@@ -79,7 +80,7 @@ const nowIso = () => new Date().toISOString().slice(0, 19);
 export const store = {
   project: PROJECT,
   song: null, events: null, energy: null, script: null, shots: null, uses: null, costs: null,
-  notes: null, revisions: null, proposals: null, takes: null, checks: null, approvals: null, requests: null, overrides: null, settings: null, entities: [], media: [], mediaById: {}, mediaByPath: {}, peaks: {},
+  notes: null, revisions: null, proposals: null, takes: null, surfaces: null, checks: null, approvals: null, requests: null, overrides: null, settings: null, entities: [], media: [], mediaById: {}, mediaByPath: {}, peaks: {},
   runs: {},                       // request id -> the runner's last progress event (SSE {run}), shown in the Queue
   listeners: new Set(),
   onMutate: null,                 // set by core/history.js: (entry) => void
@@ -106,6 +107,8 @@ export const store = {
     this.proposals = normProposals(await getJSON('proposals.json', null).catch(() => null));
     // takes.json (the agent's take proposals, js/takes.js): the server writes it, the page only reads it
     this.takes = normTakes(await getJSON('takes.json', null).catch(() => null));
+    // surfaces.json (the agent's lyric-surface proposals, E2, js/surfaces.js): the server writes it, the page only reads it
+    this.surfaces = normSurfaces(await getJSON('surfaces.json', null).catch(() => null));
     // checks.json (identity checks, D7, js/checks.js): the server writes it, the page only reads it (the node / take badges)
     this.checks = normChecks(await getJSON('checks.json', null).catch(() => null));
     this.media = (await getJSON('media.json', { items: [] })).items || [];
@@ -134,6 +137,7 @@ export const store = {
       if (WRITABLE[file]) { const [field, d] = WRITABLE[file]; let v = await getJSON(file, d); if (NORM[file]) v = NORM[file](this, v); if (this._saving[file]) { this._missed.add(file); continue; } if (JSON.stringify(v) !== JSON.stringify(this[field])) { this[field] = v; this.emit(field); } }
       else if (file === 'proposals.json') { const v = normProposals(await getJSON(file, null).catch(() => null)); if (JSON.stringify(v) !== JSON.stringify(this.proposals)) { this.proposals = v; this.emit('proposals'); } }
       else if (file === 'takes.json') { const v = normTakes(await getJSON(file, null).catch(() => null)); if (JSON.stringify(v) !== JSON.stringify(this.takes)) { this.takes = v; this.emit('takes'); } }
+      else if (file === 'surfaces.json') { const v = normSurfaces(await getJSON(file, null).catch(() => null)); if (JSON.stringify(v) !== JSON.stringify(this.surfaces)) { this.surfaces = v; this.emit('surfaces'); } }
       else if (file === 'checks.json') { const v = normChecks(await getJSON(file, null).catch(() => null)); if (JSON.stringify(v) !== JSON.stringify(this.checks)) { this.checks = v; this.emit('checks'); } }
       else if (file === 'revisions.json') { const v = normRevisions(await getJSON(file, null).catch(() => null)); if (JSON.stringify(v) !== JSON.stringify(this.revisions)) { this.revisions = v; this.emit('revisions'); } }
       else if (/^peaks\//.test(file)) { const id = file.slice(6, -5); delete this.peaks[id]; await this.loadPeaks([id]); this.emit('peaks'); }
