@@ -1983,6 +1983,63 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
   check('E4 / E7 offline: render_start, render_config and song_version_use without the page are 403; render_propose still writes a draft', o1 === 403 && o2 === 403 && o3 === 403 && oprop.request?.status === 'draft' && oprop.request.render?.scope === 'full', { o1, o2, o3, oprop: oprop.error || oprop.warnings });
 }
 // ==================== 27. (E4 / E7 / E8) render jobs, song versions, contact sheets: END ====================
+// ==================== 29. (G5) the project as a zip: export / import ====================
+// On its own project copy (mcp-zip) with a private photo (the PRIVATE rule) and a file flagged private: project_export over MCP never
+// holds them (the schema has no private switch; the op refuses an agent's include_private with 403), the page's personal backup does
+// (private/exports/); project_import makes a NEW project with the approvals demoted and the costs kept; an agent cannot upload.
+{
+  const ZP = 'mcp-zip', ZD = path.join(DATA, ZP);
+  S.duplicateProject(PROJECT, ZP, false);
+  const Z = await import('../lib/zip.mjs');
+  const pageOp = (name, body = {}) => post(`/api/op/${name}?project=${ZP}`, body, { origin: URL_ });
+  const AGENT_TOKEN = fs.readFileSync(path.join(DATA, '.wb-agent-token'), 'utf8').trim();
+  const agentOp = (name, body = {}) => fetch(`${URL_}/api/op/${name}?project=${ZP}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-wb-agent-token': AGENT_TOKEN }, body: JSON.stringify(body) }).then(async r => ({ status: r.status, body: await r.json().catch(() => null) }));
+  const png = Buffer.from(tinyPngB64(), 'base64');
+  fs.mkdirSync(path.join(ZD, 'private', 'refs', 'ada'), { recursive: true }); fs.writeFileSync(path.join(ZD, 'private', 'refs', 'ada', 'secret-face.png'), png);
+  fs.mkdirSync(path.join(ZD, 'media', 'still'), { recursive: true }); fs.writeFileSync(path.join(ZD, 'media', 'still', 'flagged-crop.png'), png);
+  const M = JSON.parse(fs.readFileSync(path.join(ZD, 'media.json'), 'utf8'));
+  M.items.push({ id: 'zip-secret', path: 'private/refs/ada/secret-face.png', kind: 'ref', private: true, entities: ['ada'] }, { id: 'zip-flagged', path: 'media/still/flagged-crop.png', kind: 'still', private: true });
+  fs.writeFileSync(path.join(ZD, 'media.json'), JSON.stringify(M, null, 1));
+  const names = (await mcp.listTools()).tools.map(t => t.name);
+  check('G5 tools: project_export and project_import; NO tool uploads a file (project_upload is the page\'s) and project_export has no private switch',
+    names.includes('project_export') && names.includes('project_import') && !names.includes('project_upload')
+    && !Object.keys((await mcp.listTools()).tools.find(t => t.name === 'project_export').inputSchema.properties || {}).includes('include_private'));
+  const ex = await call(mcp, 'project_export', { project: ZP, include_private: true });
+  const zf = ex.error ? null : path.join(ZD, ex.path), z = zf ? Z.openZip(zf) : null;
+  const zn = z ? z.entries.map(e => e.name) : [], jsonText = z ? z.entries.filter(e => e.name.endsWith('.json')).map(e => z.read(e).toString('utf8')).join('\n') : '';
+  const man = z ? JSON.parse(z.read(z.entries.find(e => e.name === 'workbench-export.json')).toString('utf8')) : null;
+  const sums = z ? man.files.every(f => crypto.createHash('sha256').update(z.read(z.entries.find(e => e.name === f.path))).digest('hex') === f.sha256) : false;
+  z?.close();
+  check('G5 project_export over MCP: exports/<p>-<stamp>.zip with the manifest (every file\'s sha256 right); the private photo and the flagged file are NOT in it, nor named in any JSON (an include_private sent anyway is ignored)',
+    !ex.error && /^exports\/mcp-zip-\d{8}-\d{6}\.zip$/.test(ex.path) && ex.include_private === false && ex.private_excluded >= 2 && zn.includes('song.json') && zn.includes('media.json')
+    && !zn.some(n => /secret-face|flagged-crop|^private\//.test(n)) && !/secret-face|flagged-crop/.test(jsonText) && sums && man.format === 'director-workbench/project-zip',
+    { ex: ex.error || { path: ex.path, priv: ex.private_excluded }, leaked: zn.filter(n => /secret|flagged|private/.test(n)), sums });
+  const a403 = await agentOp('project_export', { include_private: true }), fake = await agentOp('project_export', { include_private: true, via: 'page' });
+  const pb = await pageOp('project_export', { include_private: true });
+  const pz = pb.status === 200 ? Z.openZip(path.join(ZD, pb.body.path)) : null, pzn = pz ? pz.entries.map(e => e.name) : []; pz?.close();
+  check('G5 an agent cannot opt private media in (403, also claiming via "page"); the page\'s personal backup holds them, under private/exports/',
+    a403.status === 403 && fake.status === 403 && pb.status === 200 && /^private\/exports\/.+-personal\.zip$/.test(pb.body.path) && pzn.includes('private/refs/ada/secret-face.png') && pzn.includes('media/still/flagged-crop.png'),
+    { a403: a403.status, fake: fake.status, pb: pb.status, path: pb.body?.path });
+  const A0 = JSON.parse(fs.readFileSync(path.join(ZD, 'approvals.json'), 'utf8')), C0 = JSON.parse(fs.readFileSync(path.join(ZD, 'costs.json'), 'utf8'));
+  const dry = await call(mcp, 'project_import', { project: ZP, path: `data/${ZP}/${ex.path}`, dry_run: true });
+  const im = await call(mcp, 'project_import', { project: ZP, path: `data/${ZP}/${ex.path}` });
+  const ID = im.id, IJ = (f) => JSON.parse(fs.readFileSync(path.join(DATA, ID || 'x', f), 'utf8'));
+  const A1 = ID ? IJ('approvals.json') : { items: {} }, R1 = ID ? IJ('requests.json') : { items: [] }, C1 = ID ? IJ('costs.json') : {};
+  check('G5 project_import over MCP: a NEW project (mcp-zip-import); approvals approved / locked arrive as review, every request as draft, costs kept as history; the original untouched',
+    !dry.error && dry.dry_run && !fs.existsSync(path.join(DATA, dry.id)) && !im.error && ID === 'mcp-zip-import' && Object.values(A0.items).some(x => x.state === 'approved')
+    && !Object.values(A1.items).some(x => ['approved', 'locked'].includes(x.state)) && R1.items.every(r => r.status === 'draft') && (C1.items || []).length === (C0.items || []).length && C1.imported?.from === ZP
+    && JSON.parse(fs.readFileSync(path.join(ZD, 'approvals.json'), 'utf8')).rev === A0.rev,
+    { dry: dry.error || dry.id, im: im.error || im.demoted, left: Object.values(A1.items).filter(x => x.state === 'approved').length, costs: [(C0.items || []).length, (C1.items || []).length, !!C1.imported], notDraft: R1.items.filter(r => r.status !== 'draft').length });
+  const over = await call(mcp, 'project_import', { project: ZP, path: `data/${ZP}/${ex.path}`, id: ZP });
+  const privImp = await call(mcp, 'project_import', { project: ZP, path: `data/${ZP}/${pb.body?.path}` });
+  const outside = await call(mcp, 'project_import', { project: ZP, path: `../${ex.path}` });
+  const up = await agentOp('project_upload', { upload: 'abcdefgh12', kind: 'zip', size: 10, offset: 0, data: 'UEsDBA==' });
+  const upImp = await agentOp('project_import', { upload: 'abcdefgh12' });
+  check('G5 never over an existing project (409); a personal backup is the director\'s to import (403); a path outside exports/ or the media roots is refused; an agent cannot upload a file or import an upload (403)',
+    /409/.test(over.error || '') && /403/.test(privImp.error || '') && /40[03]/.test(outside.error || '') && up.status === 403 && upImp.status === 403,
+    { over: over.error, privImp: privImp.error, outside: outside.error, up: up.status, upImp: upImp.status });
+}
+// ==================== 29. (G5) the project as a zip: END ====================
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {
   // ---------------------------------------------------------------- clean up whatever happened

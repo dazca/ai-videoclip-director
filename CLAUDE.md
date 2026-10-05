@@ -22,7 +22,11 @@ node mcp/client.mjs <tool> '<json>' [--project <id>]   # call one MCP tool from 
 node tools/run.mjs --project <id> <request ids> | --all [--dry-run]   # run APPROVED requests (see "Running approved requests")
 node exporters/composition-data.mjs --project <id> [--out composition/edl.json] [--map "gen/=assets/gen/"]   # the picks as edl.json (E9)
 node tools/contact.mjs <video> <out.jpg> [--every 2] | --seams 73.888,118.664 | --images a.png b.png <out.jpg>   # a contact sheet (E8; ffmpeg, free)
+node mcp/client.mjs project_export '{}' --project <id>        # G5: the project as exports/<id>-<stamp>.zip (never private media)
+node mcp/client.mjs project_import '{"path":"data/<id>/exports/<file>.zip"}'   # G5: a NEW project, approvals as review
 ```
+
+In the page: File › Export project as zip… / Import project from zip… (G5) and File › New project… with a dropped song (G6).
 
 **A stale server.** The server hashes its code at start (`serve.mjs`, `lib/`, `js/`, `tabs/`, `core/`, `app.js`). `/api/status`
 `code` and the header `x-wb-code` on every `/api` response carry it. When the files on disk differ, `status` says
@@ -64,6 +68,8 @@ win: `WB_PROJECT`, `WORKBENCH_DATA`, `WORKBENCH_MEDIA_BASE`, `FAL_KEY`.
 | `js/renders.js`, `lib/ops/renders.mjs`, `lib/contact.mjs`, `core/renders.js`, `mcp/tools/renders.mjs`, `tools/contact.mjs` | E4 render jobs and E8 contact sheets: the shared logic (renders.json, the config and its `{placeholders}`, `checkSpec` (excerpt ≤ 20 s / chapter / full), `orderGaps` (chapters before the full film), `seamsIn`, the revision of a sheet), the ops (`renders_get`, `render_propose`, the page-only `render_config` / `render_start` / `render_cancel`, `sheet_make`, `sheet_ask`, `sheets_get`, `sheet_review`; the job: RAM floor + wait, the warm-up, the director's command without a shell, the log, the MP4 + contact sheet + seams sheet registered and linked to the revision; one render at a time: `<data>/.render.lock`), ffmpeg sheets (labelled tiles, frame-exact seams), the page (Final › "Renders and sheets", Render… with its confirm, Render settings…, the sheet viewer with "Ask for a second opinion", Review › Queue's render rows and a done request's Sheet, Compare's sheets per revision), the tools and the CLI |
 | `js/songs.js`, `lib/ops/songs.mjs`, `core/songver.js`, `mcp/tools/songs.mjs` | E7 song versions and the Suno brief: the shared logic (`versionsOf` (v1 = the song as imported), the alignment of a new take (LRC lines matched by their words, measured line starts, offset + scale, or stretched), `timeMap`, `mapLines`, `songPlan` (the E1 re-time preview's rows for every scene / shot boundary and event), `sunoBrief` (style + lyrics with [section] tags, the Suno limits)), the ops (`song_versions_get`, `song_version_add`, `song_version_plan`, `suno_brief`; page only `song_version_use`, `song_upload`), the Lyrics stage's "versions…" (Preview with core/events.js `planTable`, Use = one undoable change) and "Suno brief…" dialogs, the tools |
 | `tools/verify-renders.mjs`, `tools/security-renders.mjs` | v27 of the UI suite (E4 / E7 / E8 in the page and over MCP, a fake ffmpeg render; screenshots `v27_*.png`) and their security regressions (page-only acts, a render never started by an agent, the command never an agent's, sheet paths not traversable, song files) |
+| `lib/zip.mjs`, `lib/ops/projectio.mjs`, `core/projectzip.js`, `core/wizard.js`, `mcp/tools/projectio.mjs` | G5 the project as a zip and G6 a new project from a song: the dependency-free zip writer / validating reader (node:zlib + CRC-32; store / deflate; no zip64), the ops (`project_export` (private media out by default, JSON scrubbed, `workbench-export.json` with sha256s; `include_private` page only), `project_upload` (page only: chunks staged in `<data>/.uploads/`, kind zip / song), `project_import` (validate everything, a NEW project, the director's decisions demoted, costs kept), `createFromSong` (`/api/projects/new {song_upload}`: createGuidedProject + `attachSong {estimate}`), `exportPlan`, `inspectZip`, `badName`, `demote`), File › Export project as zip… / Import project from zip… (a dropped .zip opens it; `uploadStaged` shared with the wizard), the wizard's dropped song / .lrc with its steps and progress, the tools; `importers/new_project.mjs` `tempo(x)` estimates the BPM and first downbeat |
+| `tools/verify-projectzip.mjs`, `tools/security-projectzip.mjs` | v29 of the UI suite (G5 export / import in the page, G6 the song wizard; screenshots `v29_*.png`) and their security regressions (zip-slip, sizes, checksums, ids, private media, demotion, page-only upload) |
 | `tools/verify-layout.mjs` | v26 of the UI suite (run by `npm run verify`, or alone): F7 the timeline fills the height at 1280 / 1600 and keeps every column on screen, the docked preview narrows the columns; F8 the same stage bar on every stage; F9 the Connect dialog (and its quick test, run as shown); F10 About; E10 interpretations over MCP and in the page; screenshots `v26_*.png` |
 | `js/events.js`, `js/eventscol.js`, `core/events.js`, `lib/ops/events.mjs`, `mcp/tools/events.mjs` | E1, named sync points: the shared logic (events.json v2 and the old array, kinds, `snapToEvent` (the nearest accepted event within 1 s), anchors (`anchorsOf`, `reanchor` for a draft, `settleAnchors` for a write: the anchor wins), `retimePlan` (anchored boundaries + the cuts that sit on them, old -> new, problems), `importList` (an audio events.json in seconds)), the timeline's events column (drag = measured), the page acts (the event dialog, + Named event here / at a word, Import events…, Re-time after the take… with its preview and one undo step, the Time view markers), the ops and the agent tools |
 | `core/timemode.js` | the stages' Time view (List | Time, Alt+T; ROADMAP_v4 F6): `TimeAxis` places a stage's rows on the timeline's warp (`WB.timeline.warp`, `tl.watch` for its relayouts and playhead), click-to-seek, scroll sync, "+ Add at m:ss" (`tmadd`); the timeline page stays laid out behind the others (`.pgwrap.bg`) so its warp stays true |
@@ -106,6 +112,7 @@ that owns them and imported by the others); ops call each other through `ops.<na
 | interpretations (E10) | `interpret.mjs` | `interpret.mjs` | `interpretation_set` (the agent's reading of an intake answer (`key`) or a note (`note`): via agent, status proposed; an edited one is the director's: 409), `interpretation_act` (page only: accept / edit; no tool) |
 | render jobs, contact sheets (E4 / E8) | `renders.mjs` | `renders.mjs` | `renders_get` (read only: the director's render settings, the machine lock and free RAM, the render jobs with their phase and log, the order, the sheets), `render_propose` (a draft request of kind `render`, never a command), `sheet_make`, `sheets_get` (read only: each frame's scene / shot / lyric, the constants on screen), `sheet_review` (the agent's second opinion: renders.json only), `sheet_ask` (the director's ask: no tool); `render_config` / `render_start` / `render_cancel` page only (no tool) |
 | song versions, Suno brief (E7) | `songs.mjs` | `songs.mjs` | `song_versions_get`, `song_version_add` (a candidate take: nothing moves), `song_version_plan` (read only: what would move), `suno_brief` (the paste text; `save` stores the style); `song_version_use` / `song_upload` page only (no tool) |
+| projects in and out (G5 / G6) | `projectio.mjs` | `projectio.mjs` | `project_export` (the project as a zip; private media only from the page), `project_import` (a zip -> a NEW project, approvals demoted), `project_upload` (page only: no tool), `createFromSong` (`/api/projects/new {song_upload}`, page only) |
 | rounds, revisions | `rounds.mjs` | `rounds.mjs` | review rounds (`round_get`, `round_absorb`, `round_reply`, `round_finish`; `round_send` is page only: no tool) and revisions R<n> (`revisions_get`, `revision_compare`; `revision_close` / `revision_restore` are page only: no tool), the opt-in git mirror |
 
 A new domain: a `lib/ops/<domain>.mjs` imported (or re-exported) by `lib/store.mjs`, and a `mcp/tools/<domain>.mjs`
@@ -301,6 +308,13 @@ relative to the media base; any other path is relative to the project folder. Fu
   `scene`; characters / scenery `asset` / `tree` (`"ada/look:x"`, `"studio/variant:dusk"`). One pick per set; picks, mixes
   and dismissals are the director's (page only). Logic: `js/proposals.js`, `lib/ops/proposals.mjs`.
 
+- `exports/<p>-<stamp>.zip` (G5: the project as a zip, the last 3 kept; `workbench-export.json` inside = format
+  `director-workbench/project-zip` v1, `{project, title, exported, version, include_private, snapshots, excluded{private, unregistered,
+  external}, files[{path, size, sha256}]}`), `private/exports/<p>-<stamp>-personal.zip` (the director's personal backup). An imported
+  project's `project.json` carries `imported{from, exported, version, at, private}`, its requests `imported{status, from, at}`, its
+  approvals / looks / variants / batches `imported_state` / `imported_status`, its trees `imported_approved`, `costs.json` `imported`.
+  `<data folder>/.uploads/` holds the page's staged uploads (a day).
+
 Editing by hand: read the file, change it, **bump `rev`** on the shared files, write it whole via temp file + rename.
 The server watches the folder and every open page reloads the changed file. Keep ids stable and `t0 < t1`.
 
@@ -370,7 +384,8 @@ of t). The first film's `xp/world.js` is NOT changed: its adoption is a proposal
    this > `cap_usd`). Editing an approved request sends it back to draft. Never ask for, print or store the fal key.
 3. **Private files stay local.** Paths matching the PRIVATE rule (`thumbs/priv_*`, any `private/` folder, plus the
    configured `private_media` regex) and media flagged `private` are served to localhost only and never exported.
-   Never copy them into the demo, the template or anything shared.
+   Never copy them into the demo, the template or anything shared. A project zip (`project_export`) never holds them when you make
+   it; only the director's "personal backup" tick in the page does, and you never import one (403).
 4. **Stages are the director's to close.** Mark your progress with `stage_update` (in_progress, needs_you + a note,
    blockers); `done` is refused, and a done stage cannot be moved by an agent. Lyrics: propose in notes
    (`lyrics_note_add`) or save a new version (`lyrics_update`, never destructive: every version stays); answer the
@@ -563,7 +578,8 @@ of t). The first film's `xp/world.js` is NOT changed: its adoption is a proposal
   private refs", and the ops `take_act`, `surface_act`, `media_use`, `media_upload`, `batch_act`, `jobbooks_import`, `asset_act` /
   `character_act` (base / import accept, approvals, constants), `ref_upload`, `breakdown_promote`, `round_send`,
   `revision_close`, `revision_restore`, `final_lock` / `final_unlock`, `proposal_act`, `events_act`, `retime_apply` /
-  `retime_undo`, `interpretation_act`, `render_config`, `render_start`, `render_cancel`, `song_version_use`, `song_upload`. An agent gets 403 on each
+  `retime_undo`, `interpretation_act`, `render_config`, `render_start`, `render_cancel`, `song_version_use`, `song_upload`, `project_upload`
+  (and `project_export include_private`, `project_import upload`, `/api/projects/new song_upload`). An agent gets 403 on each
   ("agents use the MCP tools"), whatever `via` its body claims; an agent's save is stamped `by: "agent", via:
   "agent"`, and `/api/restore` without the page is an agent's restore. Every `/api` write answers `x-wb-client: page |
   agent`. Offline mode is unchanged: the MCP server's file ops run with `via` absent (an agent) and never approve.
@@ -827,6 +843,24 @@ of t). The first film's `xp/world.js` is NOT changed: its adoption is a proposal
   duration: 415), never a PRIVATE path or one with `..` (400); a file elsewhere on the machine is copied into `audio/versions/`; `song_upload`
   sniffs the first chunk as audio (MP3 / WAV / FLAC / OGG / M4A, else 415). While the project is locked for render the agent's `render_propose`
   is 409; `sheet_make`, `sheet_review` and `song_version_plan` still work. Whys, titles and review notes render escaped (Final, the viewer).
+- The project as a zip (G5 / G6, `lib/ops/projectio.mjs`, `lib/zip.mjs`; tools/security-projectzip.mjs): `project_export` leaves out
+  PRIVATE media (the PRIVATE rule, media flagged private, `thumbs/priv_*`) and scrubs every JSON file (`scrubPrivate`; a cost row keeps
+  its money); `include_private` (a personal backup, written to `private/exports/`: served to localhost only) is the page's only (S9: 403
+  to the page token alone, the agent token, the Origin alone, a forged Origin with the agent token, a claimed via "page" and offline;
+  the MCP tool has no such field). `project_upload` (chunks staged in `<data>/.uploads/`, a dot-folder: never served, cleaned after a
+  day) is page only; its first chunk must sniff as a zip / an audio file (415); declared size caps 2 GB / 300 MB (413); offsets
+  checked (409); free disk checked (507). `project_import` validates the whole zip before writing anything (into a temp folder,
+  renamed at the end; removed on any failure): every entry and manifest name a clean relative path (no `..`, `.`, empty segment,
+  leading `/`, drive, backslash, `:`, NUL, control character, `~<digit>`, device name, trailing dot / space, dot-file or dot-folder
+  but `.snapshots/`), no symlink, no zip64 / multi-disk / encryption, store or deflate only, no overlapping entries, the local name =
+  the central one, sizes (a zip and its total uncompressed <= 2 GB, a file <= 512 MB, <= 20 000 files, ratio <= 1000:1, inflating stops at
+  the declared size), every CRC, the manifest (format v1, a valid project id, every file listed once with the same size and sha256,
+  nothing extra or missing), every JSON parses, entity / request / media ids and paths; then `inside()` again for each file. It never
+  writes over an existing project (409) and demotes the director's decisions (approvals -> review, requests -> draft with the
+  private-upload tick taken back, batches -> draft, looks / variants -> review, approved tree nodes unset, scenes / items ok ->
+  needs_you / review, stages done -> in_progress, the render lock and command dropped; snapshots too); an agent imports only a
+  path under a project's `exports/` or a media root, never a private one (403), and never an upload (403). A new project from an
+  uploaded song (`/api/projects/new {song_upload}`) is the page's (403).
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.
 
@@ -907,6 +941,8 @@ initial project. Tools:
 | `sheet_review` | E8: your second opinion on a sheet (verdict ok / issues / fail, items {t, shot, constant, ok, note}, note): renders.json only; absorbs the director's ask |
 | `song_versions_get`, `song_version_add`, `song_version_plan` | E7: the takes of the song (v1, v2…: source, audio, length, alignment, style / lyrics used); add a take (a candidate; LRC / lines / offset / stretch); what using one would move |
 | `suno_brief` | E7: the text to paste into Suno (style, exclude, title + the lyrics with [section] tags; counts and gates); `save` stores the style; nothing calls Suno |
+| `project_export` | G5: the project as `exports/<p>-<stamp>.zip` (JSON, sketches, peaks, thumbnails, registered media + `workbench-export.json` with sha256s); never private media, JSON scrubbed; `snapshots`, `dry_run`; the personal backup with private media is the director's, in the page |
+| `project_import` | G5: a project zip (`path`: under a project's `exports/` or a media root) -> a NEW project (409 over an existing id); validated first (zip-slip, sizes, checksums, ids); approvals arrive as review, requests as draft, costs as history; `id`, `dry_run` |
 | `final_get` | stage 7, read only: `ready`, `locked`, `failing`, the checklist (10 derived checks with their gaps, `lyrics` = the lyric gate), `pending` rows by group (lyrics, script, breakdown, characters, scenery, storyboard, requests: status, why, est / spent, notes open, approvable), `counts`, `costs` (spent / committed / drafts / to request / projected vs the cap); filters group / status / notes |
 | `approvals_get`, `request_changes` | approval states (approving is the director's, in the page: no tool) |
 | `requests_list`, `request_create`, `request_update` | the generation queue and its lifecycle (`asset` links a stage-4 / 5 generation to an asset tree; `char` is deprecated: a warning, stored as `asset`); `recipe` builds the prompt from the photoreal blocks; `video {model, start, end?, ref_video?, seconds}` makes a video request (refs, tool, est_cost from it); `warnings[]` |
@@ -1023,7 +1059,9 @@ listed in `GENERATORS` (`lib/run.mjs`). Tests never call fal: `tools/mock-fal.mj
   pick does there (one undo step with the recorded pick); add the stage / kind to `js/proposals.js` `TARGETS`.
 - **A page-only act** (the director's decision): an op in its `lib/ops/<domain>.mjs` that fails unless `via === 'page'`, and one
   line in `serve.mjs` setting `body.via` from the request's Origin (see `breakdown_promote`, `character_act`,
-  `asset_act`, `ref_upload`, `round_send`, `proposal_act`, `final_lock`, `take_act`, `surface_act`, `media_upload`, `media_use`, `batch_act`, `jobbooks_import`, `events_act`, `retime_apply`, `retime_undo`, `interpretation_act`, `render_config`, `render_start`, `render_cancel`, `song_version_use`, `song_upload`); no MCP tool; a security check that the agent surface gets 403.
+  `asset_act`, `ref_upload`, `round_send`, `proposal_act`, `final_lock`, `take_act`, `surface_act`, `media_upload`, `media_use`, `batch_act`, `jobbooks_import`, `events_act`, `retime_apply`, `retime_undo`, `interpretation_act`, `render_config`, `render_start`, `render_cancel`, `song_version_use`, `song_upload`, `project_upload`); no MCP tool; a security check that the agent surface gets 403.
+- **A file the director drops before a project exists** (G6): `uploadStaged(file, kind, onProgress)` from `core/projectzip.js` (4 MB
+  chunks to `project_upload`, staged in `<data>/.uploads/<id>.<kind>`); a server op then takes it by its upload id (`stagedFile`).
 - **An agent op / MCP tool**: a function in the `Object.assign(ops, {...})` of its `lib/ops/<domain>.mjs` (it is then
   also `POST /api/op/<name>`; see "Where to add an op or a tool"), and a `mcp.registerTool` in `mcp/tools/<domain>.mjs`
   with a zod schema and a description an agent can follow; cover it in `mcp/test.mjs`.
