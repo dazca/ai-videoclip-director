@@ -38,6 +38,9 @@ const blobB64 = (b) => new Promise((ok, bad) => { const r = new FileReader(); r.
 const imgUrl = (p) => !p ? '' : /^catalog\//i.test(p) ? '/' + p.split('/').map(encodeURIComponent).join('/') : mediaUrl(p);
 const lock = (p, priv) => (priv || isPrivatePath(p)) ? '<i class="chlock" title="private: local only, never exported">🔒</i>' : '';
 const usd = (n) => `$${Number(n || 0).toFixed(2)}`;
+// an import's cost on record (lib/ops/assets.mjs provenanceOf): a job's cost is split per take, so the takes of one job
+// sum to it once ("$0.12 · take 1 of 2, job $0.24")
+const costOf = (c) => `${usd(c.usd)}${c.takes > 1 ? ` · take ${c.take} of ${c.takes}, job ${esc(c.job || c.id || '')} ${usd(c.job_usd)}` : ''} (${esc(c.source)}${c.via ? ' via ' + esc(c.via) : ''})`;
 const when = (at) => at ? esc(String(at).replace('T', ' ').slice(5, 16)) : '';
 const STEPS = ['draft', 'approved', 'running', 'done'];
 const op = async (name, body) => { const r = await postJSON('/api/op/' + name, body), j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; };
@@ -187,7 +190,7 @@ export class AssetWorkspace {
     if (!items.length) return toast('no registered images: the agent registers files with media_add');
     const id = await ui.pick({ title: `Import an image as a node of ${tree} (${e.name}): no request, nothing paid`, items }); if (!id) return;
     const r = await this.act('import', { tree, media: id }); this.sel = r.node; this.mode = 'view';
-    toast(`${id} imported as ${r.node}: the head of ${tree}${r.provenance?.cost ? ` (cost on record: $${Number(r.provenance.cost.usd).toFixed(2)}, ${r.provenance.cost.source})` : ''}`);
+    toast(`${id} imported as ${r.node}: the head of ${tree}${r.provenance?.cost ? ` (cost on record: ${costOf(r.provenance.cost)})` : ''}`);
   }
   async newVariant() {
     const e = this.ent(); if (!e) return;
@@ -383,7 +386,7 @@ export class AssetWorkspace {
     for (const pr of (Array.isArray(it.proposals) ? it.proposals : []).filter(x => x.status === 'open' && x.tree === tree)) {
       const c = pr.provenance?.cost, blocked = !A.isRoot(tree) && !A.approvedNode(it, this.T.root);
       h += `<div class="chprop imp" data-prop="${esc(pr.id)}">${lock(pr.path, pr.private)}<img src="${esc(imgUrl(pr.path))}" alt=""><div class="chprb"><div class="chprh"><b>The agent proposes ${esc(pr.media)} as a node of ${esc(tree)}</b><span class="dim">${esc(pr.id)} · ${when(pr.at)}</span></div>`
-        + `<div class="chprt">${esc(pr.why || '')}</div><div class="dim">imported, no request: ${[pr.provenance?.job ? 'job ' + esc(pr.provenance.job) : '', pr.provenance?.request ? 'request ' + esc(pr.provenance.request) : '', c ? `cost on record ${usd(c.usd)} (${esc(c.source)}${c.via ? ' via ' + esc(c.via) : ''})` : 'no cost row found'].filter(Boolean).join(' · ')}</div>`
+        + `<div class="chprt">${esc(pr.why || '')}</div><div class="dim">imported, no request: ${[pr.provenance?.job ? 'job ' + esc(pr.provenance.job) : '', pr.provenance?.request ? 'request ' + esc(pr.provenance.request) : '', c ? `cost on record ${costOf(c)}` : 'no cost row found'].filter(Boolean).join(' · ')}</div>`
         + `<div class="chprf"><button data-a="ipaccept" data-p="${esc(pr.id)}" class="pri"${blocked ? ' disabled' : ''} title="${blocked ? esc('approve the ' + this.T.rootWord + ' first') : 'make it a node (the head of this tree); your act'}">Accept as node</button><button data-a="ipdismiss" data-p="${esc(pr.id)}">Dismiss</button>${blocked ? `<span class="dim">approve the ${esc(this.T.rootWord)} first</span>` : ''}</div></div></div>`;
     }
     return h;
@@ -423,14 +426,14 @@ export class AssetWorkspace {
     if (!reqs.length) return '';
     const it = this.iter(), T = this.T;
     const rows = [...reqs].reverse().map(r => {
-      const i = r.status === 'rejected' ? -1 : r.status === 'queued' ? 1 : STEPS.indexOf(r.status), nodes = it.nodes.filter(n => n.request === r.id);
+      const i = r.status === 'rejected' || r.status === 'withdrawn' ? -1 : r.status === 'queued' ? 1 : STEPS.indexOf(r.status), nodes = it.nodes.filter(n => n.request === r.id);
       const steps = STEPS.map((s, k) => `<span class="chstep${k <= i ? ' done' : ''}${k === i ? ' cur' : ''}">${s}</span>`).join('<i>›</i>');
       const act = r.status === 'draft' ? `<button data-a="reqok" data-r="${esc(r.id)}" class="pri" title="approve: the agent may run it and spend up to the estimate (page only)">Approve ${usd(r.est_cost)}</button><button data-a="reqno" data-r="${esc(r.id)}">Reject</button>`
         : ['approved', 'queued'].includes(r.status) ? '<span class="dim">approved: Run it in Review › Queue (or the agent: request_run)</span>' : r.status === 'running' ? '<span class="dim">running…</span>'
         : r.status === 'done' ? (nodes.length ? `<span>→ ${nodes.map(n => `<a data-node="${esc(n.id)}">${esc(n.id)}</a>`).join(' ')}</span>` : '<span class="dim">done · the agent registers the output</span>') : `<span class="dim">${esc(r.why || '')}</span>`;
       const vid = A.treeVariant(r.char.tree), vname = r.look?.name || r.variant?.name || vid;
       const warns = (r.warnings || []).length ? `<div class="chreqw">${r.warnings.map(w => `<span>⚠ ${esc(w)}</span>`).join('')}</div>` : '';
-      return `<div class="chreq s-${esc(r.status)}${warns ? ' warn' : ''}" data-r="${esc(r.id)}"><b>${esc(r.kind)}</b><span class="dim">${esc(r.id)}${r.char.from ? ' · from ' + esc(r.char.from) : ''}</span><span class="chsteps">${r.status === 'rejected' ? '<span class="chstep cur rej">rejected</span>' : steps}</span><span class="chreqt" title="${esc(r.prompt)}">${esc(r.char.text || (vid && r.char.kind !== 'edit' ? `${T.vWord} sheet “${vname}” from ${r.char.from}` : r.prompt))}</span>${r.char.pins?.length ? `<span class="dim">${r.char.pins.length} pin${r.char.pins.length > 1 ? 's' : ''}</span>` : ''}${r.char.mask ? '<span class="dim">mask</span>' : ''}<span class="dim">${usd(r.est_cost)}${r.actual_cost_usd != null ? ' / ' + usd(r.actual_cost_usd) : ''}</span>${act}${warns}</div>`;
+      return `<div class="chreq s-${esc(r.status)}${warns ? ' warn' : ''}" data-r="${esc(r.id)}"><b>${esc(r.kind)}</b><span class="dim">${esc(r.id)}${r.char.from ? ' · from ' + esc(r.char.from) : ''}</span><span class="chsteps">${r.status === 'rejected' || r.status === 'withdrawn' ? `<span class="chstep cur rej">${r.status}</span>` : steps}</span><span class="chreqt" title="${esc(r.prompt)}">${esc(r.char.text || (vid && r.char.kind !== 'edit' ? `${T.vWord} sheet “${vname}” from ${r.char.from}` : r.prompt))}</span>${r.char.pins?.length ? `<span class="dim">${r.char.pins.length} pin${r.char.pins.length > 1 ? 's' : ''}</span>` : ''}${r.char.mask ? '<span class="dim">mask</span>' : ''}<span class="dim">${usd(r.est_cost)}${r.actual_cost_usd != null ? ' / ' + usd(r.actual_cost_usd) : ''}</span>${act}${warns}</div>`;
     });
     return `<div class="chreqs"><div class="chsh">requests <span class="dim">request → approve (you) → Run (Review › Queue, or the agent) → a new node</span></div>${rows.join('')}</div>`;
   }
@@ -458,7 +461,7 @@ export class AssetWorkspace {
       + (!locked && n.id !== st.head && !isPending ? `<button data-a="tohead" title="continue from this node (revert to it)">Make head</button>` : '')
       + (!locked && n.id === st.head && A.treeNodes(it, n.tree).length ? `<button data-a="approve" class="pri">Approve ${word}</button>` : '')
       + `<button data-a="nnote" title="a note on this node, in the Notes column (Alt+N)">✉</button><button data-a="pinnote" class="${this.pinMode ? 'on' : ''}" title="pin a note on the image: click here, then on the image">📍 pin</button><b class="sctool" data-a="nclose" title="close (Esc)">▴</b></div>`;
-    const pv = n.provenance, prov = n.origin === 'imported' ? `<div class="chnedit"><span class="dim">imported (no request):</span> ${esc(pv?.media || '')} <span class="dim">${esc(pv?.path || '')}</span>${pv?.job ? ` · job ${esc(pv.job)}` : ''}${pv?.request ? ` · request ${esc(pv.request)}` : ''} · ${pv?.cost ? `cost on record ${usd(pv.cost.usd)} (${esc(pv.cost.source)}${pv.cost.via ? ' via ' + esc(pv.cost.via) : ''})` : 'no cost row'}${n.proposal ? ` · proposed by ${esc(n.proposed_by || 'agent')} (${esc(n.proposal)})` : ''}${n.note ? ` · ${esc(n.note)}` : ''}</div>` : '';
+    const pv = n.provenance, prov = n.origin === 'imported' ? `<div class="chnedit"><span class="dim">imported (no request):</span> ${esc(pv?.media || '')} <span class="dim">${esc(pv?.path || '')}</span>${pv?.job ? ` · job ${esc(pv.job)}` : ''}${pv?.request ? ` · request ${esc(pv.request)}` : ''} · ${pv?.cost ? `cost on record ${costOf(pv.cost)}` : 'no cost row'}${n.proposal ? ` · proposed by ${esc(n.proposed_by || 'agent')} (${esc(n.proposal)})` : ''}${n.note ? ` · ${esc(n.note)}` : ''}</div>` : '';
     const edit = n.edit && (n.edit.text || n.edit.pins?.length || n.edit.png || n.edit.mask) ? `<div class="chnedit"><span class="dim">edit:</span> ${esc(n.edit.text || '(sketch only)')}${(n.edit.pins || []).map(p => `<span class="chpin"><b>${p.n}</b>${esc(p.text)}</span>`).join('')}${n.edit.png ? ` <a href="${esc(imgUrl(n.edit.png))}" target="_blank" rel="noopener">sketch</a>` : ''}${n.edit.mask ? ` <a href="${esc(imgUrl(n.edit.mask))}" target="_blank" rel="noopener">mask</a>` : ''}${n.note ? `<span class="dim"> · agent: ${esc(n.note)}</span>` : ''}</div>` : '';
     let main = '';
     if (this.mode === 'edit' && this.sk?.node === n.id) {

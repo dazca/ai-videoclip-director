@@ -2,7 +2,7 @@
  "_header": "Photoreal prompt recipe: the default prompt template of the Director Workbench (request_create recipe, the Queue's request form). Why each block exists, the sources and what is verified: docs/PHOTOREAL.md. Copied from videoclip-research/photoreal_recipe.json (2026-10-04); edit here. Prices: js/prices.js is the workbench's price table (per_model.cost_* below is the research snapshot).",
  "version": "2026-10-04",
  "guide": "docs/PHOTOREAL.md",
- "notes": "Default prompt template for photoreal generation requests. Join the still blocks in order with a single space. Placeholders are {curly}. Blocks marked required:false may be dropped when empty. Prices are fal list prices read 2026-10-04.",
+ "notes": "Default prompt template for photoreal generation requests. Join the still blocks in order with a single space. Placeholders are {curly}. Blocks marked required:false may be dropped when empty. Prices are fal list prices read 2026-10-04. Character-agnostic: no block names a gender; {name} is the entity name and {constants} its identity constants (entity.constants[]: the details that must stay identical), which js/recipe.js puts into the identity lock. A field fills its block and keeps the fixed sentences; an edited block replaces the whole block.",
  "still": {
   "join": " ",
   "target_words": [
@@ -14,15 +14,16 @@
     "id": "refs",
     "required": false,
     "use_when": "any request with reference images (edit endpoints)",
-    "template": "Image {n_face} is a close-up of {name}'s face, Image {n_body} is her full body{extra_refs}. Create a new photograph of the same woman as Image {n_face}.",
-    "example": "Image 1 is a close-up of her face, Image 2 is her full body, Image 3 is the hair clip, Image 4 is the office. Create a new photograph of the same woman as Image 1."
+    "template": "Image {n_face} is a close-up of {name}'s face, Image {n_body} is {name}'s full body{extra_refs}. Create a new photograph of the same person as Image {n_face}.",
+    "example": "Image 1 is a close-up of Ada's face, Image 2 is Ada's full body, Image 3 is the hair clip, Image 4 is the office. Create a new photograph of the same person as Image 1."
    },
    {
     "id": "identity_lock",
     "required": false,
     "use_when": "a real person or approved character is in frame",
-    "template": "Keep her face exactly as in Image {n_face}: bone structure, eye shape, eyebrows, nose, lips, skin tone, {marks}, hairline and body proportions. Do not beautify, slim or de-age her.",
-    "example": "Keep her face exactly as in Image 1: bone structure, eye shape, eyebrows, nose, lips, skin tone, the mole on her left cheek, hairline and body proportions. Do not beautify, slim or de-age her."
+    "template": "Keep the face exactly as in Image {n_face}: bone structure, eye shape, eyebrows, nose, lips, skin tone, hairline and body proportions. Keep these exactly the same: {constants}. Do not beautify, slim or de-age.",
+    "example": "Keep the face exactly as in Image 1: bone structure, eye shape, eyebrows, nose, lips, skin tone, hairline and body proportions. Keep these exactly the same: the mole on the left cheek; an orange (#D97757) starburst enamel clip above the LEFT ear. Do not beautify, slim or de-age.",
+    "fill": "{constants} = the entity's constants[] joined with \"; \" (no constants: \"marks\" goes into the feature list instead)"
    },
    {
     "id": "subject_wardrobe",
@@ -33,7 +34,7 @@
      "give exact colours or hex for props",
      "state prop size and position"
     ],
-    "example": "Full-body photograph of her, wearing a black long-sleeved cotton shirt-dress under a cream cotton pinafore, slightly creased at the waist, and a small orange (#F26B1D) starburst enamel hair clip above her left temple."
+    "example": "Full-body photograph of Ada, wearing a black long-sleeved cotton shirt-dress under a cream cotton pinafore, slightly creased at the waist, and a small orange (#F26B1D) starburst enamel hair clip above the left temple."
    },
    {
     "id": "action",
@@ -44,7 +45,7 @@
      "asymmetric stance",
      "gaze off-axis unless a portrait"
     ],
-    "example": "She stands relaxed with her weight on one leg, one hand loosely at her side, looking just past the camera with a calm, tired expression."
+    "example": "Ada stands relaxed with the weight on one leg, one hand loosely at the side, looking just past the camera with a calm, tired expression."
    },
    {
     "id": "location",
@@ -59,13 +60,13 @@
    {
     "id": "light",
     "required": true,
-    "template": "Light: {key_source} from {direction}, {colour_temp}, {hardness}; {secondary}; {practicals}. The same light falls on her and the room, with matching shadows and a soft contact shadow at her feet.",
+    "template": "Light: {key_source} from {direction}, {colour_temp}, {hardness}; {secondary}; {practicals}. The same light falls on the subject and the place, with matching shadows and a soft contact shadow at the feet.",
     "rules": [
      "describe sources physically",
      "one coherent light world",
      "avoid 'cinematic lighting'"
     ],
-    "example": "Light: cool blue pre-dawn daylight through the windows camera-left, soft and low; a thin warm orange sunrise glow on the horizon rims her hair; ceiling lights off, the right side of the room falls into shadow. The same light falls on her and the room, with matching shadows and a soft contact shadow at her feet."
+    "example": "Light: cool blue pre-dawn daylight through the windows camera-left, soft and low; a thin warm orange sunrise glow on the horizon rims the hair; ceiling lights off, the right side of the room falls into shadow. The same light falls on the subject and the place, with matching shadows and a soft contact shadow at the feet."
    },
    {
     "id": "camera",
@@ -81,7 +82,7 @@
    {
     "id": "texture",
     "required": true,
-    "template": "Visible skin texture with pores, fine lines and slight natural redness, {hair_detail}, {fabric_detail}.",
+    "template": "Visible skin texture with pores, fine lines and slight natural redness, {texture_field: hair_detail, fabric_detail}.",
     "example": "Visible skin texture with pores, fine lines and slight natural redness, a few flyaway hairs, visible cotton weave and small creases in the fabric."
    },
    {
@@ -97,7 +98,7 @@
     "example": "Unretouched documentary photograph, natural colour, fine high-ISO sensor noise in the shadows."
    }
   ],
-  "full_example": "Full-body photograph of a woman in her thirties with shoulder-length dark brown hair, wearing a grey wool coat over a black turtleneck. She leans against a tiled wall, weight on one leg, looking down at her phone. Location: a Barcelona metro platform late at night, scuffed tiles, a bench, a timetable screen, a yellow safety line. Light: cold overhead fluorescent tubes, slightly greenish, hard shadows under her brows and chin, a warm sign glow from the right. The same light falls on her and the platform. Shot on a full-frame camera, 35mm lens at f/2.8, about 4 m away, ISO 3200. Visible skin texture with pores and slight redness, flyaway hairs, wool pilling. Unretouched documentary photograph, natural colour, fine sensor noise."
+  "full_example": "Full-body photograph of a man in his fifties with short grey hair and a trimmed beard, wearing a navy wool coat over a grey crew-neck jumper. He leans against a tiled wall, weight on one leg, looking down at his phone. Location: a Barcelona metro platform late at night, scuffed tiles, a bench, a timetable screen, a yellow safety line. Light: cold overhead fluorescent tubes, slightly greenish, hard shadows under the brows and chin, a warm sign glow from the right. The same light falls on the subject and the place. Shot on a full-frame camera, 35mm lens at f/2.8, about 4 m away, ISO 3200. Visible skin texture with pores, fine lines and slight natural redness, wool pilling. Unretouched documentary photograph, natural colour, fine sensor noise."
  },
  "edit": {
   "principles": [
@@ -110,18 +111,18 @@
    "use a mask endpoint (fal-ai/flux-pro/v1/fill) when face pixels must not change"
   ],
   "templates": {
-   "add_prop": "Using Image 1, add {prop} {position}. {prop_details}. Light it with the same {light} as her hair and face, with a small matching shadow. Keep her face, hair, pose, clothes, background and framing exactly the same.",
-   "change_wardrobe": "Using Image 1, change only her {garment} to {new_garment_with_material}, fitted naturally to her body and pose with realistic folds. Keep her face, hairstyle, skin, body proportions, pose, background and lighting exactly the same.",
-   "prop_from_ref": "Image 1 is the woman, Image 2 is the {prop}. Put the {prop} from Image 2 {position}, copying its exact shape and colour at about {size}. Keep everything else in Image 1 exactly the same.",
+   "add_prop": "Using Image 1, add {prop} {position}. {prop_details}. Light it with the same {light} as the hair and face, with a small matching shadow. Keep the face, hair, pose, clothes, background and framing exactly the same.",
+   "change_wardrobe": "Using Image 1, change only the {garment} to {new_garment_with_material}, fitted naturally to the body and pose with realistic folds. Keep the face, hairstyle, skin, body proportions, pose, background and lighting exactly the same.",
+   "prop_from_ref": "Image 1 is {name}, Image 2 is the {prop}. Put the {prop} from Image 2 {position}, copying its exact shape and colour at about {size}. Keep everything else in Image 1 exactly the same.",
    "sketch_guided": "Replace the {colour} scribble in Image 1 with {object}, real material and correct scale, lit by the scene's light. Keep everything else exactly the same.",
-   "relight": "Keep the subject, pose and framing exactly. Relight the scene as {source} from {direction}, {colour_temp}; add {shadow} on the {side} side of her face; match the background to the same light.",
-   "place_in_location": "Image 1 is the woman, Image 2 is the location. Photograph the same woman as Image 1 {pose} in the place shown in Image 2, at correct scale, lit by Image 2's light ({light}), with contact shadows on the floor. Keep her face, hair and body exactly as in Image 1.",
+   "relight": "Keep the subject, pose and framing exactly. Relight the scene as {source} from {direction}, {colour_temp}; add {shadow} on the {side} side of the face; match the background to the same light.",
+   "place_in_location": "Image 1 is {name}, Image 2 is the location. Photograph the same person as Image 1 {pose} in the place shown in Image 2, at correct scale, lit by Image 2's light ({light}), with contact shadows on the floor. Keep the face, hair and body exactly as in Image 1.",
    "skin_cleanup": "Retouch lightly: reduce temporary blemishes and shine only. Keep pores, moles, freckles, asymmetry and natural texture. Do not change face shape, eye size, nose or jaw."
   },
   "identity_lock_phrases": [
-   "Same woman as Image 1.",
-   "Keep her facial features exactly the same as Image 1.",
-   "Do not beautify, slim, de-age or change her face shape."
+   "Same person as Image 1.",
+   "Keep the facial features exactly the same as Image 1.",
+   "Do not beautify, slim, de-age or change the face shape."
   ]
  },
  "video": {
@@ -142,9 +143,9 @@
    "gentle handheld drift",
    "slow pan left",
    "slow pan right",
-   "slow tracking shot alongside her"
+   "slow tracking shot alongside the subject"
   ],
-  "example": "She lifts her head and glances toward the window, takes a slow breath, a strand of hair moves. Camera: slow push-in. Dawn light slowly warms on the carpet. Handheld documentary footage, natural motion blur, fine film grain, real skin texture, stable face and identity throughout.",
+  "example": "Ada lifts the head and glances toward the window, takes a slow breath, a strand of hair moves. Camera: slow push-in. Dawn light slowly warms on the carpet. Handheld documentary footage, natural motion blur, fine film grain, real skin texture, stable face and identity throughout.",
   "negative_prompt": "morphing face, changing identity, plastic skin, smooth skin, warped hands, extra fingers, flicker, cartoon, CGI, 3D render, text, watermark",
   "duration_s": {
    "default": 5,
@@ -210,8 +211,12 @@
   ],
   "edit_risk": [
    "transform her into",
+   "transform him into",
+   "transform them into",
    "this person",
-   "make her look better"
+   "make her look better",
+   "make him look better",
+   "make them look better"
   ],
   "replace_with": {
    "cinematic lighting": "name the source, direction and colour temperature",
@@ -373,7 +378,7 @@
    "full body neutral",
    "optional smiling"
   ],
-  "lock_phrase": "Same woman as Image 1. Keep her facial features exactly the same as Image 1.",
+  "lock_phrase": "Same person as Image 1. Keep the facial features exactly the same as Image 1.",
   "drift_budget_edits": 8,
   "trained_options": {
    "phota_profile_on_fal": {

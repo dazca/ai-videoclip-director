@@ -184,6 +184,7 @@ export const store = {
     const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j;
   },
   async generators() { const r = await postJSON('/api/op/generators_get', {}); return r.ok ? r.json() : null; },
+  async costsSummary() { const r = await postJSON('/api/op/costs_get', {}); return r.ok ? r.json() : null; },
   addRequest(r) {
     const id = `r${Date.now().toString(36)}`;
     const item = { id, kind: r.kind, target: r.target || null, prompt: r.prompt || '', refs: r.refs || [], est_cost: r.est_cost ?? 0, status: 'draft', by: 'director', at: nowIso(), ...(r.extra || {}) };

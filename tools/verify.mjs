@@ -1005,13 +1005,13 @@ try {
   await pg.goto(`${BASE}/?project=${NP}`, { waitUntil: 'domcontentloaded' });
   await pg.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
   await pg.reload({ waitUntil: 'domcontentloaded' }); await ready();
-  await combo(['Alt', 'Shift'], 'Digit3'); await wait(400);
+  await combo(['Alt', 'Shift'], 'Digit3'); await until(() => window.WB.stages.current() === 'breakdown' && !!document.querySelector('.bdbar [data-a=extract]'), null, 8000);
   const empty = await pg.evaluate(() => ({ stage: window.WB.stages.current(), empty: !!document.querySelector('.bdws .scempty [data-a=suggest]'), bar: !!document.querySelector('.bdbar [data-a=extract]') }));
   await pg.screenshot({ path: path.join(OUT, 'v6_breakdown_empty.png') });
   check('a scripted project: the breakdown stage (Alt+Shift+3) starts empty, offering "Suggest from script" and "Ask the agent to extract"', cr.status === 200 && sc.status === 200 && empty.stage === 'breakdown' && empty.empty && empty.bar, { empty, scenes: sc.body });
 
   // 2. Suggest from script (no agent): characters from capitalised names and the intake, locations, props, wardrobe, FX, linked to scenes and beats
-  await click('.bdbar [data-a=suggest]'); await wait(200);
+  await click('.bdbar [data-a=suggest]'); await until(() => window.WB.breakdown.ws.draft.length > 0 && document.querySelectorAll('.bdws .bdrow').length === window.WB.breakdown.ws.draft.length);
   const sug = await pg.evaluate(() => { const d = window.WB.breakdown.ws.draft, f = (n) => d.find(i => i.name === n);
     return { n: d.length, kinds: [...new Set(d.map(i => i.kind))].sort(), mara: f('Mara') && { kind: f('Mara').kind, scenes: f('Mara').links.map(l => l.scene), beats: f('Mara').links[0]?.beats.length }, theo: f('Theo')?.kind, driver: f('Bus Driver')?.kind,
       pier: f('Old pier')?.kind, raincoat: f('Red raincoat') && { kind: f('Red raincoat').kind, for: f('Red raincoat').for }, rows: document.querySelectorAll('.bdws .bdrow').length, dirty: window.WB.breakdown.ws.dirty }; });
@@ -1054,12 +1054,12 @@ try {
   await click('.bdbar [data-view=list]');
   const coat = await itemId('Coat'), rain = await itemId('Red raincoat');
   await click(`.bdrow[data-item="${rain}"] .bdnm`); await click(`.bdrow[data-item="${rain}"] .bdnm`);   // open then close: a plain selection
-  await pg.evaluate((id) => { const e = document.querySelector(`.bdrow[data-item="${id}"] .bdnm`); e.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true })); }, coat || rain); await wait(150);
+  await pg.evaluate((id) => { const e = document.querySelector(`.bdrow[data-item="${id}"] .bdnm`); e.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true })); }, coat || rain); await until(() => /2 selected/.test(document.querySelector('.bdsel')?.textContent || ''));
   const selBar = await pg.evaluate(() => ({ shown: getComputedStyle(document.querySelector('.bdsel')).display !== 'none', text: document.querySelector('.bdsel')?.textContent || '' }));
-  await click('.bdsel [data-a=merge]'); await wait(150);
-  await pg.keyboard.type('raincoat'); await wait(80);
+  await click('.bdsel [data-a=merge]'); await until(() => document.querySelectorAll('.pal .pr').length > 0);
+  await pg.keyboard.type('raincoat'); await until(() => /raincoat/i.test(document.querySelector('.pal .pr .lb')?.textContent || ''));
   await pg.screenshot({ path: path.join(OUT, 'v6_breakdown_merge_pick.png') });
-  await pg.keyboard.press('Enter'); await wait(250);
+  await pg.keyboard.press('Enter'); await until((id) => !window.WB.breakdown.ws.item(id), coat);
   const mg = await pg.evaluate(([a, b]) => { const s = window.WB.breakdown.ws; return { a: !!s.item(a), b: s.item(b) && { aliases: s.item(b).aliases, scenes: s.item(b).links.map(l => l.scene) } }; }, [coat, rain]);
   await pg.screenshot({ path: path.join(OUT, 'v6_breakdown_merged.png') });
   await combo(['Control'], 'Enter');
@@ -1071,27 +1071,36 @@ try {
   // 6. context menus: an item row (rename, kind, merge, split, drop, create entity…) and a scene chip (the scene filter)
   const lamp = await itemId('Lamp');
   const rowMenu = await menuOf(`.bdrow[data-item="${lamp}"] .bdnm`);
-  await pg.evaluate((id) => window.WB.commands.run('breakdown.drop', { itemId: id }), lamp); await wait(150);
+  await pg.evaluate((id) => window.WB.commands.run('breakdown.drop', { itemId: id }), lamp); await until((id) => !!document.querySelector(`.bdrow[data-item="${id}"].dropped`), lamp);
   const dropped = await pg.evaluate((id) => ({ flag: !!window.WB.breakdown.ws.item(id).dropped, grey: document.querySelector(`.bdrow[data-item="${id}"]`)?.classList.contains('dropped') }), lamp);
-  await pg.evaluate((id) => window.WB.commands.run('breakdown.drop', { itemId: id }), lamp); await wait(150);
+  await pg.evaluate((id) => window.WB.commands.run('breakdown.drop', { itemId: id }), lamp); await until((id) => !window.WB.breakdown.ws.item(id).dropped, lamp);
   const restored = await pg.evaluate((id) => !window.WB.breakdown.ws.item(id).dropped, lamp);
   check('item context menu (rename, change kind, merge, split, drop, create entity, note); drop is soft (greyed) and restorable',
     ['Rename the item', 'Change the kind…', 'Split the item…', 'Drop (soft: restorable)', 'Create entity…', 'Note on the item (Notes column)', '+ Add'].every(x => rowMenu.includes(x)) && dropped.flag && dropped.grey && restored, { rowMenu, dropped, restored });
 
   // 7. Create entity: Mara becomes a character (Assets), her red raincoat a look on her; nothing generated or spent
-  await pg.evaluate((id) => window.WB.breakdown.focus(id), mara); await wait(150);
-  await click('.bded [data-a=promote]'); await wait(200);
+  // (waits on the real state, never a sleep: the item's own editor, the open palette with its title, the files written,
+  // and the page's copy of them; the raincoat's editor before its click, else the click can land on Mara's stale one)
+  const promoteIn = async (id, title) => {
+    await pg.evaluate((x) => window.WB.breakdown.focus(x), id);
+    if (!(await until((x) => !!document.querySelector(`.bded[data-item="${x}"] [data-a=promote]`), id, 8000))) throw new Error(`no Create entity button in the editor of ${id}`);
+    await click(`.bded[data-item="${id}"] [data-a=promote]`);
+    if (!(await until((t) => [...document.querySelectorAll('.pal .pr .lb')].length > 0 && (document.querySelector('.pal')?.textContent || '').includes(t), title, 8000))) throw new Error(`the Create entity palette for ${id} did not open`);
+  };
+  await promoteIn(mara, 'Mara');
   const pickRows = await pg.evaluate(() => [...document.querySelectorAll('.pal .pr .lb')].map(x => x.textContent));
   await pg.screenshot({ path: path.join(OUT, 'v6_breakdown_promote_pick.png') });
   await pg.keyboard.press('Enter');
-  await until(() => window.WB.store.entities.some(e => e.id === 'mara'), null, 8000);
-  await pg.evaluate((id) => window.WB.breakdown.focus(id), rain); await wait(150);
-  await click('.bded [data-a=promote]'); await wait(200); await pg.keyboard.press('Enter');
-  await until(() => (window.WB.store.entities.find(e => e.id === 'mara')?.looks || []).length === 1, null, 8000); await wait(300);
+  await fileUntil(NP, 'breakdown.json', (j) => j.states?.[mara]?.entity_id === 'mara', 8000);
+  await until((id) => window.WB.store.entities.some(e => e.id === 'mara') && window.WB.store.breakdown.states?.[id]?.entity_id === 'mara', mara, 8000);
+  await promoteIn(rain, 'Red raincoat'); await pg.keyboard.press('Enter');
+  await fileUntil(NP, 'breakdown.json', (j) => !!j.states?.[rain]?.look_id, 8000);
+  await fileUntil(NP, 'entities/characters/mara.json', (j) => (j.looks || []).length === 1, 8000);
+  await until(() => (window.WB.store.entities.find(e => e.id === 'mara')?.looks || []).length === 1, null, 8000);
   await pg.screenshot({ path: path.join(OUT, 'v6_breakdown_promoted.png') });
   const E = readJ(NP, 'entities/characters/mara.json'), BS = readJ(NP, 'breakdown.json')?.states || {}, C = readJ(NP, 'costs.json'), RQ = readJ(NP, 'requests.json');
-  await pg.evaluate(() => window.WB.app.show('characters')); await wait(500);
-  const assets = await pg.evaluate(() => document.querySelector('#panes')?.textContent.includes('Mara'));
+  await pg.evaluate(() => window.WB.app.show('characters'));
+  const assets = await until(() => !!document.querySelector('#panes')?.textContent.includes('Mara'), null, 8000);
   await pg.screenshot({ path: path.join(OUT, 'v6_assets_from_breakdown.png') });
   check('Create entity (page): Mara becomes a draft character in Assets (linked back to the item and its scenes), the red raincoat a look on her; no request, no cost',
     /Create a new character “Mara”/.test(pickRows[0] || '') && E?.status === 'draft' && E.breakdown?.item === mara && E.breakdown.scenes.length === 4 && E.looks?.[0]?.name === 'Red raincoat' && BS[mara]?.entity_id === 'mara' && BS[rain]?.look_id === E.looks[0].id
@@ -1099,7 +1108,7 @@ try {
     { pick: pickRows.slice(0, 2), entity: E && { status: E.status, breakdown: E.breakdown, looks: E.looks?.map(l => l.id) }, states: { mara: BS[mara], rain: BS[rain] }, assets });
 
   // 8. Ask the agent to extract: an ask note; the agent answers with a new version (live, marked agent); the agent rules
-  await pg.evaluate(() => window.WB.stages.open('breakdown')); await wait(300);
+  await pg.evaluate(() => window.WB.stages.open('breakdown')); await until(() => window.WB.stages.current() === 'breakdown' && !!document.querySelector('.bdbar [data-a=extract]'));
   await click('.bdbar [data-a=extract]');
   await fileUntil(NP, 'notes.json', (j) => j.notes.some(n => n.ask === 'extract'));
   const bg = (await agent('breakdown_get', { with_script: false })).body, ask = bg.asks_for_agent.find(a => a.kind === 'extract');
@@ -1113,12 +1122,14 @@ try {
     !!ask && au.status === 200 && live && agOk.status === 403 && agRev.status === 200 && agProm.status === 403, { ask: ask && ask.text.slice(0, 60), au: au.body, live, agOk: agOk.status, agRev: agRev.status, agProm: agProm.status });
 
   // 9. the timeline: the scenes column carries the breakdown markers; a scene's menu opens its items in the breakdown
-  await pg.evaluate(() => window.WB.app.show('timeline')); await wait(500);
-  await pg.evaluate(() => { const tl = window.WB.timeline; tl.scrollToTime(0); tl.drawLanes(); }); await wait(200);
+  await pg.evaluate(() => window.WB.app.show('timeline'));
+  await pg.evaluate(() => { const tl = window.WB.timeline; tl.scrollToTime(0); tl.drawLanes(); });
+  await until(() => document.querySelectorAll('.col-scenes .scn .scbd').length >= 3 && [...document.querySelectorAll('.col-scenes .scn .scbd')].some(e => e.textContent.includes('Mara')), null, 8000);
   const marks = await pg.evaluate(() => [...document.querySelectorAll('.col-scenes .scn .scbd')].map(e => e.textContent));
   await pg.screenshot({ path: path.join(OUT, 'v6_timeline_markers.png') });
   const scMenu = await menuOf('.col-scenes .it.scene .scn');
-  await pg.evaluate(() => window.WB.commands.run('breakdown.sceneItems', { sceneId: 'sc03' })); await wait(400);
+  await pg.evaluate(() => window.WB.commands.run('breakdown.sceneItems', { sceneId: 'sc03' }));
+  await until(() => window.WB.stages.current() === 'breakdown' && window.WB.breakdown.ws.scene === 'sc03' && /sc03/.test(document.querySelector('.bdscf')?.textContent || ''), null, 8000);
   const filt = await pg.evaluate(() => ({ stage: window.WB.stages.current(), scene: window.WB.breakdown.ws.scene, rows: [...document.querySelectorAll('.bdws .bdrow')].map(r => r.dataset.item), bar: document.querySelector('.bdscf')?.textContent || '' }));
   await pg.screenshot({ path: path.join(OUT, 'v6_breakdown_scene.png') });
   const wantSc3 = (readJ(NP, 'breakdown.json')?.versions.at(-1).items || []).filter(i => i.links.some(l => l.scene === 'sc03')).map(i => i.id).sort();
@@ -1175,9 +1186,12 @@ try {
   const key = await pg.evaluate(() => document.querySelector('.col-status .chip[data-k]')?.dataset.k);
   if (!key) throw new Error('no status chip in the timeline');
   const ap0 = readTmp('approvals.json', { rev: 0, items: {} }), before = ap0.items?.[key]?.state || 'draft';
-  await pg.evaluate(async (k) => { document.querySelector(`.col-status .chip[data-k="${k}"]`).click(); await new Promise(r => setTimeout(r, 400)); }, key);
+  const tmpUntil = async (f, fn, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (fn(readTmp(f, {}))) return; } catch (e) { /* not yet */ } await new Promise(r => setTimeout(r, 100)); } };
+  await pg.evaluate((k) => document.querySelector(`.col-status .chip[data-k="${k}"]`).click(), key);
+  await tmpUntil('approvals.json', (j) => (j.rev || 0) > (ap0.rev || 0));
   await pg.evaluate(async (T) => { await window.WB.store.addNote(T, 'verify: test note'); }, at(61230));
-  await new Promise(r => setTimeout(r, 300));
+  await tmpUntil('notes.json', (j) => (j.notes || []).some(n => n.text === 'verify: test note'));
+  await pg.waitForFunction(() => [...document.querySelectorAll('.col-notes .note')].some(n => n.textContent.includes('verify: test note')), { timeout: 8000 }).catch(() => {});
   const ap = readTmp('approvals.json', { rev: 0, items: {} }), nt = readTmp('notes.json', { rev: 0, notes: [] });
   const stale = await fetch(B2 + '/api/save/approvals.json', { method: 'POST', headers: await writeHeaders(B2, '_verify'), body: JSON.stringify({ base_rev: 0, data: ap }) });
   const noteShown = await pg.evaluate(() => [...document.querySelectorAll('.col-notes .note')].some(n => n.textContent.includes('verify: test note')));

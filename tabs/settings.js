@@ -10,6 +10,7 @@ export default {
   show(ctx) {
     const tl = ctx.timeline, el = this.el; if (!tl) return;
     el.innerHTML = `<h4 class="gen">generator <i class="dim">(what runs an approved request, per kind · the fal key stays in your environment, never in the project)</i></h4><div class="genbox dim">loading…</div>
+      <h4 class="costset">costs <i class="dim">(spend made outside the queue, counted in the one total: Review › Costs)</i></h4><div class="falgenbox"><table class="tbl"><tr><td title="a falgen folder (a runner that spends outside the queue: its gen/spent.json and the via-falgen rows of its LEDGER.md, read only); relative to the media base, inside it">falgen folder</td><td><input data-x=falgen class="falgenin" value="${esc(typeof window.WB.store.settings?.falgen === 'string' ? window.WB.store.settings.falgen : window.WB.store.settings?.falgen?.dir || '')}" placeholder="e.g. project/gen (relative to the media base)" spellcheck="false" style="width:22em"> <span class="falgenst dim">…</span></td></tr></table></div>
       <h4>view</h4><table class="tbl"><tr><td>min px / second (floor)</td><td><input type=number data-x=pps value="${tl.pxPerSec.toFixed(1)}" min=2 max=800 step=1></td></tr>
       <tr><td>linear time (no warp)</td><td><input type=checkbox data-x=lin ${tl.linear ? 'checked' : ''}></td></tr>
       <tr><td>column header</td><td><select data-x=hdr>${['full', 'thin', 'hidden'].map((n, i) => `<option value=${i} ${i === tl.headerMode ? 'selected' : ''}>${n}</option>`).join('')}</select></td></tr></table>
@@ -18,7 +19,7 @@ export default {
       <h4 class="kb">keybindings <i class="dim">(project settings.json · click + then press the keys · Esc cancels)</i></h4>
       <div class="kbbar"><input class="kbf" placeholder="filter commands" value="${esc(this.filter)}"> <button data-x=kbreset>reset all to defaults</button> <span class="kbc"></span></div>
       <table class="tbl kbt"></table>`;
-    this.renderKeys(); this.renderGen();
+    this.renderKeys(); this.renderGen(); this.renderFalgen();
     el.querySelector('.kbf').addEventListener('input', (e) => { this.filter = e.target.value; this.renderKeys(); });
     el.onchange = (e) => {
       const d = e.target.dataset;
@@ -27,6 +28,7 @@ export default {
       if (d.x === 'hdr') { tl.headerMode = Number(e.target.value); tl.applyHeaderMode(); tl.save(); }
       if (d.c) tl.setHidden(d.c, !e.target.checked);
       if (d.w) tl.setWidth(d.w, Math.max(3, Number(e.target.value)));
+      if (d.x === 'falgen') { const v = e.target.value.trim(); window.WB.store.setSettings((s) => { if (v) s.falgen = v; else delete s.falgen; }).then(() => this.renderFalgen()); }
       if (d.gen) window.WB.store.setSettings((s) => { s.generators = { ...(s.generators || {}), [d.gen]: e.target.value }; }).then(() => this.renderGen());
     };
     el.onclick = (e) => {
@@ -36,6 +38,7 @@ export default {
         location.reload();
       }
       if (t.dataset.x === 'kbreset') K.resetAll();
+      if (t.dataset.fglink) { const inp = this.el.querySelector('[data-x=falgen]'); inp.value = t.dataset.fglink; inp.dispatchEvent(new Event('change', { bubbles: true })); return; }
       const row = t.closest('tr[data-id]'); if (!row) return;
       const id = row.dataset.id, keys = window.WB.commands.keysFor(id);
       if (t.dataset.rm != null) K.set(id, keys.filter((_, i) => i !== Number(t.dataset.rm)));
@@ -56,6 +59,15 @@ export default {
         <td class="${g.ready && runs ? 'ok' : 'no'}">${runs ? `${g.ready ? '✓' : '✕'} ${esc(g.why)}` : `✕ ${esc(g.label)} does not run ${esc(k)} yet (D3b): pick "Open in another app" for now`}</td></tr>`;
     }).join('')}</table>
       <div class="dim">fal key: ${info.fal_key.found ? `found in ${esc(info.fal_key.source)}` : `not found${info.fal_key.why ? ` (${esc(info.fal_key.why)})` : ''}: set FAL_KEY before starting the server, or fal_key_file in workbench.config.json`} · Review › Queue runs approved requests only, up to 2 at once, the cap checked for each</div>`;
+  },
+  // the falgen link as costs_get sees it: linked (from settings.json or project.json), an error, or the folders nearby
+  async renderFalgen() {
+    const st = this.el?.querySelector('.falgenst'); if (!st) return;
+    let c = null; try { c = await window.WB.store.costsSummary(); } catch (e) { /* static page */ }
+    const fg = c?.falgen;
+    if (!fg) { st.textContent = c ? '' : 'the server did not answer'; return; }
+    if (fg.linked) st.innerHTML = fg.error ? `<span class="bad">${esc(fg.error)}</span>` : `<span class="ok">✓ linked (${esc(fg.from)})</span> · spent.json ${fg.spent_json_total != null ? '$' + fg.spent_json_total : '<span class="bad">not found</span>'} · ${fg.ledger_rows} ledger rows${fg.from === 'project.json' ? ' · project.json wins over this field' : ''}`;
+    else st.innerHTML = fg.candidates?.length ? `<span class="bad">not linked: spend in ${fg.candidates.map(x => esc(x) + '/spent.json').join(', ')} is not counted</span> ${fg.candidates.map(x => `<button data-fglink="${esc(x)}">link ${esc(x)}</button>`).join(' ')}` : 'not linked (no falgen folder found near the project)';
   },
   capture(btn, id, keys) {
     btn.textContent = 'press keys…'; btn.classList.add('cap');

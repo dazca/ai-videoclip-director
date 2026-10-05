@@ -933,6 +933,78 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   check('wait_for: wakes when the page approves (changed, status approved, within a few s), returns at once when already there, times out with the current state, needs exactly one item',
     wf.changed === true && wf.status === 'approved' && wf.from === 'draft' && wfMs < 6000 && wfNow.already === true && wfTo.timed_out === true && /400/.test(wfBad.error || ''), { wf, wfMs, wfTo: wfTo.timed_out, wfBad: wfBad.error });
 
+  // ---- the looks dogfood (DOGFOOD_looks.md): a character-agnostic recipe from the entity's constants, the identity lock
+  // never dropped silently, fields vs blocks, takes in the estimate, recipe.identity on update, withdrawn, the cost split
+  // per take, the falgen link warning and the Settings field, wait_for on several requests, a queued ui_focus
+  {
+    await call(mcp, 'entity_upsert', { kind: 'character', id: 'bram', name: 'Bram', fields: { role: 'the bus driver', constants: ['a silver ring on the LEFT ring finger', 'a scar through the right eyebrow'] } });
+    const bramAsset = { type: 'character', id: 'bram', tree: 'identity', kind: 'identity' };
+    const m1 = await callW(mcp, 'request_create', { kind: 'identity-sheet', refs: ['media/still/bo_face.jpg'], asset: bramAsset,
+      recipe: { subject: 'Bram, a man in his fifties with short grey hair', wardrobe: 'a navy wool driver jacket', action: 'he leans on the bus door, tired', place: 'the same depot as before, oil stains, a timetable board',
+        light: 'sodium lamps overhead, orange, hard. The same light falls on the subject and the place.', texture: 'wool pilling and grey stubble', takes: 2, blocks: { identity_lock: 'Keep his face exactly as in Image 1, with the scar.' } } });
+    const p1 = m1.r.prompt || '', blk = (r, id) => r.recipe?.blocks?.find(b => b.id === id)?.text || '';
+    const m2 = await callW(mcp, 'request_create', { kind: 'identity-sheet', refs: ['media/still/bo_face.jpg'], asset: bramAsset, recipe: { wardrobe: 'a navy wool driver jacket', action: 'he waits', place: 'a depot', light: 'sodium lamps' } });
+    check('looks: the recipe is character-agnostic (Bram\'s name and constants, no "her / woman"); an identity_lock block given while identity is false is ADDED with a warning (never dropped); without it a character request warns "no identity lock"; texture keeps the skin sentence + the field; the light sentence is not doubled; "Location: the same …" keeps its case; takes 2 = est $0.24',
+      /Bram, a man in his fifties/.test(p1) && !/\b(her|she|woman)\b/i.test(p1) && /Keep his face exactly as in Image 1, with the scar\./.test(p1) && m1.r.warnings?.some(w => /block "identity_lock" was not built/.test(w))
+      && /silver ring on the LEFT ring finger/.test(blk(m1.r, 'constants')) && /pores, fine lines/.test(blk(m1.r, 'texture')) && /wool pilling and grey stubble/.test(blk(m1.r, 'texture'))
+      && (blk(m1.r, 'light').match(/same light falls on/gi) || []).length === 1 && /^Location: the same depot/.test(blk(m1.r, 'location')) && m1.r.est_cost === 0.24 && m1.r.takes === 2 && m1.r.recipe?.takes === 2
+      && m2.r.warnings?.some(w => /^no identity lock: image 1 is not Bram's approved identity/.test(w)) && !/\b(her|she|woman)\b/i.test(m2.r.prompt || ''),
+      { p1: p1.slice(0, 300), w1: m1.r.warnings, w2: m2.r.warnings, est: m1.r.est_cost, light: blk(m1.r, 'light'), loc: blk(m1.r, 'location') });
+    const u2 = await call(mcp, 'request_update', { id: m2.r.id, recipe: { identity: true, takes: 3 } });
+    const id2 = u2.request || {};
+    check('looks: request_update recipe.identity: true rebuilds the references + the identity lock (with the constants), drops the "no identity lock" warning; recipe.takes 3 re-estimates ($0.36) and sets takes',
+      /Image 1 is Bram, the approved identity/.test(id2.prompt || '') && /Keep the face exactly as in Image 1/.test(id2.prompt) && /scar through the right eyebrow/.test(blk(id2, 'identity_lock')) && id2.recipe?.identity === true
+      && !(id2.warnings || []).some(w => /no identity lock/.test(w)) && id2.est_cost === 0.36 && id2.takes === 3, { prompt: (id2.prompt || u2.error || '').slice(0, 260), warnings: id2.warnings, est: id2.est_cost, takes: id2.takes });
+
+    // wait_for several requests: returns on the first that changes (the agent withdraws its own obsolete draft)
+    const waitMany = call(mcp, 'wait_for', { requests: [m1.r.id, m2.r.id], timeout_s: 20 });
+    await wait(600);
+    const wd = await call(mcp, 'request_update', { id: m2.r.id, status: 'withdrawn', why: 'superseded by the sheet with the identity lock', superseded_by: [m1.r.id] });
+    const wm = await waitMany;
+    const wdBad = await call(mcp, 'request_update', { id: m1.r.id, superseded_by: ['x'] });
+    // a director's own draft (the page): the agent cannot withdraw it; the page withdraws its own, and cannot withdraw the agent's
+    const cur = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8'));
+    cur.items.push({ id: 'rdirector1', kind: 'generate', target: null, prompt: 'the director\'s idea', refs: [], est_cost: 0.12, status: 'draft', by: 'director', at: new Date().toISOString().slice(0, 19) });
+    const sv = await post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur });
+    const agW = await call(mcp, 'request_update', { id: 'rdirector1', status: 'withdrawn' });
+    const c2 = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8'));
+    c2.items.find(r => r.id === m1.r.id).status = 'withdrawn';
+    const pgBad = await post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: c2.rev, data: c2 });
+    const c3 = JSON.parse(fs.readFileSync(path.join(D, 'requests.json'), 'utf8'));
+    c3.items.find(r => r.id === 'rdirector1').status = 'withdrawn';
+    const pgOk = await post(`/api/save/requests.json?project=${PROJECT}`, { base_rev: c3.rev, data: c3 });
+    const ql = await call(mcp, 'requests_list', { status: 'withdrawn' });
+    check('looks: withdrawn: the agent withdraws its own draft (why + superseded_by), distinct from rejected; superseded_by needs withdrawn (400); the agent cannot withdraw the director\'s draft (403); the page withdraws the director\'s own (stamped page) but not an agent\'s (400); wait_for {requests} returns on the first change (changed_ids)',
+      wd.request?.status === 'withdrawn' && wd.request.superseded_by?.[0] === m1.r.id && wd.request.log.at(-1).status === 'withdrawn' && /400/.test(wdBad.error || '') && sv.status === 200 && /403/.test(agW.error || '')
+      && pgBad.status === 400 && pgOk.status === 200 && ql.some(r => r.id === 'rdirector1' && r.log.at(-1).via === 'page') && wm.changed === true && wm.changed_ids?.join() === m2.r.id && wm.statuses?.[m2.r.id] === 'withdrawn',
+      { wd: wd.request?.status || wd.error, wdBad: wdBad.error, agW: agW.error, pg: [sv.status, pgBad.status, pgBad.body?.error, pgOk.status], wm: { changed_ids: wm.changed_ids, error: wm.error } });
+
+    // a job of 2 takes (falgen HV9, $0.24): each take's import proposal carries its share ($0.12), so they sum to the job once
+    for (const k of [0, 1]) { fs.copyFileSync(path.join(D, 'media', 'still', 'ada_face.jpg'), path.join(D, 'media', 'still', `hv9_${k}.jpg`)); await call(mcp, 'media_add', { path: `media/still/hv9_${k}.jpg`, kind: 'sheet', job: 'HV9', take: k, entities: ['ada'] }); }
+    await call(mcp, 'cost_record', { usd: 0.24, via: 'falgen', job: 'HV9', tool: 'fal-ai/nano-banana-2/edit' });
+    const pr = []; for (const k of [0, 1]) pr.push((await call(mcp, 'node_import_propose', { id: 'ada', tree: 'look:night-out', media: `media/still/hv9_${k}.jpg`, why: `HV9 take ${k}` })).proposal?.provenance?.cost);
+    check('looks: alternative takes of one job split its cost per take in their provenance ($0.12 each of the $0.24 job, takes 2): summing them gives the job once',
+      pr.every(c => c?.usd === 0.12 && c.job_usd === 0.24 && c.takes === 2) && pr[0].take === 0 && pr[1].take === 1, pr);
+
+    // the falgen link: not linked but a gen/spent.json near the project -> a warning naming it; the Settings field links it
+    const nf = await callW(mcp, 'costs_get');
+    const readSt = () => { try { return JSON.parse(fs.readFileSync(path.join(D, 'settings.json'), 'utf8')); } catch (e) { return { rev: 0, keybindings: {} }; } }, st0 = readSt();
+    const ssv = await post(`/api/save/settings.json?project=${PROJECT}`, { base_rev: st0.rev || 0, data: { ...st0, falgen: 'proj/gen' } });
+    const lf = await callW(mcp, 'costs_get');
+    const st1 = readSt(); delete st1.falgen;
+    await post(`/api/save/settings.json?project=${PROJECT}`, { base_rev: st1.rev || 0, data: st1 });
+    check('looks: costs_get with no falgen link: falgen.linked false + a warning naming the proj/gen/spent.json found near the project (its spend not counted); Settings > costs (settings.json falgen) links it: counted, from settings.json',
+      nf.r.falgen?.linked === false && nf.r.falgen.candidates?.includes('proj/gen') && /falgen: not configured, but proj\/gen\/spent\.json exists/.test(nf.warn) && ssv.status === 200
+      && lf.r.falgen?.linked === true && lf.r.falgen.from === 'settings.json' && lf.r.sources.some(s => s.id === 'falgen') && !/not configured/.test(lf.warn) && lf.r.total_spent_usd > nf.r.total_spent_usd,
+      { nf: [nf.r.falgen, nf.warn.slice(0, 160)], lf: [lf.r.falgen?.from, lf.r.total_spent_usd, nf.r.total_spent_usd], ssv: ssv.status });
+
+    // ui_focus with no page open on a project: queued, then shown by the next page that opens it
+    const uf = await call(mcp, 'ui_focus', { project: 'nt', view: 'queue', message: 'verify: the queue' });
+    const got = await new Promise((ok) => { const ctl = new AbortController(); const t = setTimeout(() => { ctl.abort(); ok(null); }, 4000); let buf = '';
+      fetch(`${URL_}/api/events?project=nt`, { signal: ctl.signal }).then(async (r) => { const rd = r.body.getReader(); for (;;) { const x = await rd.read(); if (x.done) break; buf += Buffer.from(x.value).toString(); const m = /data: (\{.*"ui".*\})/.exec(buf); if (m) { clearTimeout(t); ctl.abort(); ok(JSON.parse(m[1])); break; } } }).catch(() => {}); });
+    check('looks: ui_focus with no page open is queued (queued: true) and delivered to the next page that opens the project (queued_at)', uf.queued === true && uf.pages === 0 && got?.ui?.view === 'queue' && !!got.ui.queued_at, { uf, got });
+  }
+
   // a stale server: a copy of the code where lib/ops/core.mjs differs (it does not know media_update) on its own port
   const OLD = path.join(TMP, 'oldcode'), P2 = PORT + 1;
   for (const p of ['serve.mjs', 'index.html', 'dock.html', 'app.js', 'app.css', 'lib', 'generators', 'js', 'tabs', 'core', 'templates']) fs.cpSync(path.join(WB, p), path.join(OLD, p), { recursive: true });

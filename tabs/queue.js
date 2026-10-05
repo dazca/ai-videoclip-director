@@ -4,7 +4,7 @@
 // progress arrives as SSE {run} (store.runs) and the row follows queued -> running -> done (outputs, the nodes it added)
 // or failed (why, Retry). The generator per kind is Settings > Generator ("Open in another app": Export prompt pack,
 // Copy prompt, Collect results). Cost cap shown on top.
-//   {id, kind, target, prompt, refs[], est_cost, takes?, status: draft|approved|queued|running|done|failed|rejected, by, at,
+//   {id, kind, target, prompt, refs[], est_cost, takes?, status: draft|approved|queued|running|done|failed|rejected|withdrawn, by, at,
 //    outputs?[], warnings?[] (request_create's: e.g. a look sheet with no approved identity), recipe? (the photoreal
 //    blocks), generator?, linked?, handoff?, last_run?}
 // "+ New request": a draft request from the page. "Apply photoreal recipe" builds the prompt from editable blocks
@@ -14,9 +14,11 @@
 import { store, toast } from '../js/store.js';
 import { fmt } from '../js/timeline.js';
 import { esc, mediaAttr } from '../core/esc.js';
-import { buildRecipe, FIELDS, MODELS, FRAMINGS } from '../js/recipe.js';
+import { buildRecipe, constantsOf, FIELDS, MODELS, FRAMINGS } from '../js/recipe.js';
 import { PRICES, estimateWith, genKindOf } from '../js/prices.js';
-const CLS = { draft: '', approved: 's-approved', queued: 's-review', running: 's-review', done: 's-locked', failed: 's-changes', rejected: 's-changes' };
+const CLS = { draft: '', approved: 's-approved', queued: 's-review', running: 's-review', done: 's-locked', failed: 's-changes', rejected: 's-changes', withdrawn: 's-archived' };
+// who wrote a request (lib/ops/requests.mjs requestAuthor): the page's own drafts are the director's; withdrawn = its author took it back
+const author = (r) => { const v = r.log?.[0]?.via; return v === 'page' ? 'director' : v === 'agent' ? 'agent' : r.by === 'director' ? 'director' : 'agent'; };
 let RECIPE = null;
 const loadRecipe = async () => (RECIPE ||= await fetch('/templates/photoreal_recipe.json').then(r => (r.ok ? r.json() : {})).catch(() => ({})));
 
@@ -27,11 +29,14 @@ export default {
     const $form = el.querySelector('.qform'), $list = el.querySelector('.qlist');
     let filter = '';
     // the new-request form (kept across list re-renders)
-    const F = { open: false, kind: 'generate', target: '', refs: '', model: 'nb2', framing: 'full_body', seconds: 5, identity: false, prompt: '', recipe: false, fields: {}, blocks: {}, built: null };
+    const F = { open: false, kind: 'generate', target: '', refs: '', model: 'nb2', framing: 'full_body', seconds: 5, takes: 1, identity: false, prompt: '', recipe: false, fields: {}, blocks: {}, built: null };
     const timeOf = (k) => { if (!k) return null; const id = k.slice(k.indexOf(':') + 1); return store.shots.find(s => 'shot:' + s.id === k)?.t0 ?? store.uses.find(u => u.id === id)?.t0 ?? store.song.sections.find(s => s.id === id)?.t0 ?? store.song.lines.find(l => l.id === id)?.t0 ?? null; };
     const refsOf = () => F.refs.split(/[,\n]/).map(s => s.trim()).filter(Boolean);
-    const rebuild = () => { F.built = buildRecipe(RECIPE, { ...F.fields, model: F.model, framing: F.framing, seconds: F.seconds, identity: F.identity, refs: refsOf().length, name: F.target.includes(':') ? store.entities.find(e => e.id === F.target.split(':')[1])?.name : undefined, blocks: F.blocks }); F.prompt = F.built.prompt; };
-    const est = () => F.recipe && F.built ? F.built.est : estimateWith({ model: F.model, tier: PRICES[F.model]?.default, what: MODELS[F.model] === 'video' ? 'image-to-video' : 'one image' }, { seconds: F.seconds });
+    // the subject from the target: a character entity gives its name and its identity constants (entity.constants[]): the
+    // recipe is character-agnostic and fills in from them (the same code as request_create's recipe)
+    const subject = () => { const [k, id] = F.target.split(':'), e = id ? store.entities.find(x => x.id === id && (!k || x.kind === k)) : null; return e ? { name: e.name || e.id, character: e.kind === 'character', constants: constantsOf(e.constants) } : {}; };
+    const rebuild = () => { F.built = buildRecipe(RECIPE, { ...F.fields, model: F.model, framing: F.framing, seconds: F.seconds, takes: F.takes, identity: F.identity, refs: refsOf().length, ...subject(), blocks: F.blocks }); F.prompt = F.built.prompt; };
+    const est = () => F.recipe && F.built ? F.built.est : estimateWith({ model: F.model, tier: PRICES[F.model]?.default, what: MODELS[F.model] === 'video' ? 'image-to-video' : F.takes > 1 ? `${F.takes} images` : 'one image' }, { seconds: F.seconds, n: F.takes });
     const renderForm = () => {
       $form.hidden = !F.open; if (!F.open) return;
       const e = est(), video = MODELS[F.model] === 'video';
@@ -39,7 +44,8 @@ export default {
         <div class="qfrow"><label>kind <input data-f="kind" value="${esc(F.kind)}" spellcheck="false"></label><label>target <input data-f="target" value="${esc(F.target)}" placeholder="character:ada · shot:sh03" spellcheck="false"></label>
         <label>model <select data-f="model">${Object.keys(MODELS).map(m => `<option value="${m}"${m === F.model ? ' selected' : ''}>${esc(PRICES[m].name)}</option>`).join('')}</select></label>
         ${video ? `<label>seconds <input data-f="seconds" type="number" min="1" max="15" value="${F.seconds}" style="width:4em"></label>` : `<label>framing <select data-f="framing">${Object.entries(FRAMINGS).map(([k, l]) => `<option value="${k}"${k === F.framing ? ' selected' : ''}>${esc(l.replace(/ photograph$/, ''))}</option>`).join('')}</select></label>`}
-        <label title="image 1 is the approved face / identity: the identity lock block is added"><input type="checkbox" data-f="identity"${F.identity ? ' checked' : ''}> image 1 = the approved identity</label></div>
+        <label title="how many images (candidates): the estimate covers all of them">takes <input data-f="takes" type="number" min="1" max="8" value="${F.takes}" style="width:3.5em"></label>
+        <label title="image 1 is the approved face / identity: the identity lock block is added (with the character's constants)"><input type="checkbox" data-f="identity"${F.identity ? ' checked' : ''}> image 1 = the approved identity</label></div>
         <div class="qfrow"><label class="wide">refs <input data-f="refs" value="${esc(F.refs)}" placeholder="paths, comma separated (image 1 first)" spellcheck="false"></label>
         ${F.recipe ? '<span class="qrec on">photoreal recipe applied</span><a data-q="norecipe">remove</a>' : '<button data-q="recipe" class="pri" title="build the prompt from the photoreal recipe\'s blocks for this model (docs/PHOTOREAL.md)">Apply photoreal recipe</button>'}</div>
         ${F.recipe ? `<div class="qfields">${FIELDS.map(x => `<label title="${esc(x.hint)}">${esc(x.label)}<input data-fld="${x.id}" value="${esc(F.fields[x.id] || '')}" placeholder="${esc(x.hint)}" spellcheck="false"></label>`).join('')}</div>
@@ -62,13 +68,14 @@ export default {
     };
     const actions = (r) => {
       const gen = genOf(r), runLbl = gen === 'openwith' ? 'Export prompt pack' : `Run · ${money(r.est_cost)}`;
-      if (r.status === 'draft') return `<button data-x="approve" class="pri" title="approve: it may then run and spend up to its estimate">Approve</button><button data-x="reject">Reject</button>`;
+      if (r.status === 'draft') return `<button data-x="approve" class="pri" title="approve: it may then run and spend up to its estimate">Approve</button>${author(r) === 'director' ? '<button data-x="withdraw" title="your own draft: take it back (not a rejection)">Withdraw</button>' : '<button data-x="reject">Reject</button>'}`;
       if (r.status === 'approved') return `${r.last_run?.status === 'refused' ? `<span class="qwhy" title="${esc(r.last_run.why)}">last run refused: ${esc(r.last_run.why.slice(0, 120))}</span>` : ''}<button data-x="run" class="pri run" title="run it now with ${esc(gen)} (Settings › Generator); the cap is checked again">${runLbl}</button><button data-x="unapprove" title="back to draft">Unapprove</button><button data-x="reject">Reject</button>`;
       if (r.status === 'queued' || (r.status === 'running' && !r.handoff)) return `<span class="qprog">⟳ ${esc(progress(r))}</span>`;
       if (r.status === 'running' && r.handoff) return `<span class="qprog">handed off: pack in <code>${esc(r.handoff.pack || '')}</code>; save the images in <code>${esc(r.handoff.results || '')}</code></span><button data-x="copy">Copy prompt</button><button data-x="run" class="pri">Collect results</button>`;
       if (r.status === 'failed') return `<span class="qwhy" title="${esc(r.why || '')}">✕ ${esc(String(r.why || 'failed').slice(0, 140))}</span><button data-x="run" class="pri" title="run again (outputs that exist are skipped; a submitted job is polled, not paid twice)">Retry · ${money(r.est_cost)}</button><button data-x="reject">Reject</button>`;
       if (r.status === 'done') { const L = r.linked; return `<span class="qdone">✓ ${money(r.actual_cost_usd)} spent${L ? ` · ${L.nodes?.length ? `node${L.nodes.length > 1 ? 's' : ''} ${esc(L.nodes.join(', '))}` : ''}${L.proposals?.length ? ` proposed ${esc(L.proposals.join(', '))}` : ''} in ${esc(L.id)} ${esc(L.tree || '')}: keep or pick` : ''}</span>${L ? '<button data-x="stage" title="keep or pick them in the stage">Open in stage</button>' : ''}`; }
       if (r.status === 'rejected') return `<button data-x="redraft">Back to draft</button>`;
+      if (r.status === 'withdrawn') return `<span class="qwhy" title="${esc(r.why || '')}">withdrawn by ${author(r) === 'director' ? 'you' : 'the agent'}${r.superseded_by?.length ? ' · superseded by ' + esc(r.superseded_by.join(', ')) : ''}${r.why ? ': ' + esc(String(r.why).slice(0, 120)) : ''}</span><button data-x="redraft">Back to draft</button>`;
       return '';
     };
     const render = () => {
@@ -83,7 +90,7 @@ export default {
       const selUsd = items.filter(r => sel.has(r.id)).reduce((s, r) => s + (Number(r.est_cost) || 0), 0);
       $list.innerHTML = `<div class="bar">spent $${spent.toFixed(2)} + approved/queued $${pending.toFixed(2)} (drafts $${drafts.toFixed(2)}) of cap $${cap} <span class="dim">(all sources: Costs)</span>
         <div class="meter"><i style="width:${pct}%"></i></div>
-        ${['', 'draft', 'approved', 'queued', 'running', 'done', 'failed', 'rejected'].map(s => `<a data-f="${s}" class="${s === filter ? 'picked' : ''}">${s || 'all'}${s ? ' ' + (by[s] || 0) : ' ' + items.length}</a>`).join(' · ')}
+        ${['', 'draft', 'approved', 'queued', 'running', 'done', 'failed', 'rejected', 'withdrawn'].map(s => `<a data-f="${s}" class="${s === filter ? 'picked' : ''}">${s || 'all'}${s ? ' ' + (by[s] || 0) : ' ' + items.length}</a>`).join(' · ')}
         · <a data-q="new" class="qnew">+ New request</a></div>
         <div class="qacts"><button data-q="runall" class="pri"${approved.length ? '' : ' disabled'} title="run every approved request (up to 2 at once; the cap is checked for each)">Run all approved (${approved.length}) · ${money(apUsd)}</button>
         ${sel.size ? `<span class="qselt">${sel.size} selected · ${money(selUsd)}</span><button data-q="approvesel" class="pri">Approve selected</button><button data-q="rejectsel">Reject selected</button>` : '<span class="dim">tick drafts to approve or reject several at once</span>'}
@@ -91,10 +98,10 @@ export default {
         ${items.length ? `<table class="tbl"><tr><th></th><th>status</th><th>kind</th><th>target</th><th>prompt</th><th>$ est</th><th>refs → outputs</th><th>at</th><th>actions</th></tr>
         ${items.filter(r => !filter || r.status === filter).slice().reverse().map(r => { const t = timeOf(r.target); return `<tr data-id="${esc(r.id)}" data-sel="request:${esc(r.id)}" class="q-${esc(r.status)}${(r.warnings || []).length ? ' warn' : ''}">
           <td>${r.status === 'draft' ? `<input type="checkbox" data-x="pick"${sel.has(r.id) ? ' checked' : ''} title="select">` : ''}</td>
-          <td><span class="chip ${CLS[r.status] || ''}">${esc(r.status)}</span></td><td>${esc(r.kind)}${r.recipe ? ' <span class="qrec" title="built from the photoreal recipe (its blocks are stored with the request)">recipe</span>' : ''}<div class="dim">${esc(genOf(r))}</div></td>
+          <td><span class="chip ${CLS[r.status] || ''}"${r.status === 'withdrawn' ? ' title="its author took it back (not a rejection by the director)"' : ''}>${esc(r.status)}</span></td><td>${esc(r.kind)}${r.recipe ? ' <span class="qrec" title="built from the photoreal recipe (its blocks are stored with the request)">recipe</span>' : ''}<div class="dim">${esc(genOf(r))}</div></td>
           <td>${t != null ? `<a data-t="${Number(t) || 0}">${esc(r.target)} ${fmt(t)}</a>` : esc(r.target || '')}</td>
           <td><textarea data-x="prompt" rows="3" ${['draft', 'approved'].includes(r.status) ? '' : 'readonly'}>${esc(r.prompt)}</textarea>${(r.warnings || []).length ? `<div class="chreqw">${r.warnings.map(w => `<span>⚠ ${esc(w)}</span>`).join('')}</div>` : ''}</td>
-          <td><input data-x="cost" type="number" step="0.01" min="0" value="${Number(r.est_cost) || 0}" style="width:4.5em"${['draft', 'approved'].includes(r.status) ? '' : ' disabled'}></td>
+          <td><input data-x="cost" type="number" step="0.01" min="0" value="${Number(r.est_cost) || 0}" style="width:4.5em"${['draft', 'approved'].includes(r.status) ? '' : ' disabled'}>${r.takes > 1 ? `<div class="dim qtakes" title="the estimate covers every take">${r.takes} takes · ${money((Number(r.est_cost) || 0) / r.takes)} each</div>` : ''}</td>
           <td class="refs">${thumbs(r.refs || [])}${(r.outputs || []).length ? `<span class="qarrow">→</span>${thumbs(r.outputs, 'out')}` : ''}</td>
           <td class="dim">${esc((r.at || '').replace('T', ' ').slice(5, 16))}</td>
           <td class="qbtns">${actions(r)}</td></tr>`; }).join('')}</table>` : '<p class="dim">no requests yet</p>'}`;
@@ -103,15 +110,16 @@ export default {
     const addRequest = async () => {
       const e = est(), refs = refsOf();
       if (!F.prompt.trim()) return toast('write a prompt (or apply the photoreal recipe)');
-      const extra = { tool: e?.tool, est_why: e?.why };
+      const extra = { tool: e?.tool, est_why: e?.why, ...(F.takes > 1 ? { takes: F.takes } : {}) };
       if (F.recipe && F.built) {
-        extra.recipe = { id: F.built.recipe, version: F.built.version, model: F.built.model, framing: F.built.framing, identity: !!F.identity, fields: Object.fromEntries(Object.entries(F.fields).filter(([, v]) => v)), blocks: F.built.blocks.map(({ id, label, text }) => ({ id, label, text })), ...(F.built.negative_prompt ? { negative_prompt: F.built.negative_prompt } : {}) };
+        const who = subject();
+        extra.recipe = { id: F.built.recipe, v: 2, version: F.built.version, model: F.built.model, framing: F.built.framing, ...(who.name ? { name: who.name } : {}), identity: !!F.identity, ...(who.character ? { character: true } : {}), ...(who.constants?.length ? { constants: who.constants } : {}), ...(F.takes > 1 ? { takes: F.takes } : {}), fields: Object.fromEntries(Object.entries(F.fields).filter(([, v]) => v)), blocks: F.built.blocks.map(({ id, label, text, edited }) => ({ id, label, text, ...(edited ? { edited: true } : {}) })), ...(F.built.negative_prompt ? { negative_prompt: F.built.negative_prompt } : {}) };
         if (F.prompt !== F.built.prompt) extra.recipe.prompt_edited = true;
         if (F.built.warnings.length) extra.warnings = F.built.warnings;
       }
       const r = await store.addRequest({ kind: F.kind.trim() || 'generate', target: F.target.trim() || null, prompt: F.prompt, refs, est_cost: Number(e?.usd || 0), extra });
       toast(`draft request ${r.id} (${r.kind}) · est $${Number(r.est_cost).toFixed(2)} · approve it, then Run it here (or let the agent run it)`);
-      Object.assign(F, { open: false, prompt: '', recipe: false, fields: {}, blocks: {}, built: null }); renderForm();
+      Object.assign(F, { open: false, prompt: '', recipe: false, fields: {}, blocks: {}, built: null, takes: 1 }); renderForm();
     };
     // Run (one request) / Run all approved: the local server's runner (lib/run.mjs); progress comes back through its SSE
     const run = async (ids) => {
@@ -140,6 +148,7 @@ export default {
       if (x === 'approve') return store.setRequest(id, { status: 'approved' });
       if (x === 'unapprove' || x === 'redraft') return store.setRequest(id, { status: 'draft' });
       if (x === 'reject') return store.setRequest(id, { status: 'rejected', ...(r.status !== 'draft' ? { why: 'rejected by the director in Review > Queue' } : {}) });
+      if (x === 'withdraw') return store.setRequest(id, { status: 'withdrawn', why: 'withdrawn by the director' });
       if (x === 'run') return run([id]);
       if (x === 'copy') { try { await navigator.clipboard.writeText(r.prompt || ''); toast('prompt copied: paste it in the other app'); } catch (er) { toast('copy failed: the prompt is in ' + (r.handoff?.pack || 'the pack') + '/prompt.txt'); } return; }
       if (x === 'stage' && r.linked) { const L = r.linked; await window.WB.stages?.open(L.type === 'character' ? 'characters' : 'scenery'); (L.type === 'character' ? window.WB.characters : window.WB.scenery)?.open?.(L.id); return; }
@@ -149,7 +158,7 @@ export default {
     $form.addEventListener('input', (e) => {
       const t = e.target, f = t.dataset.f;
       if (f === 'prompt') { F.prompt = t.value; return; }
-      if (f && f !== 'model' && f !== 'framing' && f !== 'identity') { F[f] = f === 'seconds' ? Number(t.value) || 5 : t.value; if (f === 'refs' || f === 'seconds' || f === 'target') { if (F.recipe) { rebuild(); syncBlocks(); } } return; }
+      if (f && f !== 'model' && f !== 'framing' && f !== 'identity') { F[f] = f === 'seconds' ? Number(t.value) || 5 : f === 'takes' ? Math.min(8, Math.max(1, Math.round(Number(t.value)) || 1)) : t.value; if (f === 'takes' && !F.recipe) { syncPrompt(); return; } if (f === 'refs' || f === 'seconds' || f === 'target' || f === 'takes') { if (F.recipe) { rebuild(); syncBlocks(); } } return; }
       if (t.dataset.fld) { F.fields[t.dataset.fld] = t.value; rebuild(); syncBlocks(); return; }
       if (t.dataset.blk) { F.blocks[t.dataset.blk] = t.value; rebuild(); syncBlocks(); }
     });
