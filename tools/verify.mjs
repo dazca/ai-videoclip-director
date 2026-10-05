@@ -25,6 +25,8 @@
 // tools/verify-video.mjs) D3b video generation on a mock fal (the video form, a failed take retried, takes, motion control).
 // tools/verify-import.mjs) D8 import of existing images and video (File › Import media, a falgen folder, "Use as…"), and (v19,
 // tools/verify-timemode.mjs) the stages' Time view (rows on the timeline's warped axis, ±2 px).
+// tools/verify-video.mjs) D3b video generation on a mock fal (the video form, a failed take retried, takes, motion control), and (v20,
+// tools/verify-batches.mjs) D4 job books, waves and pilot gates (Plan waves, batches with review gates, take-ratio stats, history).
 //   node tools/verify.mjs [--project <id>] [outDir]     (default project: the server's default; npm run verify = demo)
 // Copies data/<project> (and data/_template) into a scratch data folder under the OS temp dir and starts serve.mjs
 // on free ports with WORKBENCH_DATA = that folder, so nothing under data/ is written and several runs (or a running
@@ -1240,6 +1242,13 @@ catch (e) { v18.checks.aborted = blockFailed('v18', e); v18.pass = false; }
 const v19 = report.v19 = { checks: {} };
 try { const { verifyTimeMode } = await import('./verify-timemode.mjs'); Object.assign(v19, await verifyTimeMode({ browser, OUT })); }
 catch (e) { v19.checks.aborted = blockFailed('v19', e); v19.pass = false; }
+// ---------------------------------------------------------------- v20: D4 job books, waves and pilot gates on a MOCK fal: "Plan waves…" (a pilot,
+// then 4, then the rest), batches as collapsible groups with their gate, "Approve batch · $X" with the cap impact (agents 403),
+// a locked batch never runs, Run batch within its cap, a pick + a rejection then "Mark reviewed" unlocks the next wave, the
+// take-ratio stats and the re-estimate, "Import job books" as history: tools/verify-batches.mjs (also runnable alone). Screenshots v20_*.png.
+const v20 = report.v20 = { checks: {} };
+try { const { verifyBatches } = await import('./verify-batches.mjs'); Object.assign(v20, await verifyBatches({ browser, OUT })); }
+catch (e) { v20.checks.aborted = blockFailed('v20', e); v20.pass = false; }
 // write path: approve/needs-changes + a note, on another scratch copy (_verify, its own server), then a stale-rev POST must get 409
 try {
   const TMP = path.join(DATA, '_verify');
@@ -1270,7 +1279,7 @@ fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 1))
 const w = report.writes || {};
 const writesOk = w.noteSaved && w.noteShownInColumn && w.staleStatus === 409 && w.newState !== undefined && w.newState !== w.stateBefore && w.approvalsRev > w.approvalsRevBefore;
 console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· v7 (characters stage):', report.v7?.pass ? 'all PASS' : 'FAIL', '· v8 (scenery stage):', report.v8?.pass ? 'all PASS' : 'FAIL', '· v9 (storyboard stage):', report.v9?.pass ? 'all PASS' : 'FAIL', '· v10 (dogfood frictions):', report.v10?.pass ? 'all PASS' : 'FAIL', '· v11 (notes everywhere):', report.v11?.pass ? 'all PASS' : 'FAIL', '· v12 (request runner):', report.v12?.pass ? 'all PASS' : 'FAIL', '· v13 (rounds, revisions, compare):', report.v13?.pass ? 'all PASS' : 'FAIL', '· v14 (proposals):', report.v14?.pass ? 'all PASS' : 'FAIL', '· v15 (final approvals):', report.v15?.pass ? 'all PASS' : 'FAIL', '· v16 (take selection):', report.v16?.pass ? 'all PASS' : 'FAIL', '· v17 (import media):', report.v17?.pass ? 'all PASS' : 'FAIL', '· v18 (video runner):', report.v18?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
-process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && report.v7?.pass && report.v8?.pass && report.v9?.pass && report.v10?.pass && report.v11?.pass && report.v12?.pass && report.v13?.pass && report.v14?.pass && report.v15?.pass && report.v16?.pass && report.v17?.pass && report.v18?.pass && report.v19?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
+process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && report.v7?.pass && report.v8?.pass && report.v9?.pass && report.v10?.pass && report.v11?.pass && report.v12?.pass && report.v13?.pass && report.v14?.pass && report.v15?.pass && report.v16?.pass && report.v17?.pass && report.v18?.pass && report.v19?.pass && report.v20?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
 await browser.close();
 for (const c of procs) c.kill();
 await new Promise(r => setTimeout(r, 300));   // let the servers release the scratch folder; cleanup() removes it on exit

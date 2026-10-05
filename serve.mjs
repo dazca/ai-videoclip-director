@@ -210,8 +210,12 @@ function stampPage(name, data, cur, fromPage = true) {
       const pu = fromPage ? r.private_upload_ok === true : c?.private_upload_ok === true;   // without the page's Origin: unchanged
       if (pu !== (c?.private_upload_ok === true)) log.push({ at, by: 'director', via: 'page', private_upload: pu });
       const out = { ...r, log }; if (pu) out.private_upload_ok = true; else delete out.private_upload_ok;
+      // a history request (imported from a job book) is the server's: a page save cannot make one or change it
+      if (c?.history) return { ...c }; delete out.history;
       return out;
     });
+    // batches (D4) are the server's: written only by waves_plan / batch_act, a page save keeps the server's copy
+    if (Array.isArray(cur.batches)) data.batches = cur.batches; else delete data.batches;
   }
   if (name === 'approvals.json' && data.items && typeof data.items === 'object') {
     for (const [k, v] of Object.entries(data.items)) {
@@ -392,6 +396,8 @@ http.createServer(async (req, res) => {
         if (name === 'take_act') body.via = fromPage ? 'page' : 'agent';
         // D8: uploading files and "use as" (a node, a shot's take / start frame) are the director's (page only); an import's provenance
         if (name === 'media_upload' || name === 'media_use' || name === 'media_import') body.via = fromPage ? 'page' : 'agent';
+        // D4: approving / reviewing a batch and importing the job books are the director's (page only); a plan's provenance
+        if (name === 'batch_act' || name === 'jobbooks_import' || name === 'waves_plan') body.via = fromPage ? 'page' : 'agent';
         if (!fromPage) S.lockGate(project, name, body);   // a locked project refuses every agent write, proposals included
         delete body.import_ok;   // only a local script calling lib/store.mjs directly may import approved looks
         return json(res, 200, await S.ops[name](project, body));

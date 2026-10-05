@@ -129,7 +129,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve', 'character_get', 'character_iteration_add', 'character_note_add', 'look_create',
     'asset_get', 'asset_iteration_add', 'asset_note_add', 'variant_create',
     'storyboard_get', 'shots_update', 'shot_note_add', 'shot_note_resolve', 'gaps_get', 'notes_get', 'notes_add', 'notes_status', 'request_run', 'generators_get',
-    'round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get', 'proposals_add', 'proposals_get', 'final_get', 'takes_get', 'take_propose', 'media_scan', 'media_import'];
+    'round_get', 'round_absorb', 'round_reply', 'round_finish', 'revisions_get', 'proposals_add', 'proposals_get', 'final_get', 'takes_get', 'take_propose', 'media_scan', 'media_import', 'batches_get', 'waves_propose'];
   check('tools/list has every tool', EXPECT.every(t => tools.includes(t)), { count: tools.length, missing: EXPECT.filter(t => !tools.includes(t)) });
   const schemaOk = (await mcp.listTools()).tools.every(t => t.description?.length > 40 && t.inputSchema?.type === 'object');
   check('every tool has a description and a JSON schema', schemaOk);
@@ -1526,6 +1526,58 @@ for (let i = 0; i < ${K}; i++) { S.ops.cost_record('${RVP}', { usd: 0.01, via: '
   const mf = JSON.parse(fs.readFileSync(path.join(DD, 'media.json'), 'utf8')).items.find(m => m.path === 'media/clip/fps_probe.mp4');
   check('media_add records fps for a video and the request it is an output of (request is in the MCP schema)',
     ma.added === true && mf?.fps > 0 && mf.request === 'rq-fps' && ma.media?.fps === mf.fps, { err: ma.error, fps: mf?.fps, request: mf?.request });
+}
+// 22. (D4) job books, waves and pilot gates: waves_propose (drafts only), batches_get, the page-only batch approval and review,
+// a locked batch never runs, the runner runs a batch within its cap (mock fal), the job books as history (page only)
+{
+  const P4 = 'mcp-d4', DD = path.join(DATA, P4);
+  fs.cpSync(ORIG, DD, { recursive: true, filter: (f) => !f.includes(`${path.sep}.snapshots`) });
+  const { batchFixture } = await import('../tools/verify-batches.mjs');
+  batchFixture(DD, path.join(MB, 'roots', 'ff'));   // the fake falgen tree of section 21 (+ its job book)
+  const pj = JSON.parse(fs.readFileSync(path.join(DD, 'project.json'), 'utf8')); pj.falgen = 'roots/ff/project/gen'; fs.writeFileSync(path.join(DD, 'project.json'), JSON.stringify(pj));
+  const RJ = () => JSON.parse(fs.readFileSync(path.join(DD, 'requests.json'), 'utf8'));
+  const tools = (await mcp.listTools()).tools.map(t => t.name);
+  const n0 = RJ().items.length;
+  const dry = await call(mcp, 'waves_propose', { project: P4, pilot: ['w03', 'w07'], takes: 2, dry_run: true });
+  check('D4: batches_get and waves_propose are tools; approving / reviewing a batch (batch_act) and the job-book import are not (page only); waves_propose dry_run: the pilot w03 + w07, then 4, then 4 ($0.48 / $0.96 / $0.96), nothing written',
+    tools.includes('batches_get') && tools.includes('waves_propose') && !tools.includes('batch_act') && !tools.includes('jobbooks_import') && dry.dry_run === true && dry.waves?.map(w => w.shots.length).join() === '2,4,4'
+    && dry.waves[0].shots.map(s => s.shot).join() === 'w03,w07' && dry.waves.map(w => w.est_usd).join() === '0.48,0.96,0.96' && RJ().items.length === n0 && !RJ().batches, { waves: dry.waves?.map(w => [w.name, w.est_usd]), err: dry.error });
+  const wp = await call(mcp, 'waves_propose', { project: P4, pilot: ['w03', 'w07'], takes: 2 });
+  const bg = await call(mcp, 'batches_get', { project: P4 }), [b1, b2] = bg.batches || [];
+  const D0 = RJ(), mine = D0.items.filter(r => wp.requests_created?.includes(r.id));
+  check('waves_propose: 3 draft batches gated wave after wave (b01 ready, b02 / b03 locked) and 10 draft requests written by the agent (log via agent); batches_get shows totals, verdicts and the rules',
+    wp.batches?.join() === 'b01,b02,b03' && mine.length === 10 && mine.every(r => r.status === 'draft' && r.log[0].via === 'agent') && D0.batches.every(b => b.status === 'draft' && b.via === 'agent')
+    && b1?.state === 'ready' && b2?.state === 'locked' && b2.gate.after === 'b01' && b1.totals.est_usd === 0.48 && b1.verdicts.length === 2 && /never approve/.test(bg.rules || ''), { wp: wp.batches, states: bg.batches?.map(b => b.state), err: wp.error });
+  // even with agent_approvals (this suite's config) the agent cannot approve or review a batch; a request approved alone does not run
+  const a1 = await post(`/api/op/batch_act?project=${P4}`, { act: 'approve', id: 'b01' }), a2 = await post(`/api/op/batch_act?project=${P4}`, { act: 'approve', id: 'b01', via: 'page' });
+  const ru = await call(mcp, 'request_update', { project: P4, id: b1.request_ids[0], status: 'approved', director_approved: true });
+  const rd = await call(mcp, 'request_run', { project: P4, batch: 'b01', dry_run: true });
+  check('the agent cannot approve a batch (batch_act 403, also claiming via "page"); a request of the batch approved on its own (agent_approvals) is still refused by the runner: the batch is not approved',
+    a1.status === 403 && a2.status === 403 && ru.request?.status === 'approved' && rd.runnable === 0 && rd.refused.length === 2 && rd.refused.every(x => /not approved/.test(x.why)), { a: [a1.status, a2.status], refused: rd.refused });
+  // the director approves b01 (page), the runner runs it as a batch within its cap
+  const pa = await post(`/api/op/batch_act?project=${P4}`, { act: 'approve', id: 'b01' }, { origin: URL_ });
+  const run = await call(mcp, 'request_run', { project: P4, batch: 'b01', wait: true });
+  const lk = await call(mcp, 'request_run', { project: P4, batch: 'b02', dry_run: true });
+  const bg2 = await call(mcp, 'batches_get', { project: P4, id: 'b01' });
+  check('the page approves b01 (both requests, max_usd $0.48); request_run {batch: b01, wait} runs both on the mock fal (done, $0.48); b01 is in review (2 verdicts pending); b02 is locked and refused ("locked until …")',
+    pa.status === 200 && pa.body?.max_usd === 0.48 && run.results?.length === 2 && run.results.every(x => x.status === 'done') && bg2.batches?.[0]?.state === 'review' && bg2.batches[0].verdicts.every(v => v.verdict === 'pending')
+    && lk.runnable === 0 && lk.refused.every(x => /locked until the director marks/.test(x.why)), { pa: pa.body, run: run.results?.map(x => x.status), lk: lk.refused?.[0]?.why, err: run.error });
+  const rv0 = await post(`/api/op/batch_act?project=${P4}`, { act: 'review', id: 'b01' }, { origin: URL_ });
+  for (const id of b1.request_ids) await post(`/api/op/batch_act?project=${P4}`, { act: 'verdict', id: 'b01', request: id, verdict: 'rejected' }, { origin: URL_ });
+  const rv = await post(`/api/op/batch_act?project=${P4}`, { act: 'review', id: 'b01' }, { origin: URL_ });
+  const bg3 = await call(mcp, 'batches_get', { project: P4 });
+  check('Mark reviewed needs every take decided (409 first); with the takes rejected, b01 is reviewed and b02 unlocks (ready); the agent reads the take ratio (4 takes, 0 used) in batches_get',
+    rv0.status === 409 && rv.status === 200 && rv.body?.unlocked?.join() === 'b02' && bg3.batches.find(b => b.id === 'b01').state === 'done' && bg3.batches.find(b => b.id === 'b02').state === 'ready' && bg3.observed.takes === 4 && bg3.observed.used_shots === 0,
+    { rv0: rv0.status, rv: rv.body, observed: bg3.observed });
+  // the job books: page only; history never runs and adds no cost
+  const jb = await post(`/api/op/jobbooks_import?project=${P4}`, {}), jd = await post(`/api/op/jobbooks_import?project=${P4}`, { dry_run: true });
+  const costs0 = fs.readFileSync(path.join(DD, 'costs.json'), 'utf8');
+  const jp = await post(`/api/op/jobbooks_import?project=${P4}`, {}, { origin: URL_ }), again = await post(`/api/op/jobbooks_import?project=${P4}`, { dry_run: true });
+  const hr = await call(mcp, 'request_run', { project: P4, ids: ['A1'] }), hu = await call(mcp, 'request_update', { project: P4, id: 'A1', prompt: 'x' });
+  check('job books: the agent cannot import (403) but may dry-run it (A1, G01; N9 never ran); the page imports them as done history with their job book, not again on a second run; history never runs and cannot be edited; costs.json unchanged',
+    jb.status === 403 && jd.body?.imported?.map(x => x.id).join() === 'A1,G01' && jp.status === 200 && jp.body.imported.length === 2 && again.body?.imported?.length === 0 && again.body.skipped.some(s => /imported already/.test(s.why))
+    && RJ().items.filter(r => r.history).every(r => r.status === 'done' && r.history.book === 'jobs_test.json') && hr.started?.length === 0 && /history/.test(hr.refused?.[0]?.why || '') && /409|done/.test(hu.error || '')
+    && fs.readFileSync(path.join(DD, 'costs.json'), 'utf8') === costs0, { jb: jb.status, jd: jd.body?.imported, jp: jp.body?.skipped, hr: hr.refused, hu: hu.error });
 }
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {

@@ -191,8 +191,13 @@ export const store = {
   notesOn(q) { return N.notesOn(this.notes, q); },
   // ---- generation requests (the page never calls a paid API itself: Run asks the local server's runner, lib/run.mjs,
   // which runs only requests the director approved; an agent's request_run uses the same runner)
-  async runRequests(ids, { dry_run = false, all = false, retake = false } = {}) {
-    const r = await postJSON('/api/op/request_run', { ...(all ? { all: true } : { ids }), dry_run, ...(retake ? { retake: true } : {}), by: 'page' });
+  async runRequests(ids, { dry_run = false, all = false, retake = false, batch = null } = {}) {
+    const r = await postJSON('/api/op/request_run', { ...(batch ? { batch } : all ? { all: true } : { ids }), dry_run, ...(retake ? { retake: true } : {}), by: 'page' });
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j;
+  },
+  // any server op (the page's own acts: batch_act, waves_plan, jobbooks_import, ...): the JSON answer, or throws its error
+  async op(name, body = {}) {
+    const r = await postJSON('/api/op/' + name, body);
     const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j;
   },
   async generators() { const r = await postJSON('/api/op/generators_get', {}); return r.ok ? r.json() : null; },

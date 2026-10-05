@@ -19,12 +19,22 @@
 // the start frame and the end frame picked from the approved nodes and the registered images (the end frame: an edit of
 // the start frame, or none), and for motion control a reference video from the registered clips (its length sets the
 // seconds). A done request with a failed take offers "Retry take N · $x" (D3c: only that take runs again).
+// Batches (D4, js/batches.js): requests.json batches[] (waves) show as collapsible groups with their gate (locked / ready /
+// running / review / done), totals and the take-ratio stats; "Approve batch · $X" approves the whole batch after a confirm
+// with the total and the cap impact (batch_act, page only), "Run batch" runs it within its cap, a done request's takes are
+// picked (D6) or rejected / kept here, and "Mark reviewed" unlocks the next wave. "Plan waves…" (tabs/waves.js) proposes
+// waves from the storyboard gaps; "Import job books" brings the first film's falgen jobs_*.json in as history (done, never
+// run again, no new cost).
 import { store, toast, isPrivatePath } from '../js/store.js';
 import { fmt } from '../js/timeline.js';
 import { esc, mediaAttr } from '../core/esc.js';
 import { buildRecipe, constantsOf, FIELDS, MODELS, FRAMINGS } from '../js/recipe.js';
 import { PRICES, estimateWith, genKindOf } from '../js/prices.js';
 import * as VID from '../js/video.js';
+import * as B from '../js/batches.js';
+import * as SB from '../js/storyboard.js';
+import { openWaves } from './waves.js';
+import { ui } from '../core/palette.js';
 const CLS = { draft: '', approved: 's-approved', queued: 's-review', running: 's-review', done: 's-locked', failed: 's-changes', rejected: 's-changes', withdrawn: 's-archived' };
 // who wrote a request (lib/ops/requests.mjs requestAuthor): the page's own drafts are the director's; withdrawn = its author took it back
 const author = (r) => { const v = r.log?.[0]?.via; return v === 'page' ? 'director' : v === 'agent' ? 'agent' : r.by === 'director' ? 'director' : 'agent'; };
@@ -130,24 +140,87 @@ export default {
       const approved = items.filter(r => r.status === 'approved'), apUsd = approved.reduce((s, r) => s + (Number(r.est_cost) || 0), 0);
       for (const id of [...sel]) if (!items.some(r => r.id === id && r.status === 'draft')) sel.delete(id);
       const selUsd = items.filter(r => sel.has(r.id)).reduce((s, r) => s + (Number(r.est_cost) || 0), 0);
+      // D4: batches (waves) as collapsible groups with their gate, the history imported from the job books, then the rest
+      const doc = store.requests || {}, batches = B.batchesOf(doc), shotsNow = SB.boardShots(store.board);
+      const inBatch = new Set(batches.flatMap(b => b.request_ids || [])), hist = items.filter(B.isHistory), loose = items.filter(r => !inBatch.has(r.id) && !B.isHistory(r));
+      const shown = (list) => list.filter(r => !filter || r.status === filter);
       $list.innerHTML = `<div class="bar">spent $${spent.toFixed(2)} + approved/queued $${pending.toFixed(2)} (drafts $${drafts.toFixed(2)}) of cap $${cap} <span class="dim">(all sources: Costs)</span>
         <div class="meter"><i style="width:${pct}%"></i></div>
         ${['', 'draft', 'approved', 'queued', 'running', 'done', 'failed', 'rejected', 'withdrawn'].map(s => `<a data-f="${s}" class="${s === filter ? 'picked' : ''}">${s || 'all'}${s ? ' ' + (by[s] || 0) : ' ' + items.length}</a>`).join(' · ')}
-        · <a data-q="new" class="qnew">+ New request</a></div>
-        <div class="qacts"><button data-q="runall" class="pri"${approved.length ? '' : ' disabled'} title="run every approved request (up to 2 at once; the cap is checked for each)">Run all approved (${approved.length}) · ${money(apUsd)}</button>
+        · <a data-q="new" class="qnew">+ New request</a> · <a data-q="waves" class="qnew" title="waves of 2 → 4 → 8 → rest shots from the storyboard gaps, a pilot first, each gated on the review of the one before">Plan waves…</a> · <a data-q="jobbooks" title="the first film's falgen job books (jobs_*.json) as history: done requests linked to their outputs, never run again, no new cost">Import job books</a></div>
+        <div class="qacts"><button data-q="runall" class="pri"${approved.length ? '' : ' disabled'} title="run every approved request, batch by batch (up to 2 at once; the cap is checked for each; a locked batch never runs)">Run all approved (${approved.length}) · ${money(apUsd)}</button>
         ${sel.size ? `<span class="qselt">${sel.size} selected · ${money(selUsd)}</span><button data-q="approvesel" class="pri">Approve selected</button><button data-q="rejectsel">Reject selected</button>` : '<span class="dim">tick drafts to approve or reject several at once</span>'}
         <span class="dim">· nothing runs or is paid until you approve it; Run uses the generator in Settings › Generator · right-click a shot / clip / cast chip / card to add a request</span></div>
-        ${items.length ? `<table class="tbl"><tr><th></th><th>status</th><th>kind</th><th>target</th><th>prompt</th><th>$ est</th><th>refs → outputs</th><th>at</th><th>actions</th></tr>
-        ${items.filter(r => !filter || r.status === filter).slice().reverse().map(r => { const t = timeOf(r.target); return `<tr data-id="${esc(r.id)}" data-sel="request:${esc(r.id)}" class="q-${esc(r.status)}${(r.warnings || []).length ? ' warn' : ''}">
-          <td>${r.status === 'draft' ? `<input type="checkbox" data-x="pick"${sel.has(r.id) ? ' checked' : ''} title="select">` : ''}</td>
-          <td><span class="chip ${CLS[r.status] || ''}"${r.status === 'withdrawn' ? ' title="its author took it back (not a rejection by the director)"' : ''}>${esc(r.status)}</span></td><td>${esc(r.kind)}${r.recipe ? ' <span class="qrec" title="built from the photoreal recipe (its blocks are stored with the request)">recipe</span>' : ''}<div class="dim">${esc(genOf(r))}</div>${r.video ? `<div class="dim qvid" title="${esc(PRICES[r.video.model]?.name || r.video.model)}">${esc(r.video.model)} · ${esc(r.video.seconds)} s${r.video.end ? ' · start→end' : ''}${r.video.ref_video ? ' · ref video' : ''}</div>` : ''}</td>
+        ${batches.length ? wavesHead(doc, shotsNow) + batches.map(b => batchHtml(b, doc, shotsNow, shown)).join('') : ''}
+        ${hist.length ? histHtml(hist, shotsNow, shown) : ''}
+        ${batches.length || hist.length ? `<div class="qgrp"><b>Not in a batch</b> <span class="dim">${loose.length} request${loose.length === 1 ? '' : 's'}</span></div>` : ''}
+        ${loose.length ? table(shown(loose).slice().reverse()) : items.length ? '' : '<p class="dim">no requests yet</p>'}`;
+    };
+    // a list of requests as the queue table
+    const table = (list, b = null) => `<table class="tbl"><tr><th></th><th>status</th><th>kind</th><th>target</th><th>prompt</th><th>$ est</th><th>refs → outputs</th><th>at</th><th>actions</th></tr>
+        ${list.map(r => { const t = timeOf(r.target); return `<tr data-id="${esc(r.id)}" data-sel="request:${esc(r.id)}" class="q-${esc(r.status)}${(r.warnings || []).length ? ' warn' : ''}">
+          <td>${r.status === 'draft' && !b ? `<input type="checkbox" data-x="pick"${sel.has(r.id) ? ' checked' : ''} title="select">` : ''}</td>
+          <td><span class="chip ${CLS[r.status] || ''}"${r.status === 'withdrawn' ? ' title="its author took it back (not a rejection by the director)"' : ''}>${esc(r.status)}</span>${B.isHistory(r) ? '<div class="dim qhtag" title="imported from a job book: never run again">history</div>' : ''}</td><td>${esc(r.kind)}${r.recipe ? ' <span class="qrec" title="built from the photoreal recipe (its blocks are stored with the request)">recipe</span>' : ''}<div class="dim">${esc(B.isHistory(r) ? r.history.book : genOf(r))}</div>${r.video ? `<div class="dim qvid" title="${esc(PRICES[r.video.model]?.name || r.video.model)}">${esc(r.video.model)} · ${esc(r.video.seconds)} s${r.video.end ? ' · start→end' : ''}${r.video.ref_video ? ' · ref video' : ''}</div>` : ''}</td>
           <td>${t != null ? `<a data-t="${Number(t) || 0}">${esc(r.target)} ${fmt(t)}</a>` : esc(r.target || '')}</td>
           <td><textarea data-x="prompt" rows="3" ${['draft', 'approved'].includes(r.status) ? '' : 'readonly'}>${esc(r.prompt)}</textarea>${(r.warnings || []).length ? `<div class="chreqw">${r.warnings.map(w => `<span>⚠ ${esc(w)}</span>`).join('')}</div>` : ''}</td>
           <td><input data-x="cost" type="number" step="0.01" min="0" value="${Number(r.est_cost) || 0}" style="width:4.5em"${['draft', 'approved'].includes(r.status) ? '' : ' disabled'}>${r.takes > 1 ? `<div class="dim qtakes" title="the estimate covers every take">${r.takes} takes · ${money((Number(r.est_cost) || 0) / r.takes)} each</div>` : ''}</td>
           <td class="refs">${thumbs(r.refs || [], '', refTags(r))}${(r.outputs || []).length ? `<span class="qarrow">→</span>${thumbs(r.outputs, 'out')}` : ''}${privBox(r)}</td>
           <td class="dim">${esc((r.at || '').replace('T', ' ').slice(5, 16))}</td>
-          <td class="qbtns">${actions(r)}</td></tr>`; }).join('')}</table>` : '<p class="dim">no requests yet</p>'}`;
+          <td class="qbtns">${b ? batchActions(r, b) : B.isHistory(r) ? histActions(r) : actions(r)}</td></tr>`; }).join('')}</table>`;
+    // ---------------------------------------------------------------- batches (D4)
+    const open = new Map();   // batch id -> expanded? (default: open unless done)
+    let confirming = null;    // the batch whose "Approve batch" confirm is showing
+    const isOpen = (id, state) => open.has(id) ? open.get(id) : state !== 'done';
+    const pctOf = (x, c) => (c ? `${Math.round(x / c * 100)}%` : 'no cap');
+    const statsLine = (st, label = 'take ratio') => `<div class="qstats" title="takes made ÷ shots that use one of them; what they cost ÷ the seconds of them in the film">${esc(label)}: <b>${st.takes}</b> take${st.takes === 1 ? '' : 's'} for ${st.shots} shot${st.shots === 1 ? '' : 's'} · <b>${st.used_shots}</b> used · <b>${st.takes_per_used_shot ?? '–'}</b> takes per used shot · ${money(st.spent_usd)} spent · ${st.used_s} s used · <b>${st.usd_per_used_s != null ? '$' + st.usd_per_used_s.toFixed(3) : '–'}</b> per used second</div>`;
+    const wavesHead = (doc, shots) => {
+      const ob = B.observed(doc, shots), rest = B.reestimate(doc, shots);
+      return `<div class="qwaveshead"><b>Waves</b> <span class="dim">approve a whole batch; the next one unlocks when you mark the one before reviewed (its takes picked or rejected)</span>
+        ${ob.from.length ? statsLine(ob, `measured by ${ob.from.length} wave${ob.from.length > 1 ? 's' : ''}`) : '<div class="dim qstats">no wave reviewed yet: the take ratio is measured after the pilot</div>'}
+        ${rest.length ? `<div class="qrest">${rest.map(x => `<span title="list price ${money(x.list_usd)}; observed = ${x.seconds} s x the cost per used second measured">${esc(x.name)}: list ${money(x.list_usd)}${x.observed_usd != null ? ` → <b>observed ${money(x.observed_usd)}</b>` : ''}</span>`).join(' · ')}</div>` : ''}</div>`;
     };
+    const batchHtml = (b, doc, shots, shown) => {
+      const g = B.gateState(b, doc), T = B.batchTotals(b, doc), R = B.requestsOf(b, doc), op = isOpen(b.id, g.state), V = B.verdicts(b, doc, shots);
+      const prev = b.gate?.after ? B.batchById(doc, b.gate.after) : null, und = V.filter(v => v.verdict === 'pending' || v.verdict === 'not run');
+      const runnable = R.filter(r => ['approved', 'failed'].includes(r.status)), runUsd = runnable.reduce((s, r) => s + (Number(r.est_cost) || 0), 0);
+      const btns = g.state === 'locked' ? `<span class="qlock" title="${esc(g.why)}">🔒 waits for ${esc(prev?.name || b.gate.after)}</span>`
+        : g.state === 'done' ? '<span class="qdone">✓ reviewed</span>'
+        : g.state === 'review' ? `<button data-q="breview" class="pri"${und.length ? ' disabled' : ''} title="${und.length ? esc('pick a take or reject the takes of ' + und.map(v => v.id).join(', ')) : 'every request decided: unlock the next wave'}">Mark reviewed${und.length ? ` (${und.length} to decide)` : ''}</button>`
+        : b.status === 'draft' ? `<button data-q="bapprove" class="pri" title="approve every request of this batch at once">Approve batch · ${money(T.drafts_usd)}</button><button data-q="bdismiss" title="drop the batch (its requests stay drafts)">Dismiss</button>`
+        : g.state === 'ready' && runnable.length ? `<button data-q="brun" class="pri run" title="run its approved requests within the batch cap">Run batch · ${money(runUsd)}</button>` : '';
+      const c = Number(store.costs?.cap_usd) || 0, sp = (store.costs?.items || []).reduce((s, x) => s + (Number(x.usd) || 0), 0), cm = (store.requests?.items || []).filter(r => ['approved', 'queued', 'running'].includes(r.status)).reduce((s, r) => s + (Number(r.est_cost) || 0), 0), after = sp + cm + T.drafts_usd;
+      const conf = confirming === b.id && b.status === 'draft' ? `<div class="qconfirm${after > c + 1e-9 ? ' over' : ''}">Approve <b>${esc(b.name)}</b>: ${R.filter(r => r.status === 'draft').length} request${R.length === 1 ? '' : 's'} · <b>${money(T.drafts_usd)}</b> · cap: spent ${money(sp)} + committed ${money(cm)} + this ${money(T.drafts_usd)} = <b>${money(after)}</b> of ${money(c)} (${pctOf(after, c)})${after > c + 1e-9 ? ' · <b>over the cap</b>: queueing will be refused' : ''} · batch cap ${money(T.drafts_usd)}
+        <button data-q="bconfirm" class="pri">Approve · ${money(T.drafts_usd)}</button><button data-q="bcancel">Cancel</button></div>` : '';
+      return `<div class="qbatch st-${g.state}" data-b="${esc(b.id)}"><div class="qbh"><a data-q="btog" class="qtw">${op ? '▾' : '▸'}</a><b>${esc(b.name || b.id)}</b><span class="chip gate gate-${g.state}" title="${esc(g.why)}">${g.state}</span>
+        <span class="qbn">${T.n} request${T.n === 1 ? '' : 's'} · ${T.shots} shot${T.shots === 1 ? '' : 's'} · est ${money(T.est_usd)}${T.spent_usd ? ` · spent ${money(T.spent_usd)}` : ''}${T.max_usd != null ? ` · batch cap ${money(T.max_usd)}` : ''}</span>
+        <span class="dim qbg">${prev ? `gate: after ${esc(prev.name || prev.id)} is reviewed` : 'first wave'}${b.via === 'agent' ? ' · proposed by the agent' : ''}</span><span class="sp"></span>${btns}</div>
+        ${conf}${['review', 'done'].includes(g.state) || T.spent_usd ? statsLine(B.batchStats(b, doc, shots)) : ''}
+        ${op ? table(shown(R), b) : ''}</div>`;
+    };
+    const histHtml = (hist, shots, shown) => {
+      const op = open.has('_hist') ? open.get('_hist') : false, st = B.takeStats(hist, shots), books = [...new Set(hist.map(r => r.history.book))];
+      return `<div class="qbatch qhist" data-b="_hist"><div class="qbh"><a data-q="btog" class="qtw">${op ? '▾' : '▸'}</a><b>History · job books</b><span class="chip gate gate-done">history</span><span class="qbn">${hist.length} request${hist.length === 1 ? '' : 's'} · ${esc(books.join(', '))}</span><span class="dim qbg">imported: done, never run again, no new cost</span></div>
+        ${statsLine(st, 'job books')}${op ? table(shown(hist).slice().reverse()) : ''}</div>`;
+    };
+    const histActions = (r) => { const c = r.history?.cost || {}; return `<span class="qdone" title="${esc(c.why || '')}">✓ history · ${(r.outputs || []).length}/${r.history.files ?? '?'} outputs registered · ${c.usd != null ? money(c.usd) : '$?'} ${c.counted ? '(in the ledger)' : c.status === 'not_counted' ? '(not counted yet)' : ''}</span>`; };
+    // a request inside a batch: no per-row approval (the batch is approved as a whole); a done one gets its verdict
+    const batchActions = (r, b) => {
+      if (r.status === 'draft') return '<span class="dim">approved with its batch</span>';
+      const v = B.verdicts(b, store.requests, SB.boardShots(store.board)).find(x => x.id === r.id), undo = b.status === 'reviewed' ? '' : '<a data-x="vundo">undo</a>';
+      const vb = r.status !== 'done' || !v ? '' : v.verdict === 'picked' ? `<span class="qverd ok" title="the shot uses take ${v.clip?.take ?? '?'}">✓ take picked</span>`
+        : v.verdict === 'rejected' ? `<span class="qverd no">✕ takes rejected</span>${undo}` : v.verdict === 'kept' ? `<span class="qverd ok">✓ kept</span>${undo}`
+        : `<span class="qverd pend">pick a take${v.shot ? ` (${esc(v.shot)})` : ''} or</span><button data-x="vreject" title="none of its takes is usable">Reject takes</button>${v.shot ? '' : '<button data-x="vkeep" title="its takes are fine (no shot to pick them on)">Keep</button>'}`;
+      return vb + actions(r);
+    };
+    // the first film's falgen job books as history: a dry run first (what would come in), then the director confirms
+    const importJobBooks = async () => {
+      let d; try { d = await store.op('jobbooks_import', { dry_run: true }); } catch (er) { return toast(`job books: ${er.message}`); }
+      if (!d.imported.length) return toast(`job books (${d.books.join(', ') || 'none'}): nothing new to import${d.skipped.length ? ` · ${d.skipped.length} skipped` : ''}`);
+      const ok = await ui.confirm(`Import ${d.imported.length} job${d.imported.length === 1 ? '' : 's'} from ${d.books.join(', ')} as history (done, ${d.outputs_linked} registered output${d.outputs_linked === 1 ? '' : 's'} linked, never run again, no new cost: $${d.cost_usd_shown.toFixed(2)} shown, $${d.not_counted_usd.toFixed(2)} of it not in the ledger yet)?`);
+      if (!ok) return;
+      try { const j = await store.op('jobbooks_import', {}); open.set('_hist', true); toast(`${j.imported.length} history request${j.imported.length === 1 ? '' : 's'} imported from ${j.books.join(', ')} · ${j.skipped.length} skipped`); } catch (er) { toast(`job books: ${er.message}`); }
+    };
+    const batchAct = async (body, ok) => { try { const j = await store.op('batch_act', body); if (ok) toast(ok(j)); return j; } catch (er) { toast(`not done: ${er.message}`); return null; } };
     render();
     const addRequest = async () => {
       const e = est(), video = isVideo(), vs = video ? vSpec() : null, refs = video ? VID.videoRefs(vs) : refsOf();
@@ -183,11 +256,23 @@ export default {
       const f = e.target.closest('a[data-f]'); if (f) { filter = f.dataset.f; render(); return; }
       const a = e.target.closest('a[data-t]'); if (a) return ctx.goto(Number(a.dataset.t));
       if (q === 'runall') return run(null);
+      // D4: waves, batches and the job books
+      if (q === 'waves') return openWaves();
+      if (q === 'jobbooks') return importJobBooks();
+      const bid = e.target.closest('[data-b]')?.dataset.b;
+      if (q === 'btog' && bid) { const st = bid === '_hist' ? 'done' : B.gateState(B.batchById(store.requests, bid), store.requests).state; open.set(bid, !isOpen(bid, st)); render(); return; }
+      if (q === 'bapprove') { confirming = bid; render(); return; }
+      if (q === 'bcancel') { confirming = null; render(); return; }
+      if (q === 'bconfirm') { confirming = null; await batchAct({ act: 'approve', id: bid }, (j) => `${bid} approved: ${j.approved.length} request${j.approved.length === 1 ? '' : 's'} · ${money(j.total_usd)} · batch cap ${money(j.max_usd)}${j.cap?.over_cap ? ' · over the cap: queueing will be refused' : ''}`); return; }
+      if (q === 'bdismiss') { await batchAct({ act: 'dismiss', id: bid }, () => `${bid} dismissed: its requests stay drafts`); return; }
+      if (q === 'breview') { await batchAct({ act: 'review', id: bid }, (j) => `${bid} reviewed${j.unlocked?.length ? ` · ${j.unlocked.join(', ')} unlocked` : ''} · ${j.stats?.takes_per_used_shot ?? '–'} takes per used shot`); return; }
+      if (q === 'brun') { try { const j = await store.runRequests(null, { batch: bid }); for (const x of j.refused || []) toast(`${x.id} not run: ${x.why}`); if (j.started?.length) toast(`running ${bid}: ${j.started.map(x => x.id).join(', ')} · est $${(j.est_total_usd || 0).toFixed(2)}`); else if (!(j.refused || []).length) toast('nothing to run'); } catch (er) { toast(`run failed: ${er.message}`); } return; }
       if (q === 'approvesel' || q === 'rejectsel') { const ids = [...sel]; sel.clear(); for (const id of ids) await store.setRequest(id, { status: q === 'approvesel' ? 'approved' : 'rejected' }); toast(`${ids.length} request${ids.length > 1 ? 's' : ''} ${q === 'approvesel' ? 'approved' : 'rejected'}`); return; }
       const row = e.target.closest('tr[data-id]'); if (!row) return;
       const id = row.dataset.id, r = store.requests?.items?.find(x => x.id === id), x = e.target.dataset.x;
       if (!r) return;
       if (x === 'pick') { if (e.target.checked) sel.add(id); else sel.delete(id); render(); return; }
+      if ((x === 'vreject' || x === 'vkeep' || x === 'vundo') && bid) return batchAct({ act: 'verdict', id: bid, request: id, verdict: x === 'vundo' ? null : x === 'vreject' ? 'rejected' : 'kept' }, () => `${id}: ${x === 'vundo' ? 'undecided again' : x === 'vreject' ? 'takes rejected' : 'takes kept'}`);
       if (x === 'privok') { await store.setRequest(id, { private_upload_ok: e.target.checked }); toast(e.target.checked ? `${id}: its private refs may be uploaded to fal storage when it runs` : `${id}: private refs stay local (a fal run is refused)`); return; }
       if (x === 'approve') return store.setRequest(id, { status: 'approved' });
       if (x === 'unapprove' || x === 'redraft') return store.setRequest(id, { status: 'draft' });
@@ -238,7 +323,7 @@ export default {
     // (a focused button or checkbox is no reason to wait: only a field being typed in is)
     const typing = () => { const a = document.activeElement; return $list.contains(a) && a.matches('textarea, input:not([type=checkbox])'); };
     const flush = () => { if (stale && !down && !typing()) { stale = false; render(); } };
-    store.on((w) => { if (!['requests', 'all', 'runs', 'settings', 'costs'].includes(w)) return; stale = true; flush(); });
+    store.on((w) => { if (!['requests', 'all', 'runs', 'settings', 'costs', 'board', 'media'].includes(w)) return; stale = true; flush(); });
     el.addEventListener('focusout', () => setTimeout(flush));
     $list.addEventListener('pointerdown', () => { down = true; });
     document.addEventListener('pointerup', () => { if (down) { down = false; setTimeout(flush); } }, true);

@@ -215,6 +215,15 @@ your times (`t0` / `t1` ms on scenes, beats, shots) are what places them, so kee
    {ids, retake: true}` (dry run first) runs only those takes again. A run made outside the runner: `request_update`
    queued -> running -> done with `outputs` and `actual_cost_usd` (or `failed` / rejected + `why`). From a shell:
    `node <workbench>/tools/run.mjs --project <p> <ids> [--dry-run] [--retake]`.
+   **Waves** (D4): shots are generated in waves with review gates, a pilot first ("to measure the take ratio … the rest
+   only after that"). `waves_propose {pilot: [shot ids], sizes: [2, 4, 8], takes: 2, dry_run: true}` gives the plan from
+   the storyboard gaps (waves, shots, estimates, the cap): show it, then call it without `dry_run` to write draft requests
+   and draft batches (each gated on the one before). The director approves a whole batch ("Approve batch · $X") and marks
+   it reviewed once every take is picked or rejected; that unlocks the next. Run an approved batch with `request_run
+   {batch, dry_run: true}` then `request_run {batch}`; a locked batch is refused. After each wave read `batches_get`
+   (`observed.takes_per_used_shot`, `observed.usd_per_used_s`, `remaining[].observed_usd`) and tell the director what the
+   next wave will really cost. Requests marked `history` (the first film's job books, imported by the director) are
+   done: never run or edit them.
 8. **Review**: set `review`, pin a note explaining what changed, `ui_focus` with `preview` to show it. The director
    approves or requests changes; answer their notes with `note_resolve` + reply.
 9. **Render**: the final render is a media item of kind `render` and the song's `audio.render`; snapshot first.
@@ -224,7 +233,8 @@ your times (`t0` / `t1` ms on scenes, beats, shots) are what places them, so kee
 - Never call a paid API (image, video, voice, music) without an APPROVED request whose `est_cost` fits the cap.
   `costs_get` before proposing; the tools refuse queueing above the cap. Record the real cost when done. Prefer
   `request_run` (it enforces all of this) to calling a provider yourself.
-- Never approve on the director's behalf, never mark their notes resolved without doing what they asked.
+- Never approve on the director's behalf, never mark their notes resolved without doing what they asked. Never approve,
+  review (unlock) or re-cap a batch, nor import the job books: those are the director's, in the page.
 - Never pick, mix or dismiss a proposal (the director's, in the page), and never write `proposals.json` or
   `proposals/*.svg` by hand: `proposals_add` sanitises and records them. Never pick a take or write a shot's `clip` (or
   `takes.json`): propose with `take_propose`; the director picks in the page.
