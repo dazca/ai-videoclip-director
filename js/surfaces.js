@@ -110,10 +110,13 @@ export function normSurfaces(d) {
 }
 export const nextProposalId = (d) => `sp${String(d.proposals.reduce((m, p) => Math.max(m, Number(/^sp(\d+)$/.exec(p.id)?.[1]) || 0), 0) + 1).padStart(2, '0')}`;
 export const openProposals = (d, shot) => (d?.proposals || []).filter(p => p.status === 'open' && (!shot || p.shot === shot));
-// the Final checklist line (C2): "every word on a surface"
+// the lyric gate is opt-in per project (review #3): settings.json lyric_gate; a project without the key keeps it on (the
+// projects made before), a new one (data/_template/settings.json) starts with it off
+export const gateOn = (settings) => settings?.lyric_gate !== false;
+// the Final checklist line (C2): "every word on screen"
 export function gateCheck(song, shots) {
   const c = coverage(song, shots), n = c.uncovered.length;
   return { ok: c.ok, total: c.total, covered: c.covered,
-    detail: !c.total ? 'no lyrics' : c.ok ? `${c.total} words, all on a surface at their time` : `${c.covered} of ${c.total} words on a surface · ${n} uncovered run${n === 1 ? '' : 's'}`,
+    detail: !c.total ? 'no lyrics' : c.ok ? `${c.total} words, all on screen at their time` : `${c.covered} of ${c.total} words on screen · ${n} uncovered run${n === 1 ? '' : 's'}`,
     gaps: c.uncovered.map(u => ({ label: `${u.line} “${u.text.length > 40 ? u.text.slice(0, 39) + '…' : u.text}”`, line: u.line, w: u.w, t0: u.t0 })) };
 }

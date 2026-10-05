@@ -145,7 +145,8 @@ export function anchoredTo(eventId, { scenes = [], shots = [] } = {}) {
 // moves [{event, to}] (from = the event's t now) -> what moves where. rows [{kind: scene | shot, id, edge, from, to, event,
 // why: anchored | shared}], the moved scenes and shots (copies), problems (a boundary would cross another: nothing is
 // written while there are problems), and beats moved back inside their scene.
-export function retimePlan({ moves = [], events = [], scenes = [], shots = [], song } = {}) {
+// approvals (approvals.json) and states (scenes.json states) feed `held` (review #3 M2, heldOf below).
+export function retimePlan({ moves = [], events = [], scenes = [], shots = [], song, approvals = null, states = null } = {}) {
   const list = Array.isArray(events) ? events : events?.events || [], problems = [];
   const M = new Map();
   for (const m of moves) {
@@ -173,8 +174,31 @@ export function retimePlan({ moves = [], events = [], scenes = [], shots = [], s
   // the shots of a moved scene must stay inside it
   for (const s of sh) { const c = s.scene && sc.find(y => y.id === s.scene); if (c && rows.some(r => (r.kind === 'scene' && r.id === c.id) || (r.kind === 'shot' && r.id === s.id)) && (s.t0 < c.t0 - 1 || s.t1 > c.t1 + 1)) problems.push(`shot ${s.id} would leave its scene ${c.id}`); }
   rows.sort((a, b) => a.from - b.from || (a.kind === b.kind ? 0 : a.kind === 'scene' ? -1 : 1) || a.id.localeCompare(b.id));
-  return { moves: [...M.values()], rows, scenes: sc, shots: sh, problems, beats, changed: { scenes: rows.some(r => r.kind === 'scene') || beats > 0, shots: rows.some(r => r.kind === 'shot') } };
+  const held = heldOf(rows, { scenes, shots: sh, approvals, states });
+  return { moves: [...M.values()], rows, scenes: sc, shots: sh, problems, beats, held, changed: { scenes: rows.some(r => r.kind === 'scene') || beats > 0, shots: rows.some(r => r.kind === 'shot') } };
 }
+// review #3 M2: what a re-time must NOT move silently. Per item (key "shot:<id>" / "scene:<id>") the reasons:
+//   approved / locked   a shot approved or locked in approvals.json (a scene marked ok in scenes.json): its approval was for
+//                       the old timing; applying sends it back to review (a scene: needs you) with a note
+//   shared              an unanchored cut that moves only because it sits on an anchored one (a neighbour)
+//   take                the picked take (shot.clip) no longer covers the shot's new length
+// The page lists them in red and the director confirms each one; retime_apply refuses (409) a plan with an unconfirmed one.
+export const HELD_STATES = ['approved', 'locked'];
+export function heldOf(rows, { scenes = [], shots = [], approvals, states } = {}) {
+  const by = new Map();
+  const add = (kind, id, why, detail) => { const k = `${kind}:${id}`; if (!by.has(k)) by.set(k, { key: k, kind, id, reasons: [], detail: [] }); const h = by.get(k); if (!h.reasons.includes(why)) { h.reasons.push(why); if (detail) h.detail.push(detail); } };
+  for (const r of rows) {
+    const st = r.kind === 'shot' ? approvals?.items?.['shot:' + r.id]?.state : states?.[r.id]?.status === 'ok' ? 'approved' : null;
+    if (HELD_STATES.includes(st)) add(r.kind, r.id, st, `${r.kind === 'scene' ? 'marked ok' : st}: its ${r.edge === 't0' ? 'start' : 'end'} ${clock(r.from)} → ${clock(r.to)}`);
+    if (r.why === 'shared') add(r.kind, r.id, 'shared', `shares the cut of ${r.event} (not anchored)`);
+  }
+  for (const s of shots) {
+    const c = s.clip; if (!c || c.kind !== 'video' || !Number.isFinite(c.in_ms) || !Number.isFinite(c.out_ms) || !rows.some(r => r.kind === 'shot' && r.id === s.id)) continue;
+    if (c.out_ms - c.in_ms < s.t1 - s.t0) add('shot', s.id, 'take', `the picked take covers ${((c.out_ms - c.in_ms) / 1000).toFixed(2)} s of the new ${((s.t1 - s.t0) / 1000).toFixed(2)} s`);
+  }
+  return [...by.values()];
+}
+export const HELD_LABEL = { approved: 'approved', locked: 'locked', shared: 'shares the cut', take: 'take too short' };
 // a plan as short text lines (the dialog, the tool's answer, a version message)
 export const planLines = (plan) => plan.rows.map(r => `${r.kind} ${r.id}.${r.edge} ${clock(r.from)} → ${clock(r.to)} (${r.why === 'anchored' ? 'anchored to' : 'shares the cut of'} ${r.event})`);
 export const planMessage = (plan) => `re-time: ${plan.moves.map(m => `${m.event} ${clock(m.from)} → ${clock(m.to)}`).join(', ')}`.slice(0, 300);

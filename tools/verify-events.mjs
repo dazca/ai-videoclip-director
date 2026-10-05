@@ -196,6 +196,8 @@ export async function verifyEvents({ browser, OUT }) {
       'shot:s3-grid:t1': ['0:12.000', '0:11.900', 'anchored'], 'shot:s4-chorus:t0': ['0:12.000', '0:11.900', 'anchored'] };
     const rowsOk = Object.entries(want).every(([k, [a, b, w]]) => rows.some(r => r[0] === k && r[1] === a && r[2] === b && r[3].includes(w))) && rows.length === Object.keys(want).length;
     const undoN = await pg.evaluate(() => window.WB.history.undoStack.length);
+    // review #3 M2: the held items (shared cuts, approved shots) are ticked one by one first
+    await pg.evaluate(() => { for (const i of document.querySelectorAll('.evdlg .rtmine input[data-held]')) i.click(); });
     await pg.click('.evdlg [data-x=apply]');
     const applied = await until(() => /applied rt/.test(document.querySelector('.evdlg .rtres')?.textContent || ''));
     const res = await pg.evaluate(() => document.querySelector('.evdlg .rtres')?.textContent);
@@ -210,12 +212,14 @@ export async function verifyEvents({ browser, OUT }) {
     check('Re-time after the take…: the preview lists every boundary anchored to the measured events and the cuts that share them, old -> new (sc02 end 18.000 -> 18.250 anchored, sc03 start / s4-chorus end / s5-outro start shared; s3-grid end and s4-chorus start 12.000 -> 11.900, both anchored: the shot panel anchors the cut); Apply writes ONE change: a new scenes and a new storyboard version, the events at their new times (measured cleared), one undo step',
       rowsOk && appliedOk && one, { rows, res, scenes: [sc0, readP('scenes.json').current], board: [sb0, readP('storyboard.json').current], one });
     await pg.evaluate(() => document.querySelector('.evback')?.remove());
-    await pg.evaluate(() => window.WB.history.undo());
+    await pg.evaluate(() => { window.WB.history.undo(); });
+    if (await until(() => !!document.querySelector('.pal .pr'), null, 3000)) await pg.keyboard.press('Enter');   // the confirm of the held items
     const undone = await until(() => window.WB.store.events.find(e => e.id === 'stop_outro')?.t === 18000);
     const scU = cur('scenes.json', 'scenes'), sbU = cur('storyboard.json', 'shots'), evU = readP('events.json');
     const undoOk = undone && scU.find(s => s.id === 'sc02').t1 === 18000 && sbU.find(s => s.id === 's3-grid').t1 === 12000 && sbU.find(s => s.id === 's5-outro').t0 === 18000
       && evU.events.find(e => e.id === 'stop_outro').measured === 18250 && evU.retimes.at(-1).status === 'undone';
-    await pg.evaluate(() => window.WB.history.redo());
+    await pg.evaluate(() => { window.WB.history.redo(); });
+    if (await until(() => !!document.querySelector('.pal .pr'), null, 3000)) await pg.keyboard.press('Enter');
     const redone = await until(() => window.WB.store.events.find(e => e.id === 'stop_outro')?.t === 18250);
     check('Ctrl+Z undoes the re-time (new versions with the old times; the events back and pending again: measured kept); redo applies it again',
       undoOk && redone && cur('scenes.json', 'scenes').find(s => s.id === 'sc02').t1 === 18250, { undone, redone, sc02: scU.find(s => s.id === 'sc02'), rt: evU.retimes.at(-1)?.status });
@@ -228,6 +232,7 @@ export async function verifyEvents({ browser, OUT }) {
     await pg.evaluate(() => window.WB.commands.run('events.retime'));
     await until(() => !!document.querySelector('.evdlg .prop[data-rt]'));
     await shot('.evdlg', 'v23_retime_agent_proposal');
+    await pg.evaluate(() => { for (const i of document.querySelectorAll('.evdlg .prop input[data-held]')) i.click(); });
     await pg.click('.evdlg .prop [data-x=rtapply]');
     const propApplied = await until(() => window.WB.store.events.find(e => e.id === 'stop_outro')?.t === 18500);
     const evP = readP('events.json');

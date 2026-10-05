@@ -15,6 +15,7 @@ import { commands } from './commands.js';
 import { menus } from './menus.js';
 import { history } from './history.js';
 import { axisHooks } from './timemode.js';
+import { ui } from './palette.js';
 import { store, toast, esc } from '../js/store.js';
 import { fmt } from '../js/timeline.js';
 import { currentScript } from '../js/scenes.js';
@@ -32,7 +33,9 @@ const CSS = `.evback{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.55
 .evdlg .evf{display:flex;gap:6px;align-items:center;padding:4px 8px;border-top:1px solid var(--line2);flex-wrap:wrap}
 .evdlg table{border-collapse:collapse;width:100%;margin:2px 0 8px} .evdlg td,.evdlg th{padding:1px 6px;border-bottom:1px solid var(--line2);text-align:left;white-space:nowrap}
 .evdlg th{color:var(--dim);font-weight:normal} .evdlg td.old{color:var(--dim)} .evdlg td.new{color:var(--acc)} .evdlg .why{color:var(--dim);font-size:11px}
-.evdlg h4{margin:6px 0 2px;font-size:12px;color:var(--dim);font-weight:normal;text-transform:uppercase;letter-spacing:.04em}
+.evdlg h4{margin:6px 0 2px;font-size:12px;color:var(--dim);font-weight:600}
+.evdlg button:disabled{opacity:.4;cursor:default}
+.evdlg .rtheld{border:1px solid #f08080;padding:3px 6px;margin:2px 0 6px} .evdlg .rtheld .err{margin-bottom:2px} .evdlg .rthi{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .evdlg .rtwhy{color:#f08080}
 .evdlg .err{color:#f08080} .evdlg .ok{color:#7fbf8f} .evdlg .dim{color:var(--dim)} .evdlg a{cursor:pointer;color:var(--acc)}
 .evdlg .prop{border:1px dashed var(--line);padding:3px 6px;margin:3px 0}
 .tmev{position:absolute;left:0;right:var(--ncw,0px);top:0;height:0;border-top:1px dashed var(--evc,#f5a524);z-index:5;pointer-events:none;opacity:.85}
@@ -42,7 +45,8 @@ const CSS = `.evback{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.55
 .scanc-m{color:var(--acc);font-size:11px} .sbancs{display:flex;gap:8px;align-items:center}`;
 const css = () => { if (!document.getElementById('evcss')) { const st = document.createElement('style'); st.id = 'evcss'; st.textContent = CSS; document.head.appendChild(st); } };
 const parseT = (s) => { s = String(s ?? '').trim(); if (!s) return null; if (/^\d+(\.\d+)?$/.test(s)) return Math.round(Number(s) * 1000); const m = /^(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)$/.exec(s); return m ? Math.round((Number(m[1] || 0) * 3600 + Number(m[2]) * 60 + Number(m[3])) * 1000) : null; };
-const ctx = () => ({ scenes: currentScript(store.scenes)?.scenes || [], shots: store.boardShots(), song: store.song });
+const ctx = () => ({ scenes: currentScript(store.scenes)?.scenes || [], shots: store.boardShots(), song: store.song, approvals: store.approvals, states: store.scenes?.states || {} });
+const lockedNow = () => store.revisions?.lock || null;
 const ev = (id) => store.events.find(e => e.id === id) || null;
 const playhead = () => Math.round(WB()?.timeline?.player.time() ?? 0);
 async function act(body, okMsg) {
@@ -55,9 +59,15 @@ function dialog(title, sub, bodyHtml, footHtml) {
   const el = document.createElement('div'); el.className = 'evback';
   el.innerHTML = `<div class="evdlg" role="dialog" aria-label="${esc(title)}"><div class="evh"><b>${esc(title)}</b><span class="dim">${esc(sub || '')}</span><span class="sp"></span><i data-x="close" title="Esc">×</i></div>
     <div class="evb">${bodyHtml}</div><div class="evf">${footHtml}</div></div>`;
-  el.addEventListener('click', (e) => { if (e.target === el || e.target.closest('[data-x=close]')) el.remove(); });
-  el.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') el.remove(); });
+  // Esc closes the TOP dialog wherever the focus is (review #3 UX 3: the listener sat on an unfocused element), and the
+  // dialog takes the focus so typing in it never reaches the page's shortcuts
+  const close = () => { el.remove(); removeEventListener('keydown', key, true); };
+  const key = (e) => { if (!el.isConnected) return removeEventListener('keydown', key, true); if (e.key === 'Escape' && el === [...document.querySelectorAll('.evback')].pop()) { e.preventDefault(); e.stopPropagation(); close(); } };
+  el.addEventListener('click', (e) => { if (e.target === el || e.target.closest('[data-x=close]')) close(); });
+  el.addEventListener('keydown', (e) => { if (e.key !== 'Escape') e.stopPropagation(); });
+  addEventListener('keydown', key, true);
   document.body.appendChild(el);
+  const box = el.firstElementChild; box.tabIndex = -1; box.focus({ preventScroll: true });
   return el;
 }
 
@@ -107,21 +117,35 @@ export function plan(moves) {
 const planTable = (p) => p.rows.length
   ? `<table class="rtrows"><tr><th>boundary</th><th>old</th><th></th><th>new</th><th>why</th></tr>${p.rows.map(r => `<tr data-row="${esc(`${r.kind}:${r.id}:${r.edge}`)}"><td>${r.kind} <b>${esc(r.id)}</b>.${r.edge === 't0' ? 'start' : 'end'}</td><td class="old">${fmt(r.from, true)}</td><td>→</td><td class="new">${fmt(r.to, true)}</td><td class="why">${r.why === 'anchored' ? '⚓ anchored to' : 'shares the cut of'} ${esc(r.event)}</td></tr>`).join('')}</table>`
   : '<div class="dim">no scene or shot boundary is anchored to these events (anchor them in the script / storyboard: snap "events")</div>';
+// review #3 M2: the items a re-time must not move silently (js/events.js heldOf), in red, one tick each; Apply stays off
+// until every one is ticked, and the ticks go to retime_apply as `confirm`
+const heldHtml = (p) => (p.held?.length
+  ? `<div class="rtheld"><div class="err"><b>${p.held.length} to confirm</b>: an approved shot that moves goes back to review (with a note); tick each one to apply</div>${p.held.map(h => `<label class="rthi"><input type="checkbox" data-held="${esc(h.key)}"> <b>${esc(h.key)}</b> <span class="rtwhy">${esc(h.reasons.map(r => E.HELD_LABEL[r] || r).join(' · '))}</span> <span class="dim">${esc(h.detail.join('; '))}</span></label>`).join('')}</div>`
+  : '');
+const ticked = (box) => [...box.querySelectorAll('input[data-held]:checked')].map(i => i.dataset.held);
+const allTicked = (box) => [...box.querySelectorAll('input[data-held]')].every(i => i.checked);
 export function openRetime() {
   css(); rtEl?.remove();
   const D = store.eventsDoc, pend = E.pendingEvents(D), props = D.retimes.filter(r => r.status === 'proposed'), last = [...D.retimes].reverse().find(r => r.status === 'applied');
-  const p = plan();
-  const body = `<h4>Measured events (${pend.length})</h4>`
+  const p = plan(), lk = lockedNow();
+  const body = (lk ? `<div class="err rtlock">The project is locked for render (${esc(lk.revision || 'locked')}): a re-time would change the locked cut. Unlock it first (Final stage › Unlock).</div>` : '')
+    + `<h4>Measured events (${pend.length})</h4>`
     + (pend.length ? `<table><tr><th>event</th><th>now</th><th></th><th>measured</th><th></th></tr>${pend.map(e => `<tr data-ev="${esc(e.id)}"><td>${E.KIND_ICON[e.kind] || ''} <b>${esc(e.name)}</b></td><td class="old">${fmt(e.t, true)}</td><td>→</td><td><input class="tm" value="${fmt(e.measured, true)}" spellcheck="false"></td><td><a data-x="mplay">= playhead</a> · <a data-x="mclear">clear</a></td></tr>`).join('')}</table>`
       : '<div class="dim">none: drag an event in the timeline\'s events column (or set its measured time) to where it landed in the chosen take</div>')
-    + (pend.length ? `<h4>Preview: what moves</h4>${planTable(p)}${p.problems.length ? `<div class="err">cannot apply: ${esc(p.problems.join('; '))}</div>` : ''}` : '')
-    + (props.length ? `<h4>Proposed by the agent (${props.length})</h4>${props.map(r => { const q = plan(r.moves.map(m => ({ event: m.event, to: m.to }))); return `<div class="prop" data-rt="${esc(r.id)}"><b>${esc(r.id)}</b> ${esc(r.moves.map(m => `${m.event} ${fmt(m.from, true)} → ${fmt(m.to, true)}`).join(', '))}${r.why ? `<div class="why">${esc(r.why)}</div>` : ''}${planTable(q)}${q.problems.length ? `<div class="err">${esc(q.problems.join('; '))}</div>` : ''}<button data-x="rtapply" class="pri"${q.problems.length || !q.moves.length ? ' disabled' : ''}>Apply ${esc(r.id)}</button> <button data-x="rtdismiss">Dismiss</button></div>`; }).join('')}` : '')
+    + (pend.length ? `<div class="rtmine"><h4>Preview: what moves</h4>${planTable(p)}${heldHtml(p)}${p.problems.length ? `<div class="err">cannot apply: ${esc(p.problems.join('; '))}</div>` : ''}</div>` : '')
+    + (props.length ? `<h4>Proposed by the agent (${props.length})</h4>${props.map(r => { const q = plan(r.moves.map(m => ({ event: m.event, to: m.to }))); return `<div class="prop" data-rt="${esc(r.id)}"><b>${esc(r.id)}</b> ${esc(r.moves.map(m => `${m.event} ${fmt(m.from, true)} → ${fmt(m.to, true)}`).join(', '))}${r.why ? `<div class="why">${esc(r.why)}</div>` : ''}${planTable(q)}${heldHtml(q)}${q.problems.length ? `<div class="err">${esc(q.problems.join('; '))}</div>` : ''}<button data-x="rtapply" class="pri"${q.problems.length || !q.moves.length || lk || q.held.length ? ' disabled' : ''}>Apply ${esc(r.id)}</button> <button data-x="rtdismiss">Dismiss</button></div>`; }).join('')}` : '')
     + (last ? `<div class="dim" style="margin-top:6px">last applied: ${esc(last.id)} (${esc((last.applied_at || '').replace('T', ' '))}) · scenes ${esc((last.versions?.scenes || []).join(' → ') || '–')} · storyboard ${esc((last.versions?.storyboard || []).join(' → ') || '–')} (Ctrl+Z undoes it)</div>` : '')
     + '<div class="rtres"></div>';
   rtEl = dialog('Re-time after the take', 'move every boundary anchored to the measured events · uses the saved script and storyboard', body,
-    `<span class="dim">one undoable change: a new scenes and storyboard version (Ctrl+Z)</span><span class="sp"></span><button data-x="apply" class="pri"${!pend.length || p.problems.length || !p.rows.length ? ' disabled' : ''}>Apply re-time${p.rows.length ? ` (${p.rows.length} boundar${p.rows.length === 1 ? 'y' : 'ies'})` : ''}</button>`);
+    `<span class="dim">one undoable change: a new scenes and storyboard version (Ctrl+Z)</span><span class="sp"></span><button data-x="apply" class="pri"${!pend.length || p.problems.length || !p.rows.length || lk || p.held.length ? ' disabled' : ''}>Apply re-time${p.rows.length ? ` (${p.rows.length} boundar${p.rows.length === 1 ? 'y' : 'ies'})` : ''}</button>`);
   const res = (h, bad) => { const r = rtEl.querySelector('.rtres'); r.innerHTML = h; r.className = 'rtres ' + (bad ? 'err' : 'ok'); };
   rtEl.addEventListener('change', async (x) => {
+    if (x.target.matches('input[data-held]')) {
+      const prop = x.target.closest('[data-rt]'), box = prop || rtEl.querySelector('.rtmine'), btn = prop ? prop.querySelector('[data-x=rtapply]') : rtEl.querySelector('[data-x=apply]');
+      const q = prop ? plan(D.retimes.find(r => r.id === prop.dataset.rt).moves.map(m => ({ event: m.event, to: m.to }))) : p;
+      if (btn) btn.disabled = !!(lk || q.problems.length || !q.moves.length || (!prop && (!pend.length || !q.rows.length)) || !allTicked(box));
+      return;
+    }
     const row = x.target.closest('tr[data-ev]'); if (!row || !x.target.matches('input')) return;
     const t = parseT(x.target.value); if (t == null) return res('measured: m:ss.mmm or seconds', true);
     await api.measure(row.dataset.ev, t); openRetime();
@@ -134,7 +158,8 @@ export function openRetime() {
       if (k === 'mclear' && row) { await api.measure(row.dataset.ev, null); return openRetime(); }
       if (k === 'rtdismiss') { await act({ act: 'retime_dismiss', retime: rt }, `${rt} dismissed`); return openRetime(); }
       if (k === 'apply' || k === 'rtapply') {
-        const body = k === 'apply' ? { moves: E.pendingEvents(store.eventsDoc).map(e => ({ event: e.id, to: e.measured })) } : { retime: rt };
+        const box = k === 'apply' ? rtEl.querySelector('.rtmine') : x.target.closest('[data-rt]');
+        const body = { ...(k === 'apply' ? { moves: E.pendingEvents(store.eventsDoc).map(e => ({ event: e.id, to: e.measured })) } : { retime: rt }), confirm: box ? ticked(box) : [] };
         const r = await apply(body);
         openRetime(); rtEl.querySelector('.rtres').className = 'rtres ok';
         rtEl.querySelector('.rtres').innerHTML = `applied ${esc(r.retime)}: ${r.plan.rows.length} boundaries · scenes ${esc((r.versions.scenes || []).join(' → ') || 'unchanged')} · storyboard ${esc((r.versions.storyboard || []).join(' → ') || 'unchanged')} (Ctrl+Z undoes it)`;
@@ -143,11 +168,20 @@ export function openRetime() {
   });
   return rtEl;
 }
+// Ctrl+Z / redo of a re-time moves cuts too: an approved / shared / short-take item asks first (review #3 M2), never silently
+async function confirming(name, body) {
+  try { return await store.op(name, body); } catch (e) {
+    const held = e.body?.held; if (e.status !== 409 || !Array.isArray(held) || !held.length) throw e;
+    const ok = await ui.confirm(`${name === 'retime_undo' ? 'Undo' : 'Redo'} ${body.retime}: it moves ${held.map(h => `${h.key} (${h.reasons.map(r => E.HELD_LABEL[r] || r).join(', ')})`).join('; ')}. An approved shot goes back to review. Go on?`);
+    if (!ok) throw new Error('not done: you kept the cuts');
+    return store.op(name, { ...body, confirm: held.map(h => h.key) });
+  }
+}
 // the re-time as one undo step (history.push): undo = retime_undo, redo = retime_apply of the same record
 async function apply(body) {
   const r = await store.op('retime_apply', body);
   const id = r.retime;
-  history.push({ label: `re-time ${id}`, undo: () => store.op('retime_undo', { retime: id }), redo: () => store.op('retime_apply', { retime: id }) });
+  history.push({ label: `re-time ${id}`, undo: () => confirming('retime_undo', { retime: id }), redo: () => confirming('retime_apply', { retime: id }) });
   toast(`re-time ${id}: ${r.plan.rows.length} boundaries moved (a new scenes / storyboard version)`);
   return r;
 }

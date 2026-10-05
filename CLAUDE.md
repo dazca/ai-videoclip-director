@@ -61,6 +61,7 @@ win: `WB_PROJECT`, `WORKBENCH_DATA`, `WORKBENCH_MEDIA_BASE`, `FAL_KEY`.
 | `core/dialog.js`, `core/connect.js` | a small modal (`openDialog`, `copyText`); F9 Help › Connect Claude… (the `claude mcp add` line for this checkout, the agent token's FILE path (never its value), the `mcp/client.mjs status` quick test, a copy button each, the state: pages open + the last agent write; from `GET /api/connect`, local only) and F10 Help › About (package.json `version` + the `git describe` commit, from `/api/status`) |
 | `js/interpret.js`, `lib/ops/interpret.mjs`, `mcp/tools/interpret.mjs`, `core/interp.js` | E10: the agent's interpretation next to the director's verbatim intake answers and notes: the shape and labels, the ops (`interpretation_set`, the page-only `interpretation_act`), the tool, and the block under an answer / a note (Script › Intake, every Notes column, the timeline notes column) with Accept / Edit |
 | `tools/verify-layout.mjs` | v26 of the UI suite (run by `npm run verify`, or alone): F7 the timeline fills the height at 1280 / 1600 and keeps every column on screen, the docked preview narrows the columns; F8 the same stage bar on every stage; F9 the Connect dialog (and its quick test, run as shown); F10 About; E10 interpretations over MCP and in the page; screenshots `v26_*.png` |
+| `tools/verify-review3.mjs`, `tools/security-review3.mjs` | v28 of the UI suite (review #3): a new user's walk-through with no agent, no fal key and a media root named `media/`, from the wizard to Lock for render and the composition export without leaving the page; the re-time's held items; a wrapped lyric line in one block; screenshots `v28_*.png`. Its security twin (in `npm run test:security`): one check per review #3 finding (M1, M2, L1-L3, I5, Make public, results from another app, media roots) |
 | `js/events.js`, `js/eventscol.js`, `core/events.js`, `lib/ops/events.mjs`, `mcp/tools/events.mjs` | E1, named sync points: the shared logic (events.json v2 and the old array, kinds, `snapToEvent` (the nearest accepted event within 1 s), anchors (`anchorsOf`, `reanchor` for a draft, `settleAnchors` for a write: the anchor wins), `retimePlan` (anchored boundaries + the cuts that sit on them, old -> new, problems), `importList` (an audio events.json in seconds)), the timeline's events column (drag = measured), the page acts (the event dialog, + Named event here / at a word, Import events…, Re-time after the take… with its preview and one undo step, the Time view markers), the ops and the agent tools |
 | `core/timemode.js` | the stages' Time view (List | Time, Alt+T; ROADMAP_v4 F6): `TimeAxis` places a stage's rows on the timeline's warp (`WB.timeline.warp`, `tl.watch` for its relayouts and playhead), click-to-seek, scroll sync, "+ Add at m:ss" (`tmadd`); the timeline page stays laid out behind the others (`.pgwrap.bg`) so its warp stays true |
 | `core/` | command registry + keymap, menus, palette, undo history (`history.push({label, undo, redo})` for a stage draft edit), selection, projects/exports, preview dock, default commands (+ the timeline "+ Add", `notes.addHere`), `rail.js` (stage rail + stage commands + open-notes counts + the review round at its right end: "Round N · K open notes", Send round to Claude, the agent's progress, Close revision, the revision chip; `WB.rounds`), `notescol.js` (the Notes column every stage mounts: row-aligned cells, typing, threads, its width (`width` / `maxWidth`), API in its header), `wizard.js` (new-project wizard, with the unticked "Prepare starting proposals"), `proposals.js` (the proposals strip every target with proposals shows: cards, Pick / Mix / 3 more / ×, the large view, `register(stage, apply)` for what a pick does, "Prepare proposals" and "Make free layouts" (Generate menu, palette), the offer after a save; API in its header), `sketch/` (the sketch tool: `mountSketch` / `openSketch`, API in its header) |
@@ -770,6 +771,36 @@ of t). The first film's `xp/world.js` is NOT changed: its adoption is a proposal
   `.`, a drive, a backslash or a leading slash (400). A private take (the PRIVATE rule, the `private_media` regex, or
   `private: true` in media.json) is never written: the shot exports as a placeholder `private` without its file or media id;
   a private alternative is dropped (tools/security-composition.mjs). No approval, pick or project file is touched.
+- Review #3 (tools/security-review3.mjs):
+  - **Versioned files only grow (M1).** A save of `lyrics.json`, `scenes.json`, `breakdown.json` or `storyboard.json` keeps
+    every version the server has (one left out comes back) and moves `current` only to a version the save adds; switching
+    versions is an op (`*_update restore` makes a new version). An agent's raw save never drops an anchored boundary (the
+    anchor and its time carry forward), and the picks and lyric surfaces always carry forward.
+  - **Re-time holds (M2, L1).** `retimePlan` returns `held`: shots approved / locked in approvals.json, scenes marked ok,
+    unanchored cuts that move only because they share a boundary, shots whose picked take gets too short. `retime_apply` /
+    `retime_undo` answer 409 + `held` until the page confirms each (`confirm: ["shot:s1-intro", …]`, the dialog's ticks);
+    a moved approved shot goes back to `review` (a moved ok scene to needs you) with a note saying why. A project locked
+    for render refuses the director's re-time too (409: unlock first). `retime_propose` returns the held list: tell the
+    director. (The re-time logic stays in `js/events.js` `retimePlan` / `heldOf`, `lib/ops/events.mjs`, `core/events.js`.)
+  - **edl.json (L2).** On a locked project an agent's `composition_export` of the file the render reads (the remembered
+    `out`, else `composition/edl.json`) is 409; another out inside exports/ is fine. Once the director remembered a map in
+    the page, an agent's export of that file uses it (another map: 403), and an agent's save of `settings.json` keeps the
+    server's `composition`.
+  - **Never "director" (L3).** Every agent write (HTTP without the page, and the MCP offline path: `agentArgs`) turns a
+    `by` / `via` naming the director or the page into "agent"; the propose ops do the same in process (`agentBy`).
+  - **Make public (walk blocker 2).** `media_publish {media, confirm: true}` is page only: the director's own private
+    upload (`private/<kind>/`, `imported.from: "upload"`) moves to `media/<kind>/`, loses the flag (logged `made_public`),
+    and the current storyboard's picks / thumbs, the requests' refs and the take proposals follow. An agent still never
+    lowers a privacy (403), and Final's "an export is possible" links to it.
+  - **Results from another app (walk blocker 5).** With no fal key and no choice made, the generator is "Open in another
+    app" (`selectedGenerators`); the Queue approves such a request at $0 and its row takes dropped images:
+    `handoff_upload {id, name, data}` (page only; PNG / JPEG / WebP by the bytes, ≤ 20 MB) writes into the request's
+    `results/`, then Collect results runs it at $0.
+  - **Media roots (walk blocker 6).** A media root whose first folder is one a project keeps its own files in (`media/`,
+    `private/`, `thumbs/`, `gen/`, `sketches/`, `exports/`, `proposals/`) is ignored with a warning at start (and
+    `/api/config` `media_roots_ignored`): rename the folder.
+  - The lyric gate is opt-in per project (`settings.json` `lyric_gate`; a new project from `_template` starts with it
+    off, a project without the key keeps it on); its one name in the page is "on screen".
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.
 

@@ -46,6 +46,8 @@
         in_ms: null, out_ms: null, media_ms: null, media_s: null, placeholder: s.placeholder || null, looks: s.looks || {}, variants: s.variants || {}, alt: s.alt || [],
         placeholder_src: s.placeholder && s.placeholder.svg ? "data:image/svg+xml;charset=utf-8," + encodeURIComponent(s.placeholder.svg) : null, world: s.world || null };
       if (s.status !== "picked" || !k) return r;
+      // review #3 I4: a file outside the composition (absolute, a drive, a scheme, "..") is never handed out: a placeholder
+      if (typeof k.file !== "string" || /^([a-z][a-z0-9+.-]*:|[\/\\])/i.test(k.file) || k.file.split(/[\/\\]/).indexOf("..") >= 0) { r.status = "placeholder"; r.placeholder = r.placeholder || { reason: "unsafe" }; return r; }
       r.file = k.file; r.kind = k.kind; r.take = k.take; r.request = k.request; r.in_ms = k.in_ms; r.out_ms = k.out_ms;
       if (k.kind === "video") {
         var m = k.in_ms + (tt - s.t0), top = k.out_ms == null ? Infinity : k.out_ms - 1;

@@ -7,7 +7,7 @@
 // About: the one version string (package.json `version`) and the git commit this checkout is at (/api/status `commit`).
 //   connect.open() · about.open()   (commands help.connect / help.about)
 import { openDialog, copyText, esc } from './dialog.js';
-import { PROJECT } from '../js/store.js';
+import { PROJECT, toast } from '../js/store.js';
 
 const getJSON = async (u) => { try { const r = await fetch(u, { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch (e) { return null; } };
 const fwd = (p) => String(p || '').replace(/\\/g, '/');
@@ -37,6 +37,26 @@ function stateHtml(c) {
   return `<span class="cn-on">server ${esc(c.url)}</span> · ${c.pages} page${c.pages === 1 ? '' : 's'} open · `
     + (la ? `last agent write: <b>${esc(la.what)}</b>${la.project ? ` on ${esc(la.project)}` : ''} <span class="dim" title="${esc(la.at)}">${esc(ago(la.at))}</span>` : '<span class="dim">no agent write since the server started</span>');
 }
+// review #3 walk blocker 3: is an agent connected? (an agent wrote through this server since it started: /api/connect
+// last_agent). Every ask for the agent then says so, with a link to Connect Claude…, and the stage bar shows it inline.
+//   agent.last (undefined = unknown, null = none) · agent.refresh() · agent.hint() (after an ask)
+export const agent = {
+  last: undefined, at: 0,
+  async refresh(force = false) {
+    if (!force && Date.now() - this.at < 10000) return this.last;
+    const c = await getJSON('api/connect'); this.at = Date.now();
+    const was = this.last; this.last = c ? c.last_agent || null : undefined;
+    if (JSON.stringify(was) !== JSON.stringify(this.last)) document.dispatchEvent(new CustomEvent('wb:agent', { detail: this.last }));
+    return this.last;
+  },
+  none() { return this.last === null; },
+  // after an ask: no agent has written yet -> say where the ask waits and how to connect one
+  async hint() {
+    if (await this.refresh(true) !== null) return;
+    toast('No agent connected: your ask waits in the Notes until Claude reads it.', { action: { label: 'Connect Claude…', run: () => connect.open() }, ms: 8000 });
+  },
+};
+setTimeout(() => agent.refresh(true), 1500); setInterval(() => agent.refresh(true), 30000);
 export const connect = {
   async open() {
     const c = await getJSON('api/connect');
@@ -55,7 +75,7 @@ export const connect = {
 };
 export const about = {
   async open() {
-    const [pkg, st] = await Promise.all([getJSON('package.json'), getJSON('api/status')]);
+    const st = await getJSON('api/status'), pkg = null;   // (/api/status carries the version: package.json is not served, review #3)
     const version = st?.version || pkg?.version || null, commit = st?.commit || null;
     const n = window.WB?.commands?.list?.().length || 0;
     const row = (k, v) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`;
@@ -66,5 +86,5 @@ export const about = {
         + `<p class="dim">MIT licence · <a href="https://github.com/dazca/ai-videoclip-director" target="_blank" rel="noopener">source on GitHub</a></p></div>` });
   },
 };
-window.WB = Object.assign(window.WB || {}, { connect, about });
-export default { connect, about };
+window.WB = Object.assign(window.WB || {}, { connect, about, agent });
+export default { connect, about, agent };

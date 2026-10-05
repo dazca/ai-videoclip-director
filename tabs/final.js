@@ -59,7 +59,7 @@ export class FinalList {
   input() {
     return { song: store.song, lyrics: store.lyrics, stages: store.stages, scenes: store.scenes, breakdown: store.breakdown, board: store.board, uses: store.uses || [],
       entities: store.entities, approvals: store.approvals, requests: store.requests, notes: store.notes, revisions: store.revisions, costs: store.costs, ledger: this.ledger,
-      media: store.media, isPrivate: (p) => isPrivatePath(p) || store.mediaByPath?.[p]?.private === true };
+      media: store.media, settings: store.settings, isPrivate: (p) => isPrivatePath(p) || store.mediaByPath?.[p]?.private === true };
   }
   rowsShown() {
     const f = this.f;
@@ -83,7 +83,7 @@ export class FinalList {
       + `<span class="sp"></span>`
       + (this.sel.size ? `<span class="dim">${this.sel.size} selected</span><button data-x="approvesel" class="pri" title="approve every selected row (a confirm shows the count and the cost)">Approve selected (${selRows.filter(r => r.act?.approve).length})</button><button data-x="clearsel">Clear</button>` : '')
       + (this.o.panels ? (L ? `<span class="fnlocked" title="${esc(`locked by the director at ${String(L.at).replace('T', ' ')}${L.summary ? '\n' + L.summary : ''}\nagents cannot change anything until you unlock`)}">🔒 Locked for render · ${esc(L.revision)}</span><button data-x="unlock" title="agents may write again">Unlock</button>`
-        : `<button data-x="lock" class="${v.ready ? 'pri' : ''}" title="close a revision (the final snapshot), mark it final and lock the project: agents cannot change anything until you unlock">Lock for render</button>`) : '');
+        : '<span class="dim" title="the stage bar’s Lock for render…: close a revision (the final snapshot) and lock the project">lock: the stage bar ↑</span>') : '');   // review #3 (UX 8): one Lock button, the bar's
     const lb = this.$('.fnlockbar'); lb.hidden = !(L && this.o.panels);
     lb.innerHTML = L && this.o.panels ? `🔒 <b>Locked for render</b> · ${esc(L.revision)} (the final snapshot) · ${esc(String(L.at).replace('T', ' ').slice(0, 16))}${L.ready === false ? ` · locked with ${esc((L.failing || []).join(', '))} failing` : ''} · agents cannot change anything (409) until you unlock` : '';
     if (this.o.panels) this.$('.fntop').innerHTML = this.checklistHtml(v) + this.costsHtml(v.costs);
@@ -134,7 +134,7 @@ export class FinalList {
     const n = v.checklist.filter(c => c.ok).length;
     return `<div class="fnck"><div class="fnph"><b>Ready to render</b><span class="${v.ready ? 'fnok' : 'fnbad'}">${v.ready ? 'yes' : `${n}/${v.checklist.length}`}</span><span class="dim">derived from the files, never stored</span></div>`
       + v.checklist.map(c => `<div class="fnci ${c.ok ? 'ok' : 'bad'}" data-ck="${c.id}"><i>${c.ok ? '✓' : '✗'}</i><span class="fncl">${esc(c.label)}</span><span class="dim fncd" title="${esc(c.detail + (c.warn ? '\n⚠ ' + c.warn : ''))}">${esc(c.detail)}${c.warn ? ` <b class="fnw">⚠ ${esc(c.warn)}</b>` : ''}</span>`
-        + (c.ok ? '' : `<span class="fngaps">${c.gaps.map((g, i) => `<a data-gap="${c.id}:${i}" title="go there">${esc(g.label)}</a>`).join('')}${c.more ? `<span class="dim">+${c.more}</span>` : ''}</span>`) + '</div>').join('') + '</div>';
+        + (c.ok ? '' : `<span class="fngaps">${c.gaps.map((g, i) => `<a data-gap="${c.id}:${i}" title="go there">${esc(g.label)}</a>${g.publish?.length ? `<a data-pub="${c.id}:${i}" class="fnpub" title="your own private upload: make it public (asks first) so it can be exported">make public…</a>` : ''}`).join('')}${c.more ? `<span class="dim">+${c.more}</span>` : ''}</span>`) + '</div>').join('') + '</div>';
   }
   costsHtml(c) {
     const cap = c.cap || 0, scale = Math.max(cap, c.projected, 0.01), pct = (x) => `${Math.max(0, Math.min(100, x / scale * 100)).toFixed(2)}%`;
@@ -166,6 +166,7 @@ export class FinalList {
     if (t.closest('[data-t]') && !x) return this.ctx.goto(Number(t.closest('[data-t]').dataset.t));
     const gs = t.closest('[data-gostage]'); if (gs) return this.jump({ stage: gs.dataset.gostage });
     const gv = t.closest('[data-goview]'); if (gv) return this.jump({ view: gv.dataset.goview });
+    const pub = t.closest('[data-pub]'); if (pub) { const [id, i] = pub.dataset.pub.split(':'); const g = this.view.checklist.find(c => c.id === id)?.gaps[Number(i)]; return g?.publish && WB().importMedia?.makePublic(g.publish); }
     const gap = t.closest('[data-gap]'); if (gap) { const [id, i] = gap.dataset.gap.split(':'); const g = this.view.checklist.find(c => c.id === id)?.gaps[Number(i)]; return g && this.jump(g.jump); }
     if (x === 'approve' && r) return this.approve([r]);
     if (x === 'changes' && r) { this.chg = { key: r.key, text: '' }; return this.render(); }

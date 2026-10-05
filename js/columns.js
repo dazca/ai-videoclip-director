@@ -8,7 +8,7 @@ import { currentScript, sceneStatus } from './scenes.js';
 import { currentBreakdown, KINDS, KIND_COLOR } from './breakdown.js';
 import { shotEstimate } from './storyboard.js';
 import { noteTime, STAGE_TITLE } from './notes.js';
-import { coverage } from './surfaces.js';
+import { coverage, gateOn } from './surfaces.js';
 import { placeholderFor, placeholderUri } from './placeholder.js';   // E5: a shot without a frame or take
 import { chaptersColumn } from './chapterscol.js';   // E3: the chapters band
 
@@ -97,22 +97,23 @@ export function makeColumns(tl, store) {
           const groups = []; let cur = [], x = 0;
           L.words.forEach((wd, i) => { const ww = W(wd.w); if (cur.length && x + sp + ww > avail) { groups.push(cur); cur = []; x = 0; } x += (cur.length ? sp : 0) + ww; cur.push(i); });
           if (cur.length) groups.push(cur);
-          groups.forEach((g, gi) => {
-            const e = el('div', `it vl v-${L.voice}${gi === 0 ? ' l0' : ''}${gi === groups.length - 1 ? ' ll' : ''}`);
-            e.dataset.line = L.id; e.dataset.sel = 'line:' + L.id;
-            e.innerHTML = g.map(i => { const wd = L.words[i]; return `<span data-act="seek" data-t="${num(wd.t0)}"${wd.p < 0.2 ? ' class="lo"' : ''}>${esc(wd.w)}</span>`; }).join(' ');
-            frag.appendChild(e);
-            const t0 = L.words[g[0]].t0;
-            c.items.push({ t0, el: e, line: L, first: gi === 0 });
-            g.forEach((i, k) => { c.words.push(L.words[i]); c.spans.push(e.children[k]); });
-          });
+          if (!groups.length) continue;
+          // review #3 (UX 1): a wrapped line stays ONE block at its first word's time (its rows stacked, the tail indented):
+          // a wrapped tail placed at its own word time read as part of the next line when the column was narrow
+          const e = el('div', `it vl v-${L.voice} l0 ll${groups.length > 1 ? ' mr' : ''}`);
+          e.dataset.line = L.id; e.dataset.sel = 'line:' + L.id;
+          e.innerHTML = groups.map(g => `<div class="vr">${g.map(i => { const wd = L.words[i]; return `<span data-act="seek" data-t="${num(wd.t0)}" title="${fmt(wd.t0, true)}"${wd.p < 0.2 ? ' class="lo"' : ''}>${esc(wd.w)}</span>`; }).join(' ')}</div>`).join('');
+          frag.appendChild(e);
+          c.items.push({ t0: L.words[groups[0][0]].t0, el: e, line: L, first: true, rows: groups.length });
+          for (const sp of e.querySelectorAll('span[data-t]')) c.spans.push(sp);
+          groups.forEach(g => g.forEach(i => c.words.push(L.words[i])));
         }
         c.body.appendChild(frag);
         c.wT0 = c.words.map(w => w.t0);
         c.dirty = true;
       },
       measure(c) {
-        return c.items.map((it, i) => ({ t0: it.t0, t1: i + 1 < c.items.length ? Math.max(c.items[i + 1].t0, it.t0 + 1) : dur, h: LH + (i + 1 < c.items.length && c.items[i + 1].first ? 1 : 0) }));
+        return c.items.map((it, i) => ({ t0: it.t0, t1: i + 1 < c.items.length ? Math.max(c.items[i + 1].t0, it.t0 + 1) : dur, h: LH * (it.rows || 1) + (i + 1 < c.items.length && c.items[i + 1].first ? 1 : 0) }));
       },
       tick(c, t) {
         if (!c.wT0) return;
@@ -128,13 +129,18 @@ export function makeColumns(tl, store) {
     // ---------------------------------------------------------------- surface (E2, the lyric gate, js/surfaces.js): per lyric line,
     // its words as they show on screen: a word on a surface (a shot's lyrics[] at the word's time) reads normally, a word
     // on no surface is red. Hover: where it shows. Click a word: seek; double-click: the shot in the storyboard
-    { id: 'surface', title: 'surface', kind: 'text', w: 96, mode: 'follow', stripColor: '#e5484d',
+    // review #3 (UX 2): ONE name, "on screen"; per line a chip "covered/words" only (the words are in the lyrics column next
+    // to it, so they are not repeated here): hover lists where each word shows and which are missing. Off for the project
+    // (settings.json lyric_gate false): the column stays empty.
+    { id: 'surface', title: 'on screen', kind: 'text', w: 64, mode: 'follow', stripColor: '#e5484d',
       build(c) {
+        if (!gateOn(store.settings)) return addItems(c, [], () => '');
         const cov = coverage(song, store.boardShots()), next = (i) => cov.lines[i + 1]?.t0 ?? dur;
         const list = cov.lines.map((l, i) => ({ t0: num(l.t0), t1: Math.max(num(l.t0) + 1, Math.min(next(i), dur)), l }));
-        addItems(c, list, ({ l }) => `<div class="sfl${l.covered === l.n ? ' ok' : ''}" data-line="${esc(l.id)}" title="${esc(`${l.id}: ${l.covered} of ${l.n} words on a surface`)}"><i class="sfn">${l.covered}/${l.n}</i>${l.words.map(w => `<span class="sfw ${w.by.length ? 'on' : 'un'}" data-act="seek" data-t="${num(w.t0)}" title="${esc(w.by.length ? `${w.w}: ${w.by.map(b => `${b.shot} · ${b.where}`).join('\n')}` : `${w.w}: on no surface${w.off ? ` (${w.off.map(b => b.shot).join(', ')} is not on screen then)` : ''}`)}">${esc(w.w)}</span>`).join(' ')}</div>`);
+        addItems(c, list, ({ l }) => { const on = l.words.filter(w => w.by.length), un = l.words.filter(w => !w.by.length), where = [...new Set(on.flatMap(w => w.by.map(b => `${b.shot} · ${b.where}`)))];
+          return `<div class="sfl${l.covered === l.n ? ' ok' : ''}" data-line="${esc(l.id)}" data-act="seek" data-t="${num(l.t0)}" data-covered="${l.covered}" data-n="${l.n}" title="${esc(`${l.id}: ${l.covered} of ${l.n} words on screen${where.length ? `\n${where.join('\n')}` : ''}${un.length ? `\nnot on screen: ${un.map(w => w.w).join(' ')}` : ''}`)}"><i class="sfn">${l.covered}/${l.n}</i>${where.length ? `<span class="sfwh">${esc(where[0].split(' · ')[1]?.split(':')[0] || '')}</span>` : ''}</div>`; });
       },
-      act: seekAct, refresh: onBoard(),
+      act: seekAct, refresh(c, what) { if (what === 'board' || what === 'settings') { this.build(c); return true; } return false; },
       dblclick(c, t) { const s = store.boardShots().find(x => x.t0 <= t && t < x.t1); window.WB?.stages?.open('storyboard').then(() => s && window.WB.storyboard?.focus(s.id)); } },
 
     // ---------------------------------------------------------------- events
@@ -217,7 +223,7 @@ export function makeColumns(tl, store) {
     // ---------------------------------------------------------------- world clips (EDL uses: clip, take, in-point) + the picked takes
     // a storyboard shot with a picked take (shot.clip, D6) shows it over the shot's time: ★ take, in–out, its frame; the
     // EDL uses that shot lists are then hidden (the pick supersedes them)
-    { id: 'clips', title: 'world clips', kind: 'text', w: 76, mode: 'follow', stripColor: '#93c2a2',
+    { id: 'clips', title: 'clips', kind: 'text', w: 76, mode: 'follow', stripColor: '#93c2a2',
       build(c) {
         const picked = store.boardShots().filter(s => s.clip?.file), hide = new Set(picked.flatMap(s => s.clips || []));
         const items = [...store.uses.filter(u => !hide.has(u.id)), ...picked.map(s => ({ pick: true, s, id: s.id, t0: s.t0, t1: s.t1 }))].sort((a, b) => a.t0 - b.t0 || a.t1 - b.t1);

@@ -68,7 +68,10 @@ class Workspace {
     // Time view (core/timemode.js): each scene / gap row on the timeline's axis, its lyric lines and beats at their own times
     this.ta = new TimeAxis({ stage: 'script', scroller: this.$('.sclist'), nc: this.nc, rows: () => this.timeRows(), onApply: () => this.nc.schedule('place'), noSeek: '.sccard' });
     document.addEventListener('wb:timemode', (e) => { if (e.detail.stage === 'script' && !this.typing()) this.render(); });
-    store.on((w) => { if (['scenes', 'all', 'song', 'media', 'proposals', 'events'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
+    // review #3 walk blocker 1: a change that lands while the focus moves (an intake answer's `change` fires as the director
+    // clicks into the next field) re-renders only after the focus has settled, and never while a field has it: re-rendering
+    // in between threw the new field away, the focus fell to <body> and the next keys ran as shortcuts
+    store.on((w) => { if (['scenes', 'all', 'song', 'media', 'proposals', 'events'].includes(w)) setTimeout(() => { if (this.typing()) this.pending = true; else this.render(); }, 0); });
     this.render();
   }
   get doc() { return store.scenes; }
@@ -386,9 +389,12 @@ class Workspace {
     }
     const list = this.$('.lylist');
     if (this.side === 'intake') {
-      list.innerHTML = `<div class="lyvh"><span class="dim">${unanswered ? `${unanswered} of ${SC.INTAKE.length} open · answer here or in a chat with the agent` : 'all answered'}</span><button data-a="askdraft" title="a note asking the agent to draft the scenes from these answers (also: the stage bar's Ask the agent…)">Ask the agent to draft</button></div>`
+      // keep the answer being typed (its text, focus and caret) across the re-render: never lose a keystroke to a refresh
+      const fa = document.activeElement, keep = fa && list.contains(fa) && fa.matches('.scq textarea') ? { q: fa.closest('[data-q]').dataset.q, v: fa.value, s: fa.selectionStart, e: fa.selectionEnd } : null;
+      list.innerHTML =`<div class="lyvh"><span class="dim">${unanswered ? `${unanswered} of ${SC.INTAKE.length} open · answer here or in a chat with the agent` : 'all answered'}</span><span class="dim" title="the stage bar's Ask the agent… › Draft the scenes: a note the agent reads">then: Ask the agent… › Draft</span></div>`
         + SC.INTAKE.map(q => { const a = this.doc.intake[q.id] || {};
           return `<div class="scq${a.text ? ' done' : ''}" data-q="${q.id}"><div class="scqh"><b>${esc(q.q)}</b>${a.asked ? `<span class="to" title="${esc(`asked by ${a.asked.via === 'agent' ? 'the agent' : 'the director'} ${a.asked.at || ''}`)}">asked in chat</span>` : ''}<span class="sp"></span>${a.text ? who(a) : ''}</div><textarea rows="2" placeholder="${esc(q.hint)}" spellcheck="false">${esc(a.text || '')}</textarea>${interpHtml(a.interpretation, { key: q.id })}</div>`; }).join('');
+      if (keep) { const ta = list.querySelector(`.scq[data-q="${keep.q}"] textarea`); if (ta) { ta.value = keep.v; ta.focus({ preventScroll: true }); try { ta.setSelectionRange(keep.s, keep.e); } catch (e) { /* fine */ } } }
       return;
     }
     const vs = [...this.doc.versions].reverse(), { a, b } = this.ab;
@@ -443,6 +449,8 @@ class Workspace {
     });
     // field edits: text as you type (no re-render), times / title on change
     el.addEventListener('input', (e) => {
+      // an intake answer is saved while typing (a short pause), not only when the field loses the focus: nothing typed is lost
+      if (e.target.matches('.scq textarea')) { const t = e.target, k = t.closest('[data-q]').dataset.q; clearTimeout(this.ikT?.[k]); (this.ikT ||= {})[k] = setTimeout(() => { if ((this.doc.intake[k]?.text || '') !== t.value.trim()) this.setAnswer(k, t.value.trim()); }, 700); return; }
       const t = e.target, sid = t.closest('.scrow')?.dataset.scene, s = sid && this.scene(sid); if (!s) return;
       if (t.matches('.scin-text')) this.edit(() => { s.text = t.value; }, { render: false });
       else if (t.matches('.scin-title')) this.edit(() => { s.title = t.value; }, { render: false });
@@ -451,7 +459,7 @@ class Workspace {
     el.addEventListener('change', (e) => {
       const t = e.target;
       if (t.matches('.scsnap')) { this.snap = t.value; prefs.set('scriptSnap', t.value); return this.renderList(); }
-      if (t.matches('.scq textarea')) { const k = t.closest('[data-q]').dataset.q; if ((this.doc.intake[k]?.text || '') !== t.value) this.setAnswer(k, t.value.trim()); return; }
+      if (t.matches('.scq textarea')) { const k = t.closest('[data-q]').dataset.q; clearTimeout(this.ikT?.[k]); if ((this.doc.intake[k]?.text || '') !== t.value.trim()) this.setAnswer(k, t.value.trim()); return; }
       const sid = t.closest('.scrow')?.dataset.scene, s = sid && this.scene(sid); if (!s) return;
       if (t.matches('.scanc')) return this.setAnchor(sid, t.dataset.edge, t.value);
       if (t.matches('.scin-world')) { let w; try { w = WD.cleanWorld(t.value); } catch (er) { toast(er.message); return this.render(); } return this.edit(() => { if (w) s.context = w; else delete s.context; }); }

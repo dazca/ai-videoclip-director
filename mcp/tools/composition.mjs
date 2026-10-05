@@ -11,7 +11,7 @@ mcp.registerTool('composition_export', {
     + 'docs/COMPOSITION_ROUNDTRIP.md): per storyboard shot (time order) its time range, clip-use ids, the picked take (file mapped under the composition\'s assets, its workbench source, request / take, '
     + 'in_ms / out_ms) or a placeholder {reason: unpicked | private | missing | unmapped}, the alternatives, the look per character and the variant per location / prop; plus the song\'s timing anchors '
     + '(bpm, beat / bar, first beat, sections, lines) and a sha256 checksum. Deterministic: the same picks give the same bytes (changed: false). '
-    + 'It writes ONLY data/<project>/exports/<out> (default composition/edl.json): no approval, pick, request or project file changes, and it works on a project locked for render. '
+    + 'It writes ONLY data/<project>/exports/<out> (default composition/edl.json): no approval, pick, request or project file changes. The file the render reads (the director’s remembered out, else the default) and its file map are the director’s: on a project locked for render you may not rewrite it (409; another out such as "agent/edl.json" is fine), and once they remembered a map in the page your export of that file uses theirs (another map: 403). '
     + 'Private media is never written: a private pick exports as a placeholder without its file name. out must stay inside exports/ (a path with "..", ".", a drive, a backslash: 400). '
     + 'Returns {path, abs, checksum, bytes, changed, counts {shots, picked, placeholders, private, unmapped}, warnings, map}. Use dry_run to see the counts without writing. '
     + 'Copy (or link) the file into the composition and its takes under the mapped folder; the picks themselves are the director\'s (takes_get, take_propose).',

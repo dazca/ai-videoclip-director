@@ -36,7 +36,7 @@ class WavesDialog {
     el.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') this.hide(); });
   }
   sizeList() { const s = String(this.sizes).split(/[^\d]+/).map(Number).filter(n => Number.isInteger(n) && n >= 1 && n <= 50); return s.length ? s.slice(0, 8) : [2, 4, 8]; }
-  show({ pilot } = {}) { if (Array.isArray(pilot)) this.pilot = new Set(pilot); if (!this.el.isConnected) document.body.appendChild(this.el); this.refresh(); }
+  show({ pilot } = {}) { if (Array.isArray(pilot)) this.pilot = new Set(pilot); if (!this.el.isConnected) document.body.appendChild(this.el); { const b = this.el.firstElementChild; if (b) { b.tabIndex = -1; b.focus({ preventScroll: true }); } } this.refresh(); }
   hide() { this.el.remove(); }
   args() { return { pilot: [...this.pilot], sizes: this.sizeList(), takes: this.takes }; }
   async refresh() {

@@ -18,7 +18,7 @@ import { menus } from '../core/menus.js';
 import { stripHtml, register as registerProposals, offerPrepare } from '../core/proposals.js';
 import { TimeAxis } from '../core/timemode.js';
 import { upperBound } from '../js/warp.js';
-import { coverage } from '../js/surfaces.js';
+import { coverage, gateOn } from '../js/surfaces.js';
 
 const WB = () => window.WB;
 const visible = () => WB()?.app?.active() === 'stage' && WB().stages?.current() === 'lyrics';
@@ -195,9 +195,9 @@ class Workspace {
     const tm = songLines(), byLine = this.lineNotes();
     // the lyric gate (E2): per line, how many of its words show on a surface (a shot's lyrics[]) at their time
     const cov = new Map(coverage(store.song, store.boardShots()).lines.map(x => [x.id, x]));
-    const gate = (id) => { const c = cov.get(id); if (!c || !c.n) return ''; const un = c.words.filter(w => !w.by.length).map(w => w.w);
+    const gate = (id) => { const c = cov.get(id); if (!c || !c.n || !gateOn(store.settings)) return '';   /* off for the project: no chip (review #3) */ const un = c.words.filter(w => !w.by.length).map(w => w.w);
       const kinds = [...new Set(c.words.flatMap(w => w.by.map(b => b.where.split(':')[0])))];
-      return kinds.map(k => `<i class="lysfk" title="${esc(c.words.flatMap(w => w.by).filter(b => b.where.split(':')[0] === k).map(b => `${b.shot} · ${b.where}`).filter((x, i, a) => a.indexOf(x) === i).join('\n'))}">${esc(k)}</i>`).join('') + `<b class="lysf${c.covered === c.n ? ' ok' : ''}" data-sfgo="${esc(id)}" title="${esc(`on a surface: ${c.covered} of ${c.n} words${un.length ? `
+      return kinds.map(k => `<i class="lysfk" title="${esc(c.words.flatMap(w => w.by).filter(b => b.where.split(':')[0] === k).map(b => `${b.shot} · ${b.where}`).filter((x, i, a) => a.indexOf(x) === i).join('\n'))}">${esc(k)}</i>`).join('') + `<b class="lysf${c.covered === c.n ? ' ok' : ''}" data-sfgo="${esc(id)}" title="${esc(`on screen: ${c.covered} of ${c.n} words${un.length ? `
 not on screen: ${un.join(' ')}` : ''}
 (click: the shot in the storyboard)`)}">${c.covered}/${c.n}</b>`; };
     let k = 0;

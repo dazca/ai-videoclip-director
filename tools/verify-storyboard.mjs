@@ -180,8 +180,8 @@ export async function verifyStoryboard({ browser, BASE, DATA, OUT, post, writeHe
 
   // 7. the asks: "Fill the gaps" and "Ask the agent to storyboard" write notes for the agent
   const askAgent = async (label) => { await click('.sgbar [data-ask]'); await wait(200); return pg.evaluate((l) => { const it = [...document.querySelectorAll('.pop .pi')].find(e => (e.querySelector('.lb')?.textContent || '').startsWith(l)); it?.click(); return !!it; }, label); };   // the stage bar's one "Ask the agent…" menu
-  await askAgent('Ask the agent to fill the gaps'); await wait(300);
-  await askAgent('Ask the agent to storyboard'); await wait(300);
+  await askAgent('Fill the gaps'); await wait(300);
+  await askAgent('Storyboard'); await wait(300);
   const N = await fileUntil('notes.json', (j) => j.notes?.filter(n => n.to === 'agent' && n.target?.stage === 'storyboard').length >= 2);
   const fillN = N?.notes.find(n => n.ask === 'fill_gaps'), boardN = N?.notes.find(n => n.ask === 'storyboard');
   check('"Fill the gaps" writes an ask (kind fill_gaps: the shots, the assets, the estimate) and "Ask the agent to storyboard" another (kind storyboard), both by the director via page',

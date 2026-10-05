@@ -24,7 +24,7 @@ import * as N from './notes.js';
 import { inFlight } from './revisions.js';
 import { currentVersion, flatLines, assetApproval } from './flow.js';
 import { takesChecklist } from './takes.js';
-import { gateCheck } from './surfaces.js';
+import { gateCheck, gateOn } from './surfaces.js';
 import { chaptersView } from './chapters.js';
 
 export const GROUPS = [
@@ -169,8 +169,9 @@ export function finalView(I) {
   add('takes', 'every shot has a picked take', tk.ok, !shots.length ? 'no shots yet' : `${tk.done} of ${pl(tk.total, 'shot')} picked${tk.missing.length ? ` · ${tk.missing.length} to pick` : ''}`,
     tk.missing.map(id => ({ label: `${id} no take picked`, jump: { stage: 'storyboard', focus: id } })));
   // E2, the lyric gate: every sung or spoken word on a desktop surface (a shot's lyrics[]) at its time
-  const lg = gateCheck(song, shots);
-  add('lyrics', 'every word on a surface', lg.ok, lg.detail,
+  // (review #3: opt-in per project, settings.json lyric_gate; off = not a blocker, and nothing red)
+  const lg = gateOn(I.settings) ? gateCheck(song, shots) : { ok: true, detail: 'off for this project (Settings › Lyric gate turns it on)', gaps: [] };
+  add('lyrics', 'every word on screen', lg.ok, lg.detail,
     lg.gaps.map(g => { const sh = shots.find(x => x.t0 <= g.t0 && g.t0 < x.t1); return { label: g.label, jump: sh ? { stage: 'storyboard', focus: sh.id } : { stage: 'storyboard', t: g.t0 } }; }));
   add('assets', 'every asset the shots need is approved', !gaps.assets.length, gaps.assets.length ? `${pl(gaps.assets.length, 'asset')} not approved` : 'all approved',
     gaps.assets.map(a => ({ label: `${a.name}${a.variant ? ' · ' + a.variant_name : ''}: ${a.why || 'not approved'}`, jump: { stage: A.TYPE[a.type]?.stage || 'characters', focus: a.id } })));
@@ -183,12 +184,15 @@ export function finalView(I) {
   add('round', 'no open review round', !live, live ? `round ${live.n} is ${live.status === 'sent' ? 'with the agent' : 'finished: close its revision on the rail'}` : 'none in flight', live ? [{ label: `round ${live.n}`, jump: { view: 'compare' } }] : []);
   add('cap', 'costs are within the cap', costView.within, `$${spent} spent + $${committed} committed of $${cap}${cap ? '' : ' (cap 0 blocks paid runs)'}`,
     costView.within ? [] : [{ label: 'Review › Costs', jump: { view: 'costs' } }], !costView.projected_within ? `projected $${projected} with the drafts and the shots not requested yet` : costView.warnings[0] || null);
+  // review #3 walk blocker 2: the remedy for a shot with private media only: the director's own private uploads among it can be
+  // made public (Make public…, media_publish): their media ids, for the checklist's link
+  const pubOf = (s) => shotMedia(s, { uses: I.uses || [], requests: reqs, media: I.media || [] }).map(x => (I.media || []).find(m => m.path === x.path)).filter(m => m?.private && m.imported?.from === 'upload' && /^private\/[a-z0-9_-]+\/[^/]+$/.test(m.path)).map(m => m.id);
   const noMedia = [], privOnly = [];
   for (const s of shots) { const m = shotMedia(s, { uses: I.uses || [], requests: reqs, media: I.media || [] }); if (!m.length) noMedia.push(s); else if (m.every(x => isPriv(x.path))) privOnly.push(s); }
   const hasSong = !!song.audio?.mix;
   add('export', 'an export is possible', hasSong && shots.length && !noMedia.length && !privOnly.length,
     !hasSong ? 'no song file' : !shots.length ? 'no shots' : noMedia.length || privOnly.length ? [noMedia.length ? `${pl(noMedia.length, 'shot')} without media` : '', privOnly.length ? `${pl(privOnly.length, 'shot')} with private media only (never exported)` : ''].filter(Boolean).join(' · ') : 'song + media for every shot, none private',
-    [...(!hasSong ? [{ label: 'song file', jump: { stage: 'lyrics' } }] : []), ...noMedia.map(s => ({ label: `${s.id} no media`, jump: { stage: 'storyboard', focus: s.id } })), ...privOnly.map(s => ({ label: `${s.id} private only`, jump: { stage: 'storyboard', focus: s.id } }))]);
+    [...(!hasSong ? [{ label: 'song file', jump: { stage: 'lyrics' } }] : []), ...noMedia.map(s => ({ label: `${s.id} no media`, jump: { stage: 'storyboard', focus: s.id } })), ...privOnly.map(s => ({ label: `${s.id} private only`, jump: { stage: 'storyboard', focus: s.id }, publish: pubOf(s) }))]);
 
   const groups = GROUPS.map(g => ({ ...g, rows: rows.filter(r => r.group === g.id) })).filter(g => g.rows.length);
   const counts = { total: rows.length, ...Object.fromEntries(ST.map(s => [s, rows.filter(r => r.st === s).length])), notes: rows.filter(r => r.notes_open).length,

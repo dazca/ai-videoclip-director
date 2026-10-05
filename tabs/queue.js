@@ -25,7 +25,7 @@
 // picked (D6) or rejected / kept here, and "Mark reviewed" unlocks the next wave. "Plan waves…" (tabs/waves.js) proposes
 // waves from the storyboard gaps; "Import job books" brings the first film's falgen jobs_*.json in as history (done, never
 // run again, no new cost).
-import { store, toast, isPrivatePath } from '../js/store.js';
+import { store, toast, isPrivatePath, postJSON } from '../js/store.js';
 import { fmt } from '../js/timeline.js';
 import { esc, mediaAttr } from '../core/esc.js';
 import { buildRecipe, constantsOf, FIELDS, MODELS, FRAMINGS } from '../js/recipe.js';
@@ -98,7 +98,9 @@ export default {
         <div class="qfrow qest"><span>est <b>$${Number(e?.usd || 0).toFixed(2)}</b> <span class="dim">${esc(e?.why || '')}</span></span><span class="sp"></span><button data-q="add" class="pri">Add draft request</button></div>`;
     };
     // the generator per kind (Settings > Generator; settings.json generators, default fal) and the runner's live progress
-    const genOf = (r) => (['draft', 'approved', 'failed'].includes(r.status) ? null : r.generator || r.handoff?.generator) || store.settings?.generators?.[genKindOf(r)] || 'fal';
+    // (no choice made: the server's default from generators_get: fal with a key, else Open in another app; review #3 blocker 5)
+    let GI = null;
+    const genOf = (r) => (['draft', 'approved', 'failed'].includes(r.status) ? null : r.generator || r.handoff?.generator) || store.settings?.generators?.[genKindOf(r)] || GI?.default || 'fal';
     const sel = new Set();   // ticked draft rows (Approve / Reject selected)
     const money = (x) => `$${(Number(x) || 0).toFixed(2)}`;
     const privRef = (p) => isPrivatePath(p) || !!store.mediaByPath?.[p]?.private;
@@ -123,10 +125,12 @@ export default {
     const costLbl = (r) => { if (!B.isHistory(r)) return `${money(r.actual_cost_usd)} spent`; const c = r.history.cost || {}; return counted(c) ? `${money(c.usd ?? r.actual_cost_usd)} spent` : c.usd != null ? `${money(c.usd)} est. (not counted)` : 'cost unknown'; };
     const actions = (r) => {
       const gen = genOf(r), runLbl = gen === 'openwith' ? 'Export prompt pack' : `Run · ${money(r.est_cost)}`;
+      // made in another app (no fal key, or chosen): nothing is paid through the workbench, so it is approved at $0 (the cap untouched)
+      if (r.status === 'draft' && gen === 'openwith') return `<button data-x="approve0" class="pri" title="approve it to be made in another app: Run exports its prompt pack; nothing is paid through the workbench ($0 against the cap)">Approve · $0 (another app)</button>${author(r) === 'director' ? '<button data-x="withdraw" title="your own draft: take it back (not a rejection)">Withdraw</button>' : '<button data-x="reject">Reject</button>'}`;
       if (r.status === 'draft') return `<button data-x="approve" class="pri" title="approve: it may then run and spend up to its estimate">Approve</button>${author(r) === 'director' ? '<button data-x="withdraw" title="your own draft: take it back (not a rejection)">Withdraw</button>' : '<button data-x="reject">Reject</button>'}`;
       if (r.status === 'approved') return `${r.last_run?.status === 'refused' ? `<span class="qwhy" title="${esc(r.last_run.why)}">last run refused: ${esc(r.last_run.why.slice(0, 120))}</span>` : ''}<button data-x="run" class="pri run" title="run it now with ${esc(gen)} (Settings › Generator); the cap is checked again">${runLbl}</button><button data-x="unapprove" title="back to draft">Unapprove</button><button data-x="reject">Reject</button>`;
       if (r.status === 'queued' || (r.status === 'running' && !r.handoff)) return `<span class="qprog">⟳ ${esc(progress(r))}</span>`;
-      if (r.status === 'running' && r.handoff) return `<span class="qprog">handed off: pack in <code>${esc(r.handoff.pack || '')}</code>; save the images in <code>${esc(r.handoff.results || '')}</code></span><button data-x="copy">Copy prompt</button><button data-x="run" class="pri">Collect results</button>`;
+      if (r.status === 'running' && r.handoff) return `<div class="qho"><span class="qhol" title="${esc(`pack: ${r.handoff.pack || ''} · results: ${r.handoff.results || ''}`)}"><b>1</b> Copy prompt · <b>2</b> make the images in your app with the refs (Open folder) · <b>3</b> drop them here · <b>4</b> Collect results</span><span class="qhob"><button data-x="copy">Copy prompt</button><button data-x="reveal" title="open the prompt pack (prompt.txt, refs/, README) in your file manager">Open folder</button><label class="qdrop" data-drop="${esc(r.id)}" title="PNG, JPEG or WebP: they land in ${esc(r.handoff.results || 'results/')}">drop images here or <u>pick files</u><input type="file" data-x="hofiles" accept="image/png,image/jpeg,image/webp" multiple hidden></label><button data-x="run" class="pri">Collect results</button></span></div>`;
       if (r.status === 'failed') return `<span class="qwhy" title="${esc(r.why || '')}">✕ ${esc(String(r.why || 'failed').slice(0, 140))}</span><button data-x="run" class="pri" title="run again (outputs that exist are skipped; a submitted job is polled, not paid twice)">Retry · ${money(r.est_cost)}</button><button data-x="reject">Reject</button>`;
       if (r.status === 'done' && r.retaking) return `<span class="qprog">⟳ retake ${esc((r.retaking.takes || []).map(t => t + 1).join(', '))}: ${esc(progress(r))}</span>`;
       if (r.status === 'done') { const L = r.linked, tf = r.takes_failed || [], per = (Number(r.est_cost) || 0) / Math.max(1, r.takes || 1); return `${tf.length ? `<button data-x="retake" class="pri" title="run only the failed take${tf.length > 1 ? 's' : ''} again (the done takes are kept and not paid again); within the approved estimate, the cap checked">Retry take ${tf.map(t => t + 1).join(', ')} · ${money(per * tf.length)}</button>` : ''}<span class="qdone">✓ ${costLbl(r)}${tf.length ? ` · take ${tf.map(t => t + 1).join(', ')} failed` : ''}${L ? ` · ${L.nodes?.length ? `node${L.nodes.length > 1 ? 's' : ''} ${esc(L.nodes.join(', '))}` : ''}${L.proposals?.length ? ` proposed ${esc(L.proposals.join(', '))}` : ''} in ${esc(L.id)} ${esc(L.tree || '')}: keep or pick` : ''}</span>${L ? '<button data-x="stage" title="keep or pick them in the stage">Open in stage</button>' : ''}`; }
@@ -155,6 +159,7 @@ export default {
         <div class="qacts"><button data-q="runall" class="pri"${approved.length ? '' : ' disabled'} title="run every approved request, batch by batch (up to 2 at once; the cap is checked for each; a locked batch never runs)">Run all approved (${approved.length}) · ${money(apUsd)}</button>
         ${sel.size ? `<span class="qselt">${sel.size} selected · ${money(selUsd)}</span><button data-q="approvesel" class="pri">Approve selected</button><button data-q="rejectsel">Reject selected</button>` : '<span class="dim">tick drafts to approve or reject several at once</span>'}
         <span class="dim">· nothing runs or is paid until you approve it; Run uses the generator in Settings › Generator · right-click a shot / clip / cast chip / card to add a request</span></div>
+        ${GI && !GI.fal_key?.found && Object.values(GI.selected || {}).includes('openwith') ? '<div class="qnokey">No fal key: an approved request runs as <b>Open in another app</b> ($0). Run exports its prompt and refs; you make the images in any app and drop them on its row. (A fal key: Settings › Generator.)</div>' : ''}
         ${batches.length ? wavesHead(doc, shotsNow) : ''}
         ${items.length ? `<table class="tbl qtbl">${HEAD}
           ${batches.map(b => batchHtml(b, doc, shotsNow, shown)).join('')}
@@ -231,6 +236,22 @@ export default {
     };
     const batchAct = async (body, ok) => { try { const j = await store.op('batch_act', body); if (ok) toast(ok(j)); return j; } catch (er) { toast(`not done: ${er.message}`); return null; } };
     render();
+    store.generators().then(g => { GI = g; render(); }).catch(() => {});
+    // results made in another app, dropped (or picked) on a handed-off row: uploaded into its results/ (handoff_upload, page
+    // only), then collected (request_run: its outputs at $0)
+    const handoffFiles = async (id, files) => {
+      const imgs = [...files].filter(f => /^image\/(png|jpeg|webp)$/.test(f.type) || /\.(png|jpe?g|webp)$/i.test(f.name));
+      if (!imgs.length) return toast('drop PNG, JPEG or WebP images');
+      let n = 0;
+      for (const f of imgs) {
+        const data = await new Promise((ok, bad) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(',')[1] || ''); fr.onerror = bad; fr.readAsDataURL(f); });
+        try { await store.op('handoff_upload', { id, name: f.name, data }); n++; } catch (er) { toast(`${f.name}: ${er.message}`); }
+      }
+      if (n) { toast(`${n} image${n === 1 ? '' : 's'} in ${id}'s results: collecting them`); await run([id]); }
+    };
+    $list.addEventListener('dragover', (e) => { const d = e.target.closest('.qdrop'); if (d) { e.preventDefault(); e.stopPropagation(); d.classList.add('over'); } });
+    $list.addEventListener('dragleave', (e) => { e.target.closest('.qdrop')?.classList.remove('over'); });
+    $list.addEventListener('drop', (e) => { const d = e.target.closest('.qdrop'); if (!d) return; e.preventDefault(); e.stopPropagation(); d.classList.remove('over'); handoffFiles(d.dataset.drop, e.dataTransfer.files); });
     const addRequest = async () => {
       const e = est(), video = isVideo(), vs = video ? vSpec() : null, refs = video ? VID.videoRefs(vs) : refsOf();
       if (video) { const bad = VID.videoProblems(vs); if (bad.length) return toast(bad[0]); }
@@ -284,10 +305,12 @@ export default {
       if ((x === 'vreject' || x === 'vkeep' || x === 'vundo') && bid) return batchAct({ act: 'verdict', id: bid, request: id, verdict: x === 'vundo' ? null : x === 'vreject' ? 'rejected' : 'kept' }, () => `${id}: ${x === 'vundo' ? 'undecided again' : x === 'vreject' ? 'takes rejected' : 'takes kept'}`);
       if (x === 'privok') { await store.setRequest(id, { private_upload_ok: e.target.checked }); toast(e.target.checked ? `${id}: its private refs may be uploaded to fal storage when it runs` : `${id}: private refs stay local (a fal run is refused)`); return; }
       if (x === 'approve') return store.setRequest(id, { status: 'approved' });
+      if (x === 'approve0') return store.setRequest(id, { est_cost: 0 }).then(() => store.setRequest(id, { status: 'approved' }));   // edit, then approve: an edit voids an approval
       if (x === 'unapprove' || x === 'redraft') return store.setRequest(id, { status: 'draft' });
       if (x === 'reject') return store.setRequest(id, { status: 'rejected', ...(r.status !== 'draft' ? { why: 'rejected by the director in Review > Queue' } : {}) });
       if (x === 'withdraw') return store.setRequest(id, { status: 'withdrawn', why: 'withdrawn by the director' });
       if (x === 'run') return run([id]);
+      if (x === 'reveal' && r.handoff?.pack) { const res = await postJSON('/api/reveal', { path: `${r.handoff.pack}/README.md` }).catch(() => null); if (!res?.ok) toast(`the pack is in ${r.handoff.pack}/ (in the project folder)`); return; }
       if (x === 'retake') return run([id], { retake: true });
       if (x === 'copy') { try { await navigator.clipboard.writeText(r.prompt || ''); toast('prompt copied: paste it in the other app'); } catch (er) { toast('copy failed: the prompt is in ' + (r.handoff?.pack || 'the pack') + '/prompt.txt'); } return; }
       if (x === 'stage' && r.linked) { const L = r.linked; await window.WB.stages?.open(L.type === 'character' ? 'characters' : 'scenery'); (L.type === 'character' ? window.WB.characters : window.WB.scenery)?.open?.(L.id); return; }
@@ -323,6 +346,7 @@ export default {
     const syncBlocks = () => { for (const b of F.built.blocks) { const ta = $form.querySelector(`[data-blk="${b.id}"]`); if (!ta) continue; if (ta !== document.activeElement) ta.value = b.text; ta.parentElement.classList.toggle('unfilled', /\[fill:/.test(b.text)); ta.parentElement.classList.toggle('edited', !!b.edited); } syncPrompt(); };
     $list.addEventListener('change', (e) => {
       const row = e.target.closest('tr[data-id]'); if (!row) return;
+      if (e.target.dataset.x === 'hofiles') { const fl = e.target.files; if (fl?.length) handoffFiles(row.dataset.id, fl); return; }
       if (e.target.dataset.x === 'prompt') store.setRequest(row.dataset.id, { prompt: e.target.value });
       if (e.target.dataset.x === 'cost') store.setRequest(row.dataset.id, { est_cost: Number(e.target.value) || 0 });
     });
