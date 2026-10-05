@@ -16,9 +16,13 @@ formats and how to add features.
    Not up and the director wants to watch: ask them to run `npm start` in the workbench folder.
 2. `projects` (action list / open) if the project is not the right one.
 3. `stages_get`: where the project stands in the guided flow (seven stages, the next one, what blocks it). Then
-   `song_get` (words:false for a quick read), `shots_list`, `notes_list` status=open, `approvals_get` state=changes,
+   `song_get` (words:false for a quick read), `shots_list`, `notes_get` (every stage's open notes), `approvals_get` state=changes,
    `requests_list`, `costs_get`. Summarise in a few lines: where the video stands, what the director asked for, money.
-4. Open director notes and items in `changes` are the to-do list. Confirm the plan before large changes.
+4. Open director notes and items in `changes` are the to-do list. Notes are ONE list for every stage and the timeline:
+   `notes_get` (status open; `stage` filters; `to: "agent"` = the director's asks). Answer with `notes_add {reply_to}`;
+   when you did what a note asks, `notes_status {id, status: "absorbed", reply: "line 7 rewritten in v4"}`; write your
+   own on the row it is about (`notes_add {target: {stage, kind, id, w?, t?, pin?}, text}`). Never dismiss the director's
+   notes (refused) and never absorb one you did not act on. Confirm the plan before large changes.
 
 ## The workflow (one stage at a time, the director signs off each)
 
@@ -110,8 +114,9 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
 7. **Run** only approved requests: `request_update` queued -> running -> (call the provider) -> done with `outputs` and
    `actual_cost_usd`; on failure rejected + `why`. Outputs become media automatically; attach them to uses with
    `shot_update` (take, in_ms) and to entities with `entity_upsert`.
-8. **Review**: set `review`, pin a note explaining what changed, `ui_focus` with `preview` to show it. The director
-   approves or requests changes; answer their notes with `note_resolve` + reply.
+8. **Review**: set `review`, pin a note explaining what changed (`notes_add` on the shot / node / line), `ui_focus`
+   with `preview` to show it. The director approves or requests changes; answer their notes with `notes_add {reply_to}`
+   and `notes_status absorbed` + reply once done.
 9. **Render**: the final render is a media item of kind `render` and the song's `audio.render`; snapshot first.
 
 ## Never

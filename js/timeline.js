@@ -280,6 +280,9 @@ export class Timeline {
       if (act) { const c = this.byId[act.closest('.col').dataset.col]; c.def.act?.(c, act, e); return; }
       const t = this.timeAtClientY(e.clientY);
       this.seek(t);
+      // a column may take the click (the notes column: a new note at that time)
+      const colEl = e.target.closest('.col'), cc = colEl && this.byId[colEl.dataset.col];
+      if (cc?.def.click && !cc.strip) cc.def.click(cc, t, e);
     });
     this.sheet.addEventListener('dblclick', (e) => {
       const edge = this.edgeAt(e); if (edge) { this.resetWidth(edge.id); return; }
@@ -406,6 +409,15 @@ export class Timeline {
     this.save();
     this.scroller.scrollTop = this.warp.y(t0);
     this.drawLanes();
+  }
+  // "+ note at this time": the notes column (shown if hidden) gets an editor at t (scrolled into view)
+  noteAt(t) {
+    const c = this.byId.notes; if (!c) return;
+    if (c.hidden || c.collapsed) { c.hidden = false; c.collapsed = false; this.save(); this.applyColumns(); this.relayout(); }
+    const y = this.warp.y(t) - this.scroller.scrollTop;
+    if (y < this.headH + 10 || y > this.scroller.clientHeight - 70) { this.scrollToTime(t); this.drawLanes(); }
+    this.seek(t);
+    return c.def.editAt(c, t);
   }
   setHidden(id, hidden) { const c = this.byId[id]; c.hidden = hidden; this.save(); this.applyColumns(); this.relayout(); }
   toggleLinear() { this.linear = !this.linear; for (const c of this.cols) c.dirty = true; this.save(); this.relayout({ all: true }); }

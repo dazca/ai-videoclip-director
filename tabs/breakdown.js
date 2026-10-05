@@ -6,7 +6,9 @@
 // beats and the intake answers who / where) and "Ask the agent to extract" (a note the agent reads with breakdown_get).
 // Edits collect in a draft (kept in this browser) until "Save version" (Ctrl+Enter); item statuses (draft / review / ok)
 // are saved at once. "Create entity" turns a character / location / prop item into an entity (Assets) and a wardrobe
-// item into a look on a character: page only, nothing is generated or spent. Format: js/breakdown.js.
+// item into a look on a character: page only, nothing is generated or spent. The Notes column (core/notescol.js) on the
+// right is row-aligned with the items (list and matrix); notes on a scene or the whole breakdown sit in its top row.
+// Right-click: + Add › item (by kind) / note (undoable). Format: js/breakdown.js, js/notes.js.
 import { store, prefs, toast, esc, PROJECT, postJSON } from '../js/store.js';
 import { commands } from '../core/commands.js';
 import { menus } from '../core/menus.js';
@@ -14,6 +16,8 @@ import { ui } from '../core/palette.js';
 import * as F from '../js/flow.js';
 import * as SC from '../js/scenes.js';
 import * as BD from '../js/breakdown.js';
+import { NotesColumn } from '../core/notescol.js';
+import { history } from '../core/history.js';
 
 const WB = () => window.WB;
 const visible = () => WB()?.app?.active() === 'stage' && WB().stages?.current() === 'breakdown';
@@ -28,18 +32,33 @@ let S = null;
 class Workspace {
   constructor(el, ctx) {
     this.el = el; this.ctx = ctx;
-    this.view = prefs.get('bdView', 'list'); this.side = prefs.get('bdSide', 'notes'); this.kind = 'all'; this.scene = null; this.showDropped = prefs.get('bdDropped', true);
+    this.view = prefs.get('bdView', 'list'); this.side = prefs.get('bdSide', null) === 'versions' ? 'versions' : null; this.kind = 'all'; this.scene = null; this.showDropped = prefs.get('bdDropped', true);
     this.filter = 'open'; this.open = null; this.sel = new Set(); this.compare = null; this.ab = { a: null, b: null }; this.pending = false; this.fresh = new Set();
     el.classList.add('bdws');
     el.innerHTML = `<div class="bdmain"><div class="lybar bdbar"></div><div class="bdsel"></div><div class="bdbody" tabindex="-1"></div></div>
-      <div class="lyside bdside"><div class="lytabs"><a data-side="notes">Notes</a><a data-side="versions">Versions</a></div><div class="lylist"></div>
-      <div class="lyask"><textarea rows="2" placeholder="Ask the agent… (Ctrl+Enter sends)"></textarea><button data-a="ask" title="writes a note addressed to the agent (MCP breakdown_get lists it); nothing is generated or paid">Ask the agent</button></div></div>`;
+      <div class="lyside bdside"><div class="lytabs"><a data-side="versions">Versions</a><span class="sp"></span><a data-a="closeside" title="close the versions panel">×</a></div><div class="lylist"></div></div>`;
     this.$ = (s) => el.querySelector(s);
     this.loadDraft();
     this.wire();
+    // the Notes column: one row per item (with its editor when open; in the matrix, per row); scene notes in the top row
+    const itemT = (id) => ({ stage: 'breakdown', kind: 'item', id });
+    this.nc = new NotesColumn({ stage: 'breakdown', scroller: this.$('.bdbody'), active: () => !this.compare,
+      top: () => ({ label: 'notes on the whole breakdown (and on scenes)', targets: [{ stage: 'breakdown', kind: 'stage', id: null }, ...(this.scene ? [{ stage: 'breakdown', kind: 'scene', id: this.scene }] : [])],
+        match: (n) => n.target.kind === 'stage' || n.target.kind === 'scene', sub: (n) => n.target.kind === 'scene' ? n.target.id : '' }),
+      rows: () => [...this.el.querySelectorAll('.bdbody .bdrow[data-item], .bdbody tr.bdmxr[data-item]')].map(e => {
+        const ed = e.nextElementSibling?.matches('.bded') ? e.nextElementSibling : null;
+        return { ...(ed ? { els: [e, ed] } : { el: e }), targets: [itemT(e.dataset.item)] }; }),
+      current: () => this.open && this.item(this.open) ? itemT(this.open) : this.scene ? { stage: 'breakdown', kind: 'scene', id: this.scene } : null });
     store.on((w) => { if (['breakdown', 'scenes', 'all'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
     this.render();
   }
+  // a draft edit from "+ Add" (an item) and the other structural edits: one undo step (Ctrl+Z puts the draft back)
+  undoable(label, fn) {
+    const before = structuredClone(this.draft); const r = fn(); const after = structuredClone(this.draft);
+    if (JSON.stringify(before) !== JSON.stringify(after)) history.push({ label, undo: () => this.setDraft(before), redo: () => this.setDraft(after) });
+    return r;
+  }
+  setDraft(d) { this.draft = structuredClone(d); this.saveDraft(); this.render(); }
   get doc() { return store.breakdown; }
   get cur() { return BD.currentBreakdown(this.doc); }
   get scenes() { return SC.currentScript(store.scenes)?.scenes || []; }
@@ -89,13 +108,14 @@ class Workspace {
   // ---------------------------------------------------------------- items
   targets(c) { const id = c?.itemId || this.open; return this.sel.size && (!id || this.sel.has(id)) ? [...this.sel] : id ? [id] : []; }
   focus(id) { this.compare = null; this.open = id; this.sel = new Set([id]); if (this.kind !== 'all' && this.item(id)?.kind !== this.kind) this.kind = 'all'; this.render(); this.el.querySelector(`.bdrow[data-item="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'nearest' }); }
-  async addItem(kind) {
+  async addItem(kind, scene) {
     kind ||= this.kind !== 'all' ? this.kind : await ui.pick({ title: 'New item: kind', items: BD.KINDS.map(k => ({ label: BD.KIND_ONE[k], value: k })) });
     if (!kind) return;
     const name = await ui.prompt({ title: `New ${BD.KIND_ONE[kind]}: name`, placeholder: 'name (Enter adds)' }); if (!name?.trim()) return;
-    const id = this.newId();
-    this.edit((d) => { d.push({ id, kind, name: name.trim(), description: '', links: this.scene ? [{ scene: this.scene, beats: [] }] : [], source: 'director' }); }, { render: false });
+    const id = this.newId(), sc = scene || this.scene;
+    this.undoable(`add ${BD.KIND_ONE[kind]} ${id}`, () => this.edit((d) => { d.push({ id, kind, name: name.trim(), description: '', links: sc ? [{ scene: sc, beats: [] }] : [], source: 'director' }); }, { render: false }));
     this.fresh.add(id); this.view = this.view === 'matrix' ? 'matrix' : 'list'; this.focus(id);
+    return id;
   }
   async rename(id) {
     const it = this.item(id); if (!it) return;
@@ -111,7 +131,7 @@ class Workspace {
   drop(ids, on) {
     const items = ids.map(i => this.item(i)).filter(Boolean); if (!items.length) return;
     if (on == null) on = !items.every(i => i.dropped);
-    this.edit(() => { for (const i of items) { if (on) i.dropped = true; else delete i.dropped; } });
+    this.undoable(`${on ? 'drop' : 'restore'} ${items.length} item(s)`, () => this.edit(() => { for (const i of items) { if (on) i.dropped = true; else delete i.dropped; } }));
     toast(`${items.length} item${items.length > 1 ? 's' : ''} ${on ? 'dropped (restore: same command)' : 'restored'}`);
   }
   async merge(ids) {
@@ -158,32 +178,20 @@ class Workspace {
     for (const id of [...r.added, ...r.updated]) this.fresh.add(id);
     toast(`suggested from the script: ${r.added.length} new, ${r.updated.length} with more scenes · review, then Save version`);
   }
-  addNote({ item = null, scene, text, to, kind }) {
-    return store.mutate('breakdown.json', (d) => {
-      d.notes.push({ id: BD.nextBdNoteId(d), item, ...(scene ? { scene } : {}), text, by: 'director', ...(to ? { to, kind: kind || 'request' } : {}), status: 'open', at: nowIso(), version: d.current, replies: [] });
-    }, { label: to ? 'ask the agent' : 'breakdown note' });
+  // notes (the Notes column, notes.json v2): on an item (saved or not: its id stays), else the scene / the whole breakdown
+  noteOnItem(id = this.open) {
+    const it = id && this.item(id);
+    this.nc.edit(it ? { stage: 'breakdown', kind: 'item', id } : this.scene ? { stage: 'breakdown', kind: 'scene', id: this.scene } : { stage: 'breakdown', kind: 'stage', id: null });
   }
-  reply(id, text) { return store.mutate('breakdown.json', (d) => { const n = d.notes.find(x => x.id === id); if (n) (n.replies ||= []).push({ id: `${n.id}.${(n.replies?.length || 0) + 1}`, text, by: 'director', at: nowIso() }); }, { label: 'reply ' + id }); }
-  resolve(id) { return store.mutate('breakdown.json', (d) => { const n = d.notes.find(x => x.id === id); if (n) { n.status = n.status === 'open' ? 'resolved' : 'open'; n.resolved_by = 'director'; n.resolved_at = nowIso(); } }, { label: 'resolve ' + id }); }
-  async noteOnItem(id = this.open) {
-    const it = id && this.item(id); if (!it) return toast('open an item first');
-    const text = await ui.prompt({ title: `Note on ${it.id} “${it.name}”`, placeholder: 'note (Enter saves)' }); if (!text) return;
-    if (!this.cur?.items.some(i => i.id === id)) return toast('save the item first (Save version): notes attach to saved items');
-    await this.addNote({ item: id, text }); this.setSide('notes');
-  }
-  async ask() {
-    const ta = this.$('.lyask textarea'), text = ta.value.trim(); if (!text) { ta.focus(); return; }
-    await this.addNote({ item: this.open && this.cur?.items.some(i => i.id === this.open) ? this.open : null, scene: this.scene || undefined, text, to: 'agent' });
-    ta.value = ''; toast('asked the agent (a note it reads with breakdown_get)');
-  }
+  ask() { const t = this.nc.o.current() || { stage: 'breakdown', kind: 'stage', id: null }; this.nc.edit(t, { to: true }); }
   extract() {
     if (!this.scenes.length) return toast('no script yet: write scenes in the Script stage first');
-    if (this.doc.notes.some(n => n.status === 'open' && n.kind === 'extract')) return toast('already asked: the agent has an open "extract" ask');
+    if (store.notesOn({ stage: 'breakdown', status: 'open' }).some(n => n.ask === 'extract')) return toast('already asked: the agent has an open "extract" ask');
     const v = store.scenes?.current || 'the current version';
     const text = `Extract the breakdown from script ${v}: every character, location, prop, wardrobe item and FX the scenes need (scene text, beats, sketch pins, the intake). Link each to the scenes and beats that need it, keep what is here (merge duplicates, do not undo my drops), and save it as a new version.`;
-    return this.addNote({ text, to: 'agent', kind: 'extract' }).then(() => { this.setSide('notes'); toast('asked the agent to extract the breakdown (breakdown_get, breakdown_update)'); });
+    return store.noteAdd({ stage: 'breakdown', kind: 'stage', id: null }, text, { to: 'agent', ask: 'extract', version: this.doc.current }).then(() => toast('asked the agent to extract the breakdown (breakdown_get, breakdown_update)'));
   }
-  setSide(s) { this.side = s; prefs.set('bdSide', s); this.renderSide(); }
+  setSide(s) { this.side = s === 'versions' ? 'versions' : null; prefs.set('bdSide', this.side); this.renderSide(); this.renderBar(); }
   // ---------------------------------------------------------------- entities (page only; nothing generated or spent)
   async promote(id) {
     const it = this.item(id); if (!it) return;
@@ -249,7 +257,7 @@ class Workspace {
       + `<span class="bdvw"><a data-view="list" class="${this.view === 'list' ? 'on' : ''}">List</a><a data-view="matrix" class="${this.view === 'matrix' ? 'on' : ''}" title="items x scenes: click a cell to link / unlink">Matrix</a></span>`
       + `<select class="bdkind" title="kind">${['all', ...BD.KINDS].map(k => `<option value="${k}"${k === this.kind ? ' selected' : ''}>${k === 'all' ? 'all kinds' : BD.KIND_LABEL[k]}</option>`).join('')}</select>`
       + `<label class="dim" title="show dropped items (greyed; restorable)"><input type="checkbox" class="bddrop"${this.showDropped ? ' checked' : ''}>dropped</label>`
-      + `<button data-a="add" title="a new item">+ item</button><button data-a="suggest" title="a first list from the scene text, beats and the intake (who, where): capitalised names, garments, objects, effects">Suggest from script</button><button data-a="extract" title="writes an ask for the agent: extract the breakdown from the script">Ask the agent to extract</button>`;
+      + `<button data-a="add" title="a new item">+ item</button><button data-a="suggest" title="a first list from the scene text, beats and the intake (who, where): capitalised names, garments, objects, effects">Suggest from script</button><button data-a="extract" title="writes an ask for the agent: extract the breakdown from the script">Ask the agent to extract</button><button data-a="versions" class="${this.side === 'versions' ? 'on' : ''}" title="the versions panel: diff any two, restore">Versions ${this.doc.versions.length}</button>`;
   }
   renderSel() {
     const el = this.$('.bdsel'), n = this.sel.size;
@@ -261,13 +269,13 @@ class Workspace {
     const s = this.scenes.find(x => x.id === l.scene);
     return `<span class="bdsc${s ? '' : ' gone'}${this.scene === l.scene ? ' on' : ''}" data-scene="${esc(l.scene)}" title="${esc(s ? `${s.id} · ${SC.span(s.t0, s.t1)} · ${s.title}` : `${l.scene}: not in the current script`)}${l.beats.length ? esc('\nbeats ' + l.beats.join(', ')) : ''}${l.note ? esc('\n' + l.note) : ''}">${esc(l.scene)}${l.beats.length ? `<sup>${l.beats.length}</sup>` : ''}${l.note ? '*' : ''}</span>`;
   }
-  rowHtml(it, nn) {
+  rowHtml(it) {
     const st = this.doc.states[it.id] || {}, status = st.status || 'draft', saved = this.cur?.items.find(x => x.id === it.id), chg = !saved || JSON.stringify(saved) !== JSON.stringify(it);
     const ent = st.entity_id ? `<a class="bdent" data-ent="${esc(st.entity_id)}" title="open the entity in Assets">→ ${esc(store.entities.find(e => e.id === st.entity_id)?.name || st.entity_id)}${st.look_id ? ' / ' + esc(st.look_id) : ''}</a>` : '';
     const forIt = it.kind === 'wardrobe' && it.for ? this.item(it.for) : null;
     const head = `<div class="bdrow k-${it.kind}${it.dropped ? ' dropped' : ''}${this.sel.has(it.id) ? ' sel' : ''}${this.open === it.id ? ' open' : ''}${chg ? ' chg' : ''}${this.fresh.has(it.id) ? ' fresh' : ''}" data-item="${esc(it.id)}">`
       + `${dot(it.kind)}<span class="bdnm" title="${esc(it.id)}${it.aliases?.length ? esc(' · aka ' + it.aliases.join(', ')) : ''}">${esc(it.name)}</span>${it.aliases?.length ? `<span class="dim bdaka">${esc(it.aliases.join(', '))}</span>` : ''}${forIt ? `<span class="dim">for ${esc(forIt.name)}</span>` : ''}`
-      + `<span class="bdst s-${status}" title="${status === 'ok' ? 'the director signed it off' : status === 'review' ? (st.via === 'agent' ? 'the agent asks you to look' : 'to review') : 'draft'}"><i></i>${status === 'draft' ? '' : ST_LABEL[status]}</span>${it.source === 'agent' ? '<span class="who ag" title="drafted by the agent">agent</span>' : ''}${ent}${nn ? `<span class="lynb" title="${nn} open note(s)">${nn}</span>` : ''}`
+      + `<span class="bdst s-${status}" title="${status === 'ok' ? 'the director signed it off' : status === 'review' ? (st.via === 'agent' ? 'the agent asks you to look' : 'to review') : 'draft'}"><i></i>${status === 'draft' ? '' : ST_LABEL[status]}</span>${it.source === 'agent' ? '<span class="who ag" title="drafted by the agent">agent</span>' : ''}${ent}`
       + `<span class="bdscs">${it.links.map(l => this.sceneChip(l)).join('') || '<span class="dim">no scenes</span>'}</span>`
       + `${it.description && this.open !== it.id ? `<span class="bdds" title="${esc(it.description)}">${esc(it.description)}</span>` : ''}${it.dropped ? '<b class="bdrs" data-a="undrop" title="restore">restore</b>' : ''}</div>`;
     return head + (this.open === it.id ? this.editorHtml(it, st) : '');
@@ -281,7 +289,7 @@ class Workspace {
       + (it.kind === 'wardrobe' ? `<label class="dim">for <select class="bdin-for"><option value="">(nobody yet)</option>${chars.map(c => `<option value="${esc(c.id)}"${c.id === it.for ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>` : '')
       + `${sb('draft')}${sb('review')}${sb('ok')}<span class="sp"></span>`
       + (BD.PROMOTABLE.includes(it.kind) ? (st.entity_id ? `<a data-a="unlinkent" title="forget the link (the entity stays)">unlink entity</a>` : `<button data-a="promote" title="${it.kind === 'wardrobe' ? 'a look on a character' : 'a draft entity in Assets'}: nothing generated or spent">Create entity</button>`) : '')
-      + `<b class="sctool" data-a="note" title="note on this item (Alt+N)">✉</b><b class="sctool" data-a="split" title="split into two items">split</b><b class="sctool" data-a="merge1" title="merge with another item">merge</b><b class="sctool" data-a="drop" title="${it.dropped ? 'restore' : 'drop (soft: restorable)'}">${it.dropped ? 'restore' : 'drop'}</b><b class="sctool" data-a="close" title="close (Esc)">▴</b></div>`
+      + `<b class="sctool" data-a="note" title="note on this item, in the Notes column (Alt+N)">✉</b><b class="sctool" data-a="split" title="split into two items">split</b><b class="sctool" data-a="merge1" title="merge with another item">merge</b><b class="sctool" data-a="drop" title="${it.dropped ? 'restore' : 'drop (soft: restorable)'}">${it.dropped ? 'restore' : 'drop'}</b><b class="sctool" data-a="close" title="close (Esc)">▴</b></div>`
       + `<textarea class="bdin-desc" rows="2" placeholder="what it is, what it looks like, why the script needs it" spellcheck="false">${esc(it.description)}</textarea>`
       + `<div class="scbh">scenes <select class="bdin-addsc"><option value="">+ link a scene…</option>${this.scenes.filter(s => !linked.has(s.id)).map(s => `<option value="${esc(s.id)}">${esc(s.id)} · ${SC.span(s.t0, s.t1)} ${esc(s.title)}</option>`).join('')}</select></div>`
       + it.links.map(l => { const s = this.scenes.find(x => x.id === l.scene);
@@ -292,14 +300,13 @@ class Workspace {
   }
   renderList() {
     const body = this.$('.bdbody'), items = this.shown();
-    const openNotes = new Map(); for (const n of this.doc.notes) if (n.status === 'open' && n.item) openNotes.set(n.item, (openNotes.get(n.item) || 0) + 1);
     if (!this.draft.length) {
       body.innerHTML = `<div class="scempty"><b>No breakdown yet.</b> ${this.scenes.length ? `The script has ${this.scenes.length} scene${this.scenes.length > 1 ? 's' : ''}: <a data-a="suggest">Suggest from script</a> (a first list, here and now) or <a data-a="extract">Ask the agent to extract</a> it; or add items by hand (<a data-a="add">+ item</a>).` : 'Write the script first (stage 2): every item is linked to the scenes that need it.'}</div>`;
       return;
     }
     const groups = BD.KINDS.filter(k => this.kind === 'all' || k === this.kind).map(k => [k, items.filter(i => i.kind === k)]).filter(([k, L]) => L.length || this.kind === k);
     body.innerHTML = `<div class="bdlist">${groups.map(([k, L]) => `<div class="bdgh k-${k}" data-kind="${k}">${dot(k)}<b>${BD.KIND_LABEL[k]}</b><span class="dim">${L.filter(i => !i.dropped).length}${L.some(i => i.dropped) ? ` + ${L.filter(i => i.dropped).length} dropped` : ''}</span><a data-a="addk" data-k="${k}">+ add</a></div>`
-      + L.map(i => this.rowHtml(i, openNotes.get(i.id) || 0)).join('')).join('')}</div>`
+      + L.map(i => this.rowHtml(i)).join('')).join('')}</div>`
       + (this.scene && !items.length ? `<div class="scempty">No item linked to ${esc(this.scene)} yet.</div>` : '');
   }
   renderMatrix() {
@@ -329,31 +336,13 @@ class Workspace {
       <div class="lydc"><div class="lydl">${side('-', 'del')}</div><div class="lydr">${side('+', 'add')}</div></div></div>`;
   }
   renderSide() {
-    const open = this.doc.notes.filter(x => x.status === 'open').length;
-    for (const a of this.el.querySelectorAll('.lytabs [data-side]')) {
-      a.classList.toggle('on', a.dataset.side === this.side);
-      a.innerHTML = `${{ notes: 'Notes', versions: 'Versions' }[a.dataset.side]}<i>${a.dataset.side === 'notes' ? open : this.doc.versions.length}</i>`;
-    }
-    this.$('.lyask').style.display = this.side === 'notes' ? '' : 'none';
-    const ta = this.$('.lyask textarea'), oi = this.open && this.item(this.open);
-    ta.placeholder = oi ? `Ask the agent about ${oi.id} “${oi.name}”… (Ctrl+Enter sends)` : `Ask the agent about the ${this.scene ? 'items of ' + this.scene : 'whole breakdown'}… (Ctrl+Enter sends)`;
-    const list = this.$('.lylist');
-    if (this.side === 'versions') {
-      const vs = [...this.doc.versions].reverse(), { a, b } = this.ab;
-      list.innerHTML = `<div class="lyvh"><span class="dim">pick A and B, or click a row (it vs the one before)</span><button data-a="ab" ${a && b && a !== b ? '' : 'disabled'}>Compare A → B</button></div>` + (vs.length ? vs.map(v => `<div class="lyv${v.id === this.doc.current ? ' cur' : ''}" data-v="${esc(v.id)}">
-        <span class="lyvid">${v.id === this.doc.current ? '●' : ''}${esc(v.id)}</span><span class="lyvm">${esc(v.message || (v.from ? 'restore ' + v.from : ''))}<i>${when(v.created)} ${v.via === 'agent' ? '· agent' : v.by ? '· ' + esc(v.by) : ''} · ${v.items.length} items${v.script ? ' · script ' + esc(v.script) : ''}</i></span>
-        <b data-ab="a" class="${a === v.id ? 'on' : ''}">A</b><b data-ab="b" class="${b === v.id ? 'on' : ''}">B</b>${v.id === this.doc.current ? '' : `<b data-a="restore" data-v="${esc(v.id)}" title="copy it as a new version">restore</b>`}</div>`).join('') : '<div class="dim lyno">No versions yet: the first “Save version” makes v1.</div>');
-      return;
-    }
-    const ns = this.doc.notes.filter(x => (this.filter === 'all' || x.status === this.filter)).sort((x, y) => String(x.at).localeCompare(String(y.at)));
-    const opt = (v, l, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${l}</option>`;
-    list.innerHTML = `<div class="lyvh"><span class="dim">${ns.length} note${ns.length === 1 ? '' : 's'}</span><select class="bdflt" title="which notes">${opt('open', 'open', this.filter)}${opt('all', 'all', this.filter)}${opt('resolved', 'resolved', this.filter)}</select></div>` + (ns.length ? ns.map(x => {
-      const it = x.item && this.item(x.item), where = x.item ? (it ? `${esc(it.name)}` : `${esc(x.item)} (not in the draft)`) : x.kind === 'extract' ? 'extract the breakdown' : x.scene ? `scene ${esc(x.scene)}` : 'whole breakdown';
-      return `<div class="lynote ${x.status}${x.to === 'agent' ? ' ask' : ''}" data-note="${esc(x.id)}" data-nitem="${esc(x.item || '')}">
-        <div class="lynh">${who(x)}${x.to === 'agent' ? '<span class="to">→ agent</span>' : ''}<a data-go="${esc(x.item || '')}">${where}</a><span class="sp"></span><span class="dim">${when(x.at)}</span><b data-a="resolve" title="${x.status === 'open' ? 'resolve' : 'reopen'}">${x.status === 'open' ? '✓' : '↺'}</b></div>
-        <div class="lynt">${esc(x.text)}</div>${(x.replies || []).map(rp => `<div class="lynr">${who(rp)} ${esc(rp.text)} <span class="dim">${when(rp.at)}</span></div>`).join('')}
-        <input class="lyrep" placeholder="reply (Enter)" spellcheck="false"></div>`;
-    }).join('') : `<div class="dim lyno">${this.filter === 'open' ? 'No open notes. Open an item and press ✉ (Alt+N), or ask the agent below.' : 'No notes.'}</div>`);
+    const side = this.$('.bdside'); side.style.display = this.side === 'versions' ? '' : 'none';
+    if (this.side !== 'versions') return;
+    for (const a of this.el.querySelectorAll('.lytabs [data-side]')) { a.classList.add('on'); a.innerHTML = `Versions<i>${this.doc.versions.length}</i>`; }
+    const list = this.$('.lylist'), vs = [...this.doc.versions].reverse(), { a, b } = this.ab;
+    list.innerHTML = `<div class="lyvh"><span class="dim">pick A and B, or click a row (it vs the one before)</span><button data-a="ab" ${a && b && a !== b ? '' : 'disabled'}>Compare A → B</button></div>` + (vs.length ? vs.map(v => `<div class="lyv${v.id === this.doc.current ? ' cur' : ''}" data-v="${esc(v.id)}">
+      <span class="lyvid">${v.id === this.doc.current ? '●' : ''}${esc(v.id)}</span><span class="lyvm">${esc(v.message || (v.from ? 'restore ' + v.from : ''))}<i>${when(v.created)} ${v.via === 'agent' ? '· agent' : v.by ? '· ' + esc(v.by) : ''} · ${v.items.length} items${v.script ? ' · script ' + esc(v.script) : ''}</i></span>
+      <b data-ab="a" class="${a === v.id ? 'on' : ''}">A</b><b data-ab="b" class="${b === v.id ? 'on' : ''}">B</b>${v.id === this.doc.current ? '' : `<b data-a="restore" data-v="${esc(v.id)}" title="copy it as a new version">restore</b>`}</div>`).join('') : '<div class="dim lyno">No versions yet: the first “Save version” makes v1.</div>');
   }
   // ---------------------------------------------------------------- events
   select(id, e) {
@@ -381,9 +370,9 @@ class Workspace {
       if (act === 'addk') return this.addItem(t.closest('[data-k]').dataset.k);
       if (act === 'suggest') return this.suggest();
       if (act === 'extract') return this.extract();
-      if (act === 'ask') return this.ask();
+      if (act === 'versions') return this.setSide(this.side === 'versions' ? null : 'versions');
+      if (act === 'closeside') return this.setSide(null);
       if (act === 'unscene') { this.scene = null; return this.render(); }
-      if (act === 'resolve') return this.resolve(t.closest('[data-note]').dataset.note);
       if (act === 'merge') return this.merge([...this.sel]);
       if (act === 'kindsel') return this.setKind([...this.sel]);
       if (act === 'dropsel') return this.drop([...this.sel]);
@@ -412,11 +401,9 @@ class Workspace {
       }
       if (act === 'undrop' && iid) return this.drop([iid], false);
       if (iid && (t.closest('.bdrow') || t.closest('td.bdmxn'))) return this.select(iid, e);
-      const side = t.closest('[data-side]'); if (side) return this.setSide(side.dataset.side);
       const ab = t.closest('[data-ab]'); if (ab) { const v = ab.closest('[data-v]').dataset.v; this.ab[ab.dataset.ab] = this.ab[ab.dataset.ab] === v ? null : v; return this.renderSide(); }
       const vrow = t.closest('.lyv[data-v]');
       if (vrow) { const i = this.doc.versions.findIndex(v => v.id === vrow.dataset.v); const prev = this.doc.versions[i - 1]; this.compare = prev ? { a: prev.id, b: vrow.dataset.v } : { a: vrow.dataset.v, b: this.doc.current }; return this.render(); }
-      const go = t.closest('[data-go]'); if (go?.dataset.go && this.item(go.dataset.go)) { this.view = 'list'; return this.focus(go.dataset.go); }
     });
     el.addEventListener('dblclick', (e) => { const n = e.target.closest('.bdrow .bdnm, td.bdmxn'); const id = n?.closest('[data-item]')?.dataset.item; if (id) this.rename(id); });
     el.addEventListener('input', (e) => {
@@ -428,7 +415,6 @@ class Workspace {
       const t = e.target;
       if (t.matches('.bdkind')) { this.kind = t.value; return this.render(); }
       if (t.matches('.bddrop')) { this.showDropped = t.checked; prefs.set('bdDropped', t.checked); return this.render(); }
-      if (t.matches('.bdflt')) { this.filter = t.value; return this.renderSide(); }
       const iid = t.closest('.bded')?.dataset.item, it = iid && this.item(iid); if (!it) return;
       if (t.matches('.bdin-name')) { const v = t.value.trim(); if (v && v !== it.name) this.edit(() => { it.name = v; }); return; }
       if (t.matches('.bdin-kind')) { if (this.doc.states[iid]?.entity_id) { toast('an item made into an entity keeps its kind'); return this.render(); } return this.edit(() => { it.kind = t.value; if (t.value !== 'wardrobe') delete it.for; }); }
@@ -438,8 +424,6 @@ class Workspace {
     el.addEventListener('focusout', () => setTimeout(() => { if (this.pending && !this.typing()) this.render(); }, 0));
     el.addEventListener('keydown', (e) => {
       const t = e.target;
-      if (t.matches('.lyrep')) { e.stopPropagation(); if (e.key === 'Enter' && t.value.trim()) { this.reply(t.closest('[data-note]').dataset.note, t.value.trim()); t.value = ''; } if (e.key === 'Escape') t.blur(); return; }
-      if (t.matches('.lyask textarea')) { e.stopPropagation(); if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.ask(); } return; }
       if (t.matches('.lymsg')) { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); this.save(); } return; }
       if (t.matches('input, textarea, select')) {
         e.stopPropagation();
@@ -449,10 +433,6 @@ class Workspace {
         return;
       }
       if (e.key === 'Escape' && (this.open || this.sel.size)) { e.stopPropagation(); this.open = null; this.sel.clear(); this.render(); }
-    });
-    el.addEventListener('mouseover', (e) => {
-      const n = e.target.closest('.lynote'); for (const x of this.el.querySelectorAll('.bdrow.hl')) x.classList.remove('hl');
-      if (n?.dataset.nitem) this.el.querySelector(`.bdrow[data-item="${CSS.escape(n.dataset.nitem)}"]`)?.classList.add('hl');
     });
   }
 }
@@ -491,13 +471,19 @@ commands.register([
   { id: 'breakdown.promote', group: 'Breakdown', title: (c) => itemOf(c)?.kind === 'wardrobe' ? 'Create entity: a look on a character…' : 'Create entity…', when: (c) => V() && !!itemOf(c) && BD.PROMOTABLE.includes(itemOf(c).kind) && !store.breakdown?.states?.[one(c)]?.entity_id, run: (c) => S.promote(one(c)) },
   { id: 'breakdown.showEntity', group: 'Breakdown', title: 'Show the entity', when: (c) => V() && !!store.breakdown?.states?.[one(c)]?.entity_id, run: (c) => S.showEntity(store.breakdown.states[one(c)].entity_id) },
   { id: 'breakdown.unlinkEntity', group: 'Breakdown', title: 'Unlink the entity', hidden: true, when: (c) => V() && !!store.breakdown?.states?.[one(c)]?.entity_id, run: (c) => S.unlink(one(c)) },
-  { id: 'breakdown.note', group: 'Breakdown', title: 'Note on the item', when: (c) => V() && !!itemOf(c), run: (c) => S.noteOnItem(one(c)) },
+  { id: 'breakdown.note', group: 'Breakdown', title: 'Note on the item (Notes column)', when: (c) => V() && !!itemOf(c), run: (c) => S.noteOnItem(one(c)) },
+  { id: 'breakdown.ask', group: 'Breakdown', title: 'Ask the agent about the breakdown…', run: async () => (await ensure())?.ask() },
+  { id: 'breakdown.versions', group: 'Breakdown', title: 'Breakdown versions panel', checked: () => S?.side === 'versions', when: () => V(), run: () => S.setSide(S.side === 'versions' ? null : 'versions') },
+  // "+ Add" an item of a kind (in the right-clicked scene when there is one)
+  ...BD.KINDS.map(k => ({ id: `breakdown.add_${k}`, group: 'Breakdown', title: `Breakdown: add a ${BD.KIND_ONE[k]}…`, hidden: true, when: () => V(), run: (c) => S.addItem(k, c?.sceneId) })),
   { id: 'breakdown.ok', group: 'Breakdown', title: 'Mark the item ok', when: (c) => V() && T(c).length > 0, run: (c) => S.setStatus(T(c).filter(id => S.cur?.items.some(i => i.id === id)), 'ok') },
   { id: 'breakdown.review', group: 'Breakdown', title: 'Flag the item: review', hidden: true, when: (c) => V() && T(c).length > 0, run: (c) => S.setStatus(T(c).filter(id => S.cur?.items.some(i => i.id === id)), 'review') },
 ]);
 // Ctrl+Enter / Alt+N: the rail's stage.save / stage.note ask the visible stage (core/rail.js)
-window.WB = Object.assign(window.WB || {}, { stageActions: { ...(window.WB?.stageActions || {}), breakdown: { canSave: () => V() && S.dirty, save: () => S.save(), canNote: () => V() && !!S.open, note: () => S.noteOnItem() } } });
-menus.contribute('bditem', ['breakdown.open', 'breakdown.rename', 'breakdown.kind', 'breakdown.merge', 'breakdown.split', 'breakdown.drop', '-', 'breakdown.promote', 'breakdown.showEntity', 'breakdown.unlinkEntity', '-', 'breakdown.note', 'breakdown.ok', 'breakdown.review']);
+window.WB = Object.assign(window.WB || {}, { stageActions: { ...(window.WB?.stageActions || {}), breakdown: { canSave: () => V() && S.dirty, save: () => S.save(), canNote: () => V(), note: () => S.nc.editCurrent() } } });
+const ADD = { label: '+ Add', when: () => V(), submenu: [...BD.KINDS.map(k => ({ cmd: `breakdown.add_${k}`, label: `+ ${BD.KIND_ONE[k]}` })), '-', { cmd: 'notes.addHere', label: '+ note here' }] };
+menus.contribute('bdstage', [ADD, 'breakdown.ask', 'breakdown.versions']);
+menus.contribute('bditem', [ADD, 'breakdown.open', 'breakdown.rename', 'breakdown.kind', 'breakdown.merge', 'breakdown.split', 'breakdown.drop', '-', 'breakdown.promote', 'breakdown.showEntity', 'breakdown.unlinkEntity', '-', 'breakdown.note', 'breakdown.ok', 'breakdown.review']);
 menus.contribute('scene', ['-', 'breakdown.sceneItems']);
 
 export default {

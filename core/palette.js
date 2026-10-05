@@ -2,6 +2,8 @@
 // ui.prompt (one line of text) and ui.pick (fuzzy chooser). Also the cheat sheet overlay (?).
 // One input row + up to 16 result rows of 20 px; Up/Down, PageUp/PageDown, Enter, Esc.
 import { commands, context, keyLabel } from './commands.js';
+import { noteTime } from '../js/notes.js';
+import { currentScript } from '../js/scenes.js';
 import { store } from '../js/store.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
@@ -86,7 +88,8 @@ function findRows(q) {
   const add = (group, label, detail, t, extra) => { const s = Math.max(fuzzy(q, label), fuzzy(q, detail || '') - 50); if (s >= 0) out.push({ group, label, detail, t, score: s, ...extra }); };
   for (const l of store.song.lines) add('lyric', l.text, `${l.id} · ${fmt(l.t0)}`, l.t0);
   for (const s of store.script.lines) add('script', `${s.id} ${s.action}`, fmt(s.t0), s.t0);
-  for (const n of store.notes.notes) add('note', n.text, `${n.by} · ${fmt(n.t)}`, n.t, { key: 'note:' + n.id });
+  const nctx = { song: store.song, scenes: currentScript(store.scenes)?.scenes || [], shots: store.boardShots() };
+  for (const n of store.notes.notes) { const t = noteTime(n, nctx); add('note', n.text, `${n.via === 'agent' ? 'agent' : 'director'} · ${n.target.stage}${t != null ? ' · ' + fmt(t) : ''}`, t, { key: 'note:' + n.id, stage: n.target.stage }); }
   for (const s of store.shots) add('shot', `${s.id} ${s.title || ''}`, fmt(s.t0), s.t0, { key: 'shot:' + s.id });
   for (const u of store.uses) add('clip', `${u.id} ${u.label || ''}`, fmt(u.t0), u.t0, { key: 'use:' + u.id });
   for (const s of store.song.sections) add('section', `${store.secLabel(s)} (${s.id})`, fmt(s.t0), s.t0);
@@ -100,6 +103,7 @@ export const palette = {
     if (mode === 'find') {
       return openBox({ placeholder: 'find: lyrics, script, notes, shot/clip ids, entities', value: query, source: findRows, onPick: (r) => {
         if (r.tab) return commands.run('window.tab', { tabId: r.tab });
+        if (r.t == null && r.stage && r.stage !== 'timeline') return window.WB.stages.open(r.stage);
         if (r.t != null) { window.WB.ctx.goto(r.t); if (r.key) window.WB.selection.set([r.key]); }
       } });
     }

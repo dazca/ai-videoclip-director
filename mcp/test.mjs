@@ -9,7 +9,8 @@
 // script_get / scenes_update (derived from script.json, versions, snap, restore, diff, status rules), scene notes, sketches; stage 3: breakdown_* (versions, statuses, notes, the page-only promotion); stage 4: character_* and look_create; stage 5: asset_* and variant_create (the
 // page-only base / choices / approvals, requests linked to a tree, nodes from approved runs only, locks, looks, notes, an
 // agent restore); stage 6: storyboard_get / shots_update (derived from shots.json, versions, tiling on the beat grid, statuses,
-// warnings, restore, diff), shot notes and asks, gaps_get (draft requests, the estimate vs the cap)),
+// warnings, restore, diff), shot notes and asks, gaps_get (draft requests, the estimate vs the cap); notes.json v2: the migration of
+// every old note store without loss, notes_get / notes_add / notes_status, the old note tools as aliases, wait_for on a note),
 // resources, the director-session prompt, the guard rules (edit voids approval, director-only approvals, media kind,
 // CSRF / Host / token checks, path traversal and the PRIVATE rule) and the offline (files only) mode. The temp folder
 // is removed at the end, whatever happens; data/demo must be byte-identical afterwards.
@@ -114,7 +115,7 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     'script_get', 'scenes_update', 'scene_note_add', 'scene_note_resolve', 'intake_get', 'intake_answer', 'sketch_save', 'sketch_get', 'sketch_list',
     'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve', 'character_get', 'character_iteration_add', 'character_note_add', 'look_create',
     'asset_get', 'asset_iteration_add', 'asset_note_add', 'variant_create',
-    'storyboard_get', 'shots_update', 'shot_note_add', 'shot_note_resolve', 'gaps_get'];
+    'storyboard_get', 'shots_update', 'shot_note_add', 'shot_note_resolve', 'gaps_get', 'notes_get', 'notes_add', 'notes_status'];
   check('tools/list has every tool', EXPECT.every(t => tools.includes(t)), { count: tools.length, missing: EXPECT.filter(t => !tools.includes(t)) });
   const schemaOk = (await mcp.listTools()).tools.every(t => t.description?.length > 40 && t.inputSchema?.type === 'object');
   check('every tool has a description and a JSON schema', schemaOk);
@@ -269,8 +270,10 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     { derived: lg.derived, sections: lg.sections?.map(s => s.id), first: lg.sections?.[1]?.lines?.[0] });
   const songBefore = fs.readFileSync(path.join(D, 'song.json'), 'utf8');
   const ln = await call(mcp, 'lyrics_note_add', { line: 'verse/1', quote: 'the note', text: 'mcp test: "the tone"?' });
-  const pageSees = await pageHas((id, s) => s ? s.files.includes('lyrics.json') : window.WB.store.lyrics?.notes?.some(n => n.id === id), ln.id);
-  check('lyrics_note_add on a word range (quote -> [first, last]); writes lyrics.json, not song.json; the page sees it live', ln.id === 'ln01' && JSON.stringify(ln.w) === '[2,3]' && ln.via === 'agent' && fs.readFileSync(path.join(D, 'song.json'), 'utf8') === songBefore && pageSees,
+  const pageSees = await pageHas((id, s) => s ? s.files.includes('notes.json') : window.WB.store.notes?.notes?.some(n => n.id === id && n.target.stage === 'lyrics' && n.target.id === 'verse/1'), ln.id);
+  const v2 = JSON.parse(fs.readFileSync(path.join(D, 'notes.json'), 'utf8')).notes.find(n => n.id === ln.id);
+  check('lyrics_note_add on a word range (quote -> [first, last]); writes notes.json v2 (lyrics.json and song.json untouched); the page sees it live', ln.id === 'ln01' && JSON.stringify(ln.w) === '[2,3]' && ln.via === 'agent' && fs.readFileSync(path.join(D, 'song.json'), 'utf8') === songBefore && !fs.existsSync(path.join(D, 'lyrics.json'))
+    && v2?.target?.kind === 'line' && JSON.stringify(v2.target.w) === '[2,3]' && v2.target.quote === 'the note' && pageSees,
     { id: ln.id, w: ln.w, via: ln.via, pageSees });
   // a lyrics-only project through the projects tool, then edits, diff, restore, stage rules, the song attached later
   const NP = 'mcp-lyrics';
@@ -699,6 +702,109 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const tq = await call(mcp, 'timeline_query', { t0: 4000, t1: 6000 }), sbs = await call(mcp, 'storyboard_get', { scene: sc.id });
   check('timeline_query lists the storyboard shots in the range (board); storyboard_get filters by scene', tq.board?.some(x => x.id === 's2-wall' && x.camera === 'slow push in') && sbs.scenes?.length === 1 && sbs.scenes[0].id === sc.id && !sbs.outside_script.length,
     { board: tq.board?.map(x => x.id), scenes: sbs.scenes?.map(s => s.id) });
+}
+
+// 11h. notes: ONE model (notes.json v2) for every stage and the timeline. The old stores migrate on first read without loss
+// (the old files untouched; notes.json v1 kept as notes.v1.json); notes_get / notes_add / notes_status; the old tools as
+// aliases answering in the old shapes; a note added to an old store later is imported once; wait_for on any note
+{
+  // the demo: its v1 notes.json became v2 on the page's first read, kept byte-identical as notes.v1.json
+  const dv = JSON.parse(fs.readFileSync(path.join(D, 'notes.json'), 'utf8'));
+  check('demo: notes.json migrated to v2 on first read, the v1 file kept byte-identical as notes.v1.json; its notes keep their ids, time and author',
+    dv.v === 2 && fs.readFileSync(path.join(D, 'notes.v1.json'), 'utf8') === fs.readFileSync(path.join(ORIG, 'notes.json'), 'utf8') && dv.notes.some(n => n.id === 'n02' && n.target.stage === 'timeline' && n.target.t === 12000 && n.target.line === 'chorus/0' && n.by === 'director' && n.via === 'page' && n.legacy?.store === 'notes'),
+    { v: dv.v, n02: dv.notes.find(n => n.id === 'n02') });
+  // a project whose notes are still in the old stores: notes.json v1 (with a reply note), lyrics / scenes / breakdown /
+  // storyboard notes, and two characters' iter.notes with the same id
+  const MP = 'mcp-notes';
+  S.duplicateProject(PROJECT, MP);
+  const MD = path.join(DATA, MP), J = (f) => JSON.parse(fs.readFileSync(path.join(MD, f), 'utf8')), W = (f, v) => fs.writeFileSync(path.join(MD, f), JSON.stringify(v, null, 1));
+  fs.rmSync(path.join(MD, 'notes.v1.json'), { force: true });
+  const at = '2026-10-01T10:00:00';
+  const ly = S.lyricsDoc(MP); delete ly.derived;
+  ly.notes = [{ id: 'ln01', line: 'verse/1', w: [2, 3], quote: 'the note', text: 'old lyric note', by: 'director', via: 'page', status: 'open', at, replies: [{ id: 'ln01.1', text: 'agent answer', by: 'agent', via: 'agent', at }] },
+    { id: 'ln02', line: null, w: null, quote: '', text: 'old ask for the agent', to: 'agent', kind: 'request', by: 'director', via: 'page', status: 'resolved', at, replies: [] }];
+  W('lyrics.json', ly);
+  const sc = S.scenesDoc(MP); delete sc.derived;
+  const beat = sc.versions.at(-1).scenes.find(s => s.id === 'sc02')?.beats[0]?.id;
+  sc.notes = [{ id: 'sn01', scene: 'sc02', beat, text: 'old beat note', by: 'director', via: 'page', status: 'open', at, replies: [] },
+    { id: 'sn02', scene: null, text: 'fill', to: 'agent', kind: 'fill_gaps', gaps: [[0, 1000]], by: 'director', via: 'page', status: 'open', at, replies: [] }];
+  W('scenes.json', sc);
+  W('breakdown.json', { rev: 3, current: 'v1', versions: [{ id: 'v1', created: at, by: 'director', via: 'page', message: '', items: [{ id: 'bi01', kind: 'character', name: 'Ada', description: '', links: [{ scene: 'sc02', beats: [] }], source: 'director' }] }], states: {},
+    notes: [{ id: 'bn01', item: 'bi01', text: 'old item note', by: 'agent', via: 'agent', status: 'open', at, replies: [] }, { id: 'bn02', item: null, scene: 'sc02', text: 'old scene note', by: 'director', via: 'page', status: 'open', at, replies: [] }] });
+  const sb = S.boardDoc(MP); delete sb.derived;
+  sb.notes = [{ id: 'sbn01', shot: 's2-wall', scene: 'sc02', text: 'old shot note', by: 'director', via: 'page', status: 'open', at, replies: [] }]; W('storyboard.json', sb);
+  for (const [id, note] of [['ada', { id: 'cn01', tree: 'identity', text: 'old tree note', by: 'director', via: 'page', status: 'open', at, replies: [] }], ['bo', { id: 'cn01', text: 'old asset note', by: 'agent', via: 'agent', status: 'resolved', at, replies: [] }]]) {
+    const f = `entities/characters/${id}.json`, e = J(f); e.iter = { nodes: [], trees: {}, notes: [note], log: [] }; W(f, e);
+  }
+  const v1 = { rev: 4, notes: [{ id: 'n01', t: 4000, line_id: 'verse/0', by: 'director', text: 'old timeline note', status: 'open', at },
+    { id: 'n02', t: 4000, line_id: 'verse/0', by: 'agent', via: 'agent', text: 'old reply', status: 'resolved', at, reply_to: 'n01' },
+    { id: 'n03', t: 12000, line_id: null, by: 'director', text: '◆ marker', kind: 'marker', status: 'resolved', at }] };
+  W('notes.json', v1);
+  const OLD = ['lyrics.json', 'scenes.json', 'breakdown.json', 'storyboard.json', 'entities/characters/ada.json', 'entities/characters/bo.json'], hash0 = Object.fromEntries(OLD.map(f => [f, fs.readFileSync(path.join(MD, f), 'utf8')]));
+  const all = await call(mcp, 'notes_get', { project: MP, status: 'all' }), by = (id) => all.notes?.find(n => n.id === id);
+  const v2 = J('notes.json');
+  check('migration: every old note in v2 once (11: a v1 reply folded into its note), targets per stage (line + word range, beat, item, scene, shot, tree, asset), status (resolved -> absorbed), author, via, asks and gaps kept; ids kept (a clash renamed)',
+    v2.v === 2 && v2.rev === 5 && all.notes?.length === 11 && by('n01')?.replies?.[0]?.text === 'old reply' && by('n01').replies[0].via === 'agent' && by('n03')?.marker === true && by('n03').status === 'absorbed'
+    && JSON.stringify(by('ln01')?.target) === JSON.stringify({ stage: 'lyrics', kind: 'line', id: 'verse/1', w: [2, 3], quote: 'the note' }) && by('ln01').replies.length === 1 && by('ln02')?.to === 'agent' && by('ln02').ask === 'request' && by('ln02').status === 'absorbed'
+    && by('sn01')?.target.kind === 'beat' && by('sn01').target.id === `sc02/${beat}` && by('sn02')?.ask === 'fill_gaps' && JSON.stringify(by('sn02').gaps) === '[[0,1000]]'
+    && by('bn01')?.target.kind === 'item' && by('bn01').via === 'agent' && by('bn02')?.target.kind === 'scene' && by('sbn01')?.target.id === 's2-wall' && by('sbn01').target.scene === 'sc02'
+    && by('cn01')?.target.id === 'ada/identity' && by('cn01').target.stage === 'characters' && by('cn01-2')?.target.id === 'bo' && by('cn01-2').status === 'absorbed' && by('cn01-2').via === 'agent'
+    && all.notes.every(n => n.legacy?.store && n.created === at && n.round === 1),
+    { n: all.notes?.length, ids: all.notes?.map(n => n.id), rev: v2.rev, open: all.open });
+  check('migration: the old files are untouched (byte-identical), the v1 notes.json is kept as notes.v1.json; a second read imports nothing',
+    OLD.every(f => fs.readFileSync(path.join(MD, f), 'utf8') === hash0[f]) && JSON.stringify(J('notes.v1.json')) === JSON.stringify(v1) && (await call(mcp, 'notes_get', { project: MP, status: 'all' })).notes.length === 11 && J('notes.json').rev === 5,
+    { untouched: OLD.filter(f => fs.readFileSync(path.join(MD, f), 'utf8') === hash0[f]).length });
+  // the old tools answer in the old shapes from v2
+  const lg = await call(mcp, 'lyrics_get', { project: MP, notes: 'all' }), sg = await call(mcp, 'script_get', { project: MP }), bg = await call(mcp, 'breakdown_get', { project: MP, with_script: false, notes: 'all' });
+  const sbg = await call(mcp, 'storyboard_get', { project: MP }), ag = await call(mcp, 'asset_get', { project: MP, type: 'character', id: 'ada' }), nl = await call(mcp, 'notes_list', { project: MP });
+  check('the old tools read v2 in their old shapes: lyrics_get (line, w, quote, resolved), script_get asks (fill_gaps + gaps), breakdown_get, storyboard_get, asset_get (tree), notes_list (a reply row with reply_to)',
+    lg.notes?.some(n => n.id === 'ln01' && n.line === 'verse/1' && JSON.stringify(n.w) === '[2,3]' && n.status === 'open') && lg.notes.some(n => n.id === 'ln02' && n.status === 'resolved')
+    && sg.asks_for_agent?.some(a => a.id === 'sn02' && a.kind === 'fill_gaps' && a.gaps) && sg.notes?.some(n => n.id === 'sn01' && n.scene === 'sc02' && n.beat === beat)
+    && bg.notes?.some(n => n.id === 'bn01' && n.item === 'bi01') && bg.notes.some(n => n.id === 'bn02' && n.scene === 'sc02') && sbg.notes?.some(n => n.id === 'sbn01' && n.shot === 's2-wall')
+    && ag.notes?.some(n => n.id === 'cn01' && n.tree === 'identity') && nl.some(n => n.id === 'n01') && nl.some(n => n.reply_to === 'n01' && n.text === 'old reply'),
+    { lg: lg.notes?.map(n => n.id), asks: sg.asks_for_agent?.map(a => a.id), bg: bg.notes?.map(n => n.id), sb: sbg.notes?.map(n => n.id), ag: ag.notes?.map(n => n.id), nl: nl.map(n => n.id) });
+  // a note added to an old store later (an older page, a hand edit) is imported once; one the director deleted is not
+  const cur = J('notes.json'); cur.notes = cur.notes.filter(n => n.id !== 'bn02');
+  const del = await post(`/api/save/notes.json?project=${MP}`, { base_rev: cur.rev, data: cur }, { origin: URL_ });
+  const sc2 = J('scenes.json'); sc2.notes.push({ id: 'sn03', scene: 'sc01', text: 'added later by hand', by: 'director', via: 'page', status: 'open', at, replies: [] }); sc2.rev++; W('scenes.json', sc2);
+  const bd2 = J('breakdown.json'); bd2.rev++; W('breakdown.json', bd2);   // touched: re-checked, bn02 stays deleted
+  const again = await call(mcp, 'notes_get', { project: MP, status: 'all' });
+  check('incremental: a note added to scenes.json later is imported once; a migrated note the director deleted (bn02) is not brought back',
+    del.status === 200 && again.notes.filter(n => n.id === 'sn03').length === 1 && !again.notes.some(n => n.id === 'bn02') && (await call(mcp, 'notes_get', { project: MP, status: 'all' })).notes.length === again.notes.length,
+    { del: del.status, n: again.notes.length });
+  // the one model's tools: a note on every stage's rows, a reply, absorb / dismiss / reopen, the asks, the counts
+  const add = (target, text) => call(mcp, 'notes_add', { project: MP, target, text });
+  const made = {
+    line: await add({ stage: 'lyrics', kind: 'line', id: 'verse/0', quote: 'colour' }, 'mcp: a word'), section: await add({ stage: 'lyrics', kind: 'section', id: 'chorus' }, 'mcp: the chorus'),
+    scene: await add({ stage: 'script', kind: 'scene', id: 'sc01' }, 'mcp: a scene'), beat: await add({ stage: 'script', kind: 'beat', id: `sc02/${beat}` }, 'mcp: a beat'),
+    item: await add({ stage: 'breakdown', kind: 'item', id: 'bi01' }, 'mcp: an item'), asset: await add({ stage: 'characters', kind: 'asset', id: 'ada', pin: { x: 0.25, y: 0.5 } }, 'mcp: a pin'),
+    tree: await add({ stage: 'characters', kind: 'tree', id: 'ada/identity' }, 'mcp: a tree'), use: await add({ stage: 'characters', kind: 'use', id: 'ada/sc02' }, 'mcp: in a scene'),
+    shot: await add({ stage: 'storyboard', kind: 'shot', id: 's2-wall' }, 'mcp: a shot'), final: await add({ stage: 'final', kind: 'shot', id: 's1-intro' }, 'mcp: final'),
+    time: await add({ stage: 'timeline', kind: 'time', t: '0:09.500' }, 'mcp: a time'), whole: await add({ stage: 'storyboard', kind: 'stage' }, 'mcp: the storyboard'),
+  };
+  const rep = await call(mcp, 'notes_add', { project: MP, reply_to: 'ln01', text: 'mcp: a reply' });
+  const abs = await call(mcp, 'notes_status', { project: MP, id: 'ln01', status: 'absorbed', reply: 'mcp: rewritten in v2' });
+  const disD = await call(mcp, 'notes_status', { project: MP, id: 'sbn01', status: 'dismissed' });
+  const disA = await call(mcp, 'notes_status', { project: MP, id: made.shot.id, status: 'dismissed' });
+  const reo = await call(mcp, 'notes_status', { project: MP, id: 'ln01', status: 'open' });
+  const og = await call(mcp, 'notes_get', { project: MP, stage: 'characters' }), ga = await call(mcp, 'notes_get', { project: MP, to: 'agent' });
+  check('notes_add on every stage\'s rows (a line + quote -> w, a section, a scene, a beat, an item, an asset + pin, a tree, a use, a shot, a final shot, a time given as m:ss, a stage), via agent, round 1, with where / time; a reply; absorbed with a reply; the director\'s note not dismissable (403), the agent\'s own is; reopen',
+    Object.values(made).every(n => n.id && n.via === 'agent' && n.status === 'open' && n.round === 1 && n.where) && JSON.stringify(made.line.target.w) === '[3,3]' && made.time.target.t === 9500 && made.time.t === 9500 && made.line.t != null && made.beat.t != null
+    && made.asset.target.pin?.x === 0.25 && rep.reply?.id === 'ln01.2' && abs.note?.status === 'absorbed' && abs.note.replies.length === 3 && /403/.test(disD.error || '') && disA.note?.status === 'dismissed' && reo.note?.status === 'open'
+    && og.notes.length >= 3 && og.open.stages.characters >= 3 && ga.notes.some(n => n.id === 'sn02'),
+    { made: Object.fromEntries(Object.entries(made).map(([k, n]) => [k, n.id || n.error])), rep: rep.reply?.id, abs: abs.note?.status, disD: disD.error, disA: disA.note?.status || disA.error, open: og.open });
+  // wait_for on any stage's note: returns at once when it already is in until; wakes on a reply
+  const wf = await call(mcp, 'wait_for', { project: MP, note: made.scene.id, until: ['open'] });
+  const wfP = call(mcp, 'wait_for', { project: MP, note: made.scene.id, timeout_s: 20 });
+  await wait(600); await call(mcp, 'notes_add', { project: MP, reply_to: made.scene.id, text: 'mcp: woke' });
+  const wf2 = await wfP;
+  check('wait_for note: any stage\'s note (already open: at once; a reply wakes it)', wf.already === true && wf.status === 'open' && wf2.changed === true && wf2.item?.replies?.length === 1, { wf, wf2: wf2 && { changed: wf2.changed, waited: wf2.waited_s } });
+  // stages_get counts the asks from v2; a duplicate "as a template" starts with no notes (the old stores' notes stay seen)
+  const stg = await call(mcp, 'stages_get', { project: MP });
+  const dup = await call(mcp, 'projects', { action: 'duplicate', from: MP, id: 'mcp-notes-tpl', reset_state: true });
+  const dn = await call(mcp, 'notes_get', { project: 'mcp-notes-tpl', status: 'all' });
+  check('stages_get counts the open asks from notes.json v2; a duplicate with reset_state starts with no notes (nothing re-imported from the copied old stores)',
+    stg.facts?.sceneAsks === 1 && stg.facts?.agentAsks === 0 && dup.id === 'mcp-notes-tpl' && dn.notes?.length === 0, { asks: [stg.facts?.sceneAsks, stg.facts?.agentAsks], dup: dup.id || dup.error, n: dn.notes?.length });
 }
 
 // 12. offline: the server is unreachable -> the same tools work on the files; ui_focus explains

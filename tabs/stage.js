@@ -2,14 +2,12 @@
 // status buttons (only here and on the rail can a stage be marked done), then the stage's own workspace. Stage 1
 // (lyrics) is tabs/lyrics.js, stage 2 (script) tabs/script.js, stage 3 (breakdown) tabs/breakdown.js, stage 4 (characters)
 // tabs/charstage.js, stage 5 (scenery) tabs/scenery.js (both on the generic tabs/assetws.js), stage 6 (storyboard)
-// tabs/storyboard.js; the last stage shows what it will hold and where its data lives today.
+// tabs/storyboard.js, stage 7 (final) tabs/final.js (a placeholder: the shots and their states, with the Notes column).
 import { store, esc } from '../js/store.js';
 import { STAGES, STATUS_LABEL, stageById, stageTip } from '../js/flow.js';
 
-const MODULES = { lyrics: () => import('./lyrics.js'), script: () => import('./script.js'), breakdown: () => import('./breakdown.js'), characters: () => import('./charstage.js'), scenery: () => import('./scenery.js'), storyboard: () => import('./storyboard.js') };
-const LATER = {
-  final: ['Review > Approvals, Queue and Costs.', 'approvals'],
-};
+const MODULES = { lyrics: () => import('./lyrics.js'), script: () => import('./script.js'), breakdown: () => import('./breakdown.js'), characters: () => import('./charstage.js'), scenery: () => import('./scenery.js'), storyboard: () => import('./storyboard.js'), final: () => import('./final.js') };
+const LATER = {};
 export default {
   mount(el, ctx) {
     el.classList.add('stagews');
@@ -53,7 +51,7 @@ export default {
     });
     body.addEventListener('click', (e) => { const a = e.target.closest('.sglater [data-view]'); if (a) window.WB.app.show(a.dataset.view); });
     document.addEventListener('wb:stage', () => { if (window.WB.app.active() === 'stage') showStage(); });
-    store.on((w) => { if (['stages', 'lyrics', 'scenes', 'breakdown', 'board', 'entities', 'approvals', 'all'].includes(w) && window.WB.app.active() === 'stage') renderBar(); });
+    store.on((w) => { if (['stages', 'lyrics', 'scenes', 'breakdown', 'board', 'entities', 'approvals', 'notes', 'all'].includes(w) && window.WB.app.active() === 'stage') renderBar(); });
     this._show = showStage;
   },
   show() { return this._show?.(); },

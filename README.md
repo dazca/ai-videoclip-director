@@ -65,10 +65,13 @@ the workbench?"*. With the server running every tool goes through its HTTP API (
 
 Tools: `status`, `projects` (list/create/duplicate/open), `snapshot_save` / `snapshot_list` / `snapshot_restore`, `song_get`,
 `timeline_query`, `shots_list` / `shot_get` / `shot_update`, `entities_list` / `entity_get` / `entity_upsert`, `media_list` /
-`media_add`, `notes_list` / `note_add` / `note_resolve`, `approvals_get` / `approve` / `request_changes`, `requests_list` /
+`media_add`, the notes of every stage and the timeline in one list: `notes_get` / `notes_add` (any row: a lyric line or word range, a
+scene or beat, an item, an asset / tree / node + image pin, a shot, a time) / `notes_status` (absorbed with a reply; the director's
+notes are dismissed only by the director), and the old `notes_list` / `note_add` / `note_resolve` (the timeline), `approvals_get` / `approve` / `request_changes`, `requests_list` /
 `request_create` / `request_update` (`recipe`: the photoreal prompt blocks; `warnings[]`), `costs_get` (one total over costs.json and
 a falgen ledger), `cost_record` (spend made outside the queue, never an approval), `media_update`, `wait_for` (block
-until a request / stage / note changes), `ui_focus`; the guided flow: `stages_get` / `stage_update`,
+until a request / stage / note changes), `ui_focus`; the guided flow: `stages_get` / `stage_update` (the per-stage note tools below
+are aliases that write the same notes.json v2 and answer in their old shapes),
 `lyrics_get` / `lyrics_update` / `lyrics_versions` / `lyrics_note_add` / `lyrics_note_resolve`, `song_attach`; stage 2:
 `intake_get` / `intake_answer`, `script_get` / `scenes_update`, `scene_note_add` / `scene_note_resolve`, `sketch_save` /
 `sketch_get` / `sketch_list` (image paths + pins, so the agent can look at the director's drawings); stage 3:
@@ -94,6 +97,21 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   Alt+Shift+1..7, palette "Go to stage: Lyrics", right-click on the rail) to open its workspace; its bar has the status
   buttons: **only the director marks a stage done** (here or on the rail; agents can set in progress / needs you and
   blockers). Later stages can be opened early. A project made before the flow counts stages with content as done.
+- **Notes** (SPEC v4 §1): every stage workspace has a **Notes column** on the right of its rows, **row-aligned**: a
+  note sits on the row it is about (a lyric line or a section tag, a scene (its beats' notes tagged b1, b2…), a
+  breakdown item, a tree branch / the open node, a scene's use of an asset, a storyboard scene (its shots' notes tagged
+  with the shot), a final shot); a row grows when its notes need the room. The thin top row holds the notes on the
+  whole stage (and on rows not shown). **Click an empty cell** (or **Alt+N** on the selected row) to type: Enter saves,
+  Shift+Enter a new line, Esc cancels; `@agent …` (or the `→ agent` toggle) makes it an ask the agent reads. On a
+  note: ↩ reply, ✓ done (absorbed), × dismiss, ↺ reopen; `open / all` in the column header; View > Notes column hides
+  it. The **timeline** notes column is time-aligned (warped like every column): it holds every note with a time (the
+  timeline's own, and the stages' notes on a line, scene, beat or shot, tagged lyr / scr / sto…); **click an empty spot**
+  to type a note at that ms. **Right-click "+ Add"** everywhere: lyrics (+ line above / below, + verse, + section),
+  script (+ scene here, + beat at this time), timeline (+ note at this time, + scene here, + shot here), storyboard
+  (+ shot), breakdown (+ item by kind), trees (+ note on this node, + pinned note), any row (+ note here); every one is
+  undoable (Ctrl+Z) and in the palette. The **stage rail** shows each stage's open notes; the top bar "N open notes"
+  counts them all (click: Review › Notes, every note in one table). All notes are one list, `notes.json` v2 (the old
+  per-stage note lists are read into it once: see Files).
 - **New project** (File > New project, and automatically on an empty project): a wizard, **name -> lyrics (paste) ->
   song (optional path on this machine) -> Create**; opens the new project on the lyrics stage. File > New empty
   project keeps the old one-line prompt.
@@ -103,10 +121,11 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   and sections; **Edit as text** for pasting or bulk edits (`[Section]` tags; unchanged and reworded lines keep their
   ids, so timings and notes follow). Edits are a draft (kept in this browser) until **Save version** (Ctrl+Enter, with
   an optional message): every save is a new version, and the song's lines (the timeline lyrics column) follow at once,
-  keeping the timings of the lines that still exist. **Notes**: select words in a line -> `+ note` (or Alt+N; with no
-  selection, on the focused line); threads with replies, resolve ✓ / reopen ↺; who wrote it is shown (director, or
-  agent for notes written through the tools). **Ask the agent** (bottom right) writes a note addressed to the agent
-  (MCP `lyrics_get` lists it under `asks_for_agent`): nothing is generated, nothing is paid. **Versions**: the list,
+  keeping the timings of the lines that still exist. **Notes** (the Notes column, right next to the poem): select
+  words in a line -> `+ note` (or Alt+N; with no selection, on the focused line) types a note pinned to those words
+  (they stay underlined); who wrote it shows as the bar colour (amber = director, violet = agent). **Ask the agent**
+  (palette, or `@agent` in a note) writes a note addressed to the agent (MCP `lyrics_get` lists it under
+  `asks_for_agent`): nothing is generated, nothing is paid. **Versions** (the bar's Versions button): the list,
   A/B -> side-by-side word diff (or click a row: it vs the one before; `diff` in the bar compares your unsaved edits),
   **Restore** = a new version copied from the old one. **Add song…** attaches the song file.
 - **Script stage** (stage 2): the song as a list in time order, each **scene** next to the lyric lines it covers and
@@ -118,11 +137,12 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   scene makes a copy for that scene. The scene status (**draft / needs you / ok**) is saved at once; ok is the
   director's. Edits are a draft (kept in this browser) until **Save version** (Ctrl+Enter); a new sketch on a clean
   draft is saved as a version by itself. **Fill the gaps** writes an ask for the agent listing the unscripted
-  ranges (`script_get` `asks_for_agent`); the agent answers with `scenes_update` and the page follows live. Side
-  panel: **Intake** (the nine starting questions, answered here or in a chat; "asked in chat" marks; **Ask for a
-  draft**), **Notes** (per scene or all, threads, resolve, Ask the agent about the open scene or the whole script),
-  **Versions** (A/B side-by-side diff with the scenes added / changed / removed, restore). Right-click a scene for its
-  commands; double-click a scene in the timeline Scenes column to open it here.
+  ranges (`script_get` `asks_for_agent`); the agent answers with `scenes_update` and the page follows live. The Notes
+  column sits on each scene's row (Alt+N: the open scene). Side panel: **Intake** (the nine starting questions,
+  answered here or in a chat; "asked in chat" marks; **Ask for a draft**), **Versions** (A/B side-by-side diff with the
+  scenes added / changed / removed, restore). Right-click a scene (+ Add: scene here = a split at the clicked line's
+  time, beat at this time; a gap: scene here) for its commands; double-click a scene in the timeline Scenes column to
+  open it here.
 - **Breakdown stage** (stage 3): what the script needs, as **items** of five kinds (characters, locations, props,
   wardrobe, FX), each linked to the scenes (and beats) that need it. **Suggest from script** makes a first list here and
   now, without an agent (a deterministic pass over the scene titles, text and beats and the intake answers: capitalised
@@ -137,9 +157,10 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   (pick the scenes that go to the new item), **change kind**, link / unlink. Edits are a draft until **Save version**
   (Ctrl+Enter); item statuses (draft / review / ok) are saved at once, ok is the director's. **Create entity** turns a
   character, location or prop into a draft entity in Assets (or links it to an existing one) and a wardrobe item into a
-  look on a character: no images, no request, nothing spent; page only. Side panel: notes (per item or all, Ask the
-  agent) and versions (A/B diff, restore). Right-click a scene (timeline, script, matrix) > **Breakdown items in this
-  scene**; the timeline Scenes column shows each scene's characters and locations under its title.
+  look on a character: no images, no request, nothing spent; page only. The Notes column sits on each item's row (list
+  and matrix; notes on a scene in its top row); **Versions** (the bar's button: A/B diff, restore). Right-click an item
+  > + Add (an item of any kind); a scene (timeline, script, matrix) > **Breakdown items in this scene**; the timeline
+  Scenes column shows each scene's characters and locations under its title.
 - **Characters stage** (stage 4): the characters of the breakdown (left: each with the scenes it appears in and where
   it stands: needs a base / base chosen / identity · n nodes / identity approved / looks a/n approved; breakdown
   characters not yet entities are listed greyed with a link to make them). Per character, three tabs:
@@ -158,8 +179,10 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   strip) or **Revert** (dropped; the head stays). **Make head** goes back to any node. **Approve identity** locks it
   (page only; Unlock reopens). **Looks**: one tree per costume, starting from the approved identity; the breakdown's
   wardrobe items are its draft looks (or "make it a look"), **+ New look**, **Request look sheet**, then the same edit /
-  compare / keep loop and **Approve look**. **Notes**: notes on the character, a tree or a node, "ask the agent", and
-  the history of every act. **Scenes**: the look each scene needs (see the Scenery stage). Commands: palette
+  compare / keep loop and **Approve look**. The Notes column: the character's notes in its top row, a node's on its
+  branch strip or on the open node; **📍 pin** (or right-click a node > + pinned note) then a click on the image pins a
+  numbered note there. **Notes** tab: one row per thing notes are on (a tree, a node, a scene) and the history of every
+  act. **Scenes**: the look each scene needs (see the Scenery stage). Commands: palette
   "Characters: …", right-click a node (compare, edit, keep, branch, revert, approve), Ctrl+Enter sends the open edit
   request.
 - **Scenery stage** (stage 5): locations and props on the same workspace as the characters (one code path:
@@ -203,12 +226,15 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   shots, shots without a frame, assets the shots need that are not approved (-> the characters / scenery stage on that
   asset), shots without a request or clip; and the **estimate** of generating those shots against the cap (a meter:
   spent, committed, this estimate, other drafts, the cap mark; a warning over the cap or with a $0 cap). **Fill the
-  gaps** and **Ask the agent to storyboard** write asks the agent reads (`storyboard_get` / `gaps_get`); **Notes**
-  (per shot, threads, Ask the agent) and **Versions** (A/B diff, restore). Edits are a draft until **Save version**
+  gaps** and **Ask the agent to storyboard** write asks the agent reads (`storyboard_get` / `gaps_get`); **Versions**
+  (A/B diff, restore). The Notes column sits on each scene's row (its shots' notes tagged with the shot; Alt+N: the
+  selected shot); right-click a shot or a scene > + Add > + shot. Edits are a draft until **Save version**
   (Ctrl+Enter); a new frame on a clean draft is saved as a version by itself. The timeline **shots** column shows the
   storyboard's shots (frame thumbnails), and the cast / status columns follow them. Commands: palette "Storyboard: …",
   right-click a shot (board or timeline): open in the storyboard, frame, split, merge, move, copy / paste frame,
   request, note, delete.
+- **Final stage** (stage 7, a placeholder until phase 7): every storyboard shot in time order with its approval state
+  and its request or clip, the counts per state, and the Notes column on the shots (the notes for the last pass).
 - **Top bar** (18 px; `` ` `` hides / shows it; **Esc never hides it**: Esc only closes menus, dialogs, the palette and
   the cheat sheet): menu bar (File Edit View Timeline Generate Window Help; F10 opens it from the keyboard), the
   **page tabs**, project name, transport, `⌘` = command palette, `⌃` = hide the bar, `⚙` = Settings (far right).
@@ -243,14 +269,16 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
 - **Context menus** (keyboard: ↑↓ → ← Enter Esc, type a letter to jump): ruler/lanes, timeline, lyric line, section
   (rename, colour, loop, fold = collapse, variant), shot / clip (preview, show in Clips, choose take, set in-point,
   approve, regenerate, duplicate, open file location, copy id), cast chip (open, swap costume), note, column header
-  (hide, strip, drive/follow, width presets, move, settings, reset), entity card, empty space (paste, hidden columns).
+  (hide, strip, drive/follow, width presets, move, settings, reset), entity card, empty space (paste, hidden columns);
+  **+ Add** first in every stage row's menu and on the timeline (see Notes).
 - **Column header** (16 px): hover a name for `D/F` (drive / follow), `▸` (collapse to a strip), `×` (hide).
   `⋮` at the right lists every column.
 - **Drive vs follow**: a drive column's measured heights push the axis (lyrics, events, script, cost, notes by
   default); a follow column clips to it (sections, shots, clips, cast, status). Hidden, collapsed and follow columns
   do not push, so hiding a column tightens time. A **folded** section is drawn at 0.6 px/s and its text is hidden.
 - **Edits** (all undoable per session): approval chips (click cycles `draft → approved → changes`, or A / R), notes
-  (add, edit, resolve, delete), section label/colour (`overrides.json`), generation requests (`requests.json`).
+  (add, reply, done, dismiss, edit, delete), the stage drafts' "+ Add" (a line, a verse, a section, a scene, a beat, an
+  item, a shot), section label/colour (`overrides.json`), generation requests (`requests.json`).
   `song.json`, `shots.json` etc. stay the importer's: timing / take / in-point changes become **requests** for the
   agent. The page never calls a paid API.
 - **Projects** (File menu): new (the wizard), new empty, new from template (copy without notes/approvals/requests), open, recent,
@@ -277,7 +305,7 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
 | cast | text, follow | on | cast chips + location letters per storyboard shot |
 | status | text, follow | on | approval chips for the shot and each clip use inside it |
 | cost | text, drive | hidden | $ per generation job at its first use, running Σ / cap |
-| notes | text, drive | on | Dani's and the director's notes pinned to time |
+| notes | text, drive | on | every note with a time (notes.json v2): the timeline's, and the stages' on a line, scene, beat or shot (tagged); a click on an empty spot types a note at that ms |
 
 ## Files (`data/<project>/`)
 
@@ -293,7 +321,7 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `script.json` | `{stages[{name,t0,t1,text}], lines[{id:"s07", t0, t_end?, lyric, mode:"W"|"S"|"B"|"W→S", action, line_id}]}` |
 | `shots.json` | `{shots[{id, t0, t1, section, kind, title, cast[], locations[], clips[use ids], thumb, render_frame_ms}], uses[{id:"G05@20158", clip, take, in_ms, t0, t1, file, start_image, location, thumb, label}]}` |
 | `entities/{characters,locations,props}/<id>.json` | `{id, kind, name, role|description, refs[paths], thumb, status, private_refs?, breakdown?{item, scenes}, ...}`; `entities/index.json` lists them. A character also carries `looks[{id, name, garments[], colors[], images[], notes, status: draft/review/approved, from?: breakdown/agent/page, breakdown?}]` and stage 4: `base{text, refs[{path, source: catalog/openverse/photo/sketch/media, private?, title?, licence?, licence_url?, creator?, url?, original?, attribution?, catalog_id?, openverse_id?}], at, by, via}` and `iter{nodes[{id: "n03", tree: "identity" \| "look:<id>", parent, from_identity?, image, request, kind: identity/edit/look, edit{text, sketch?, png?, mask?, pins[{n, x, y, text}]}, choice: null/kept/branch/reverted, private?, at, by, via, note?}], trees{<tree>: {head, approved?, approved_at?, approved_by?, via?}}, notes[{id: "cn01", tree?, node?, text, by, via, to?, status, at, replies[]}], log[{at, by, via, act, tree?, node?, detail?}]}`: append-only (a node never changes except the director's `choice`; every act is logged); `identity_sheet` = the approved identity image. Catalogue paths (`catalog/...`) are relative to the workbench folder. Locations and props (stage 5) carry the same `base` and `iter` (trees `"base"` and `"variant:<id>"`, node kinds base/edit/variant, notes `"an01"`) and `variants[{id, name, axes{angle?, tod?, weather?} (location) \| {angle?, state?} (prop), notes, images[], status: draft/review/approved, from?: page/agent, scenes?[] (the agent's proposal), breakdown?}]`; `sheet` = the approved base image. Every asset may carry `uses{<scene id>: {variant: <variant / look id> \| null (the base / identity), by, via: "page", at, note?}}`: the variant each scene needs (the director's pick; without one, the variant the agent proposed for that scene, else the base). Logic: `js/assets.js` (shared), `js/characters.js` (the stage-4 names) |
-| `notes.json` | `{rev, notes[{id, t, line_id, by, text, status:"open"|"resolved", at, about?, source?}]}` |
+| `notes.json` | v2, ONE list for every stage and the timeline: `{v: 2, rev, round, notes[{id, target{stage: lyrics/script/breakdown/characters/scenery/storyboard/final/timeline, kind, id, w?, quote?, t?, pin?{x, y}, line?, scene?}, text, by, via: page/agent/import, status: open/absorbed/dismissed, round, replies[{id, text, by, via, at}], absorbed_in, created, to?: "agent", ask?: request/fill_gaps/extract/storyboard, gaps?, version?, marker?, about?, legacy?{store, id}}], legacy_seen[]}`. Kinds per stage: lyrics stage/section/line (+ `w`, `quote`); script stage/scene/beat (`"sc02/b1"`); breakdown stage/item/scene; characters / scenery stage/asset/tree (`"ada/look:x"`)/node (`"ada/n03"`, + `pin`)/use (`"ada/sc02"`); storyboard stage/scene/shot; final stage/shot; timeline time (`t` ms). Shapes and logic: `js/notes.js`. **Migration**: on its first read the server (or the page, on a static host) reads the old stores into it without loss: notes.json v1 `{rev, notes[{id, t, line_id, by, text, status, at, about?, reply_to?}]}` (kept as `notes.v1.json`; a `reply_to` note becomes a reply), and the `notes` of `lyrics.json`, `scenes.json`, `breakdown.json`, `storyboard.json` and each entity's `iter.notes`; those files are never written for notes again (a note added to one later is imported once; `legacy_seen` keeps a deleted one from coming back) |
 | `approvals.json` | `{rev, states[], items:{"<kind>:<id>": {state, by, at, why?, comment?}}}`; kinds: `shot`, `use`, `job`, `script`, `character`, `location`, `prop` |
 | `costs.json` | `{cap_usd, fal_total_usd, items[{id, t, usd, tool, date, request?, via?, job?, take?, note?}], pre_production[], ledger[]}`; `project.json` `falgen` (a folder inside the media base, read only) adds its spent.json / LEDGER.md rows to `costs_get` (deduplicated by job) |
 | `peaks/<id>.json` | `{bin_ms:5, n, scale, min, max}`: min/max per 5 ms bin, int8 (value/127*scale), base64; ~140 KB each |
@@ -325,8 +353,9 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 - `approvals.json` / `notes.json` are shared with the page: read the file, change it, **bump `rev`**, write it whole
   (write a temp file and rename). The page posts `{base_rev, data}` to `/api/save/<file>`; a stale `base_rev` gets
   `409` and the page re-applies its change on top of the current file, so an agent's edit is never silently lost.
-- To answer a note: append a note with `by: "agent"` at the same `t` (or set `status: "resolved"`). To ask for a
-  review: set an item to `state: "review"`.
+- To answer a note: `notes_add {reply_to, text}` (or append a reply to its `replies` in notes.json v2 and bump `rev`);
+  when you did what it asks, `notes_status {id, status: "absorbed", reply}`. Only the director dismisses the director's
+  notes. To ask for a review: set an item to `state: "review"`.
 - Generation queue: read `requests.json`; run only `status: "approved"` items that the director approved in the page
   (a `log` entry `via: "page"`); move them with `request_update` (MCP / `/api/op`): queued / running, then `done` with
   `outputs: [paths]` (or `rejected` + `why`). The Queue tab shows it live.
@@ -389,6 +418,13 @@ small files are served in one read so no handle stays open.
 - Guided flow: `stage_update` refuses `done` and refuses moving a done stage; a page save of `stages.json` is stamped
   (`done_by: "director", via: "page"`). A page save of `lyrics.json` cannot rewrite a saved version nor a note's author;
   the tools stamp `via: "agent"`.
+- Notes (`notes.json` v2): a target is checked (stage and kind known, ids without `..` / `.` / `\` / markup, the row
+  exists: 404, word ranges, times inside the song, pins 0..1; text 1-8000 characters: else 400). An agent may reply,
+  mark a note absorbed (with a reply) and reopen it, and dismiss only its own notes: dismissing a director's note, or
+  reopening one the director dismissed, is 403 (HTTP, MCP and offline). A page save of `notes.json` stamps new notes and
+  replies `by: "director", via: "page"`, keeps an existing note's author, via, created, target, round and an agent's
+  words, stamps a status change `closed_by: "director"`, only grows `legacy_seen`, and refuses an old (v1) list or a
+  bad target / status / id (400). Note texts are rendered as text everywhere (Notes columns, the timeline, Review).
 - Stage 2 (script): a page save of `scenes.json` cannot rewrite a saved version nor the author of an existing note,
   status or intake answer; new versions, notes, replies, changed scene statuses and answers are stamped
   `by: "director", via: "page"`; a malformed file is refused (400). Only the page marks a scene `ok` (`scenes_update`
@@ -462,7 +498,10 @@ WB.dock.open() / close() / toggle() / isOpen() / show(source) / el / body   // p
 ```
 
 Contexts for `contribute`: `timeline`, `ruler`, `lyric`, `section`, `shot`, `clip`, `cast`, `note`, `header`,
-`entity` (any element with `data-ent="<entity id>"`), `empty`, `global`, `columns`, `menubar:<Menu>`. Elements with
+`entity` (any element with `data-ent="<entity id>"`), `empty`, `global`, `columns`, `menubar:<Menu>`, and in the stage
+workspaces `stage`, `scene`, `bditem`, `chnode`, `tladd` (the timeline: first on its sheet, its + Add), `lyline` (a lyric line: `lineId`), `lysec` (a section tag: `secId`),
+`lystage`, `scgap` (a script gap: `gap`), `sbscene` (a storyboard scene or shot), `bdstage`, `noterow` (any row with a
+Notes column: `ncCol`, `ncTarget`; `hasAdd` says the menu has its own "+ Add"). Elements with
 `data-sel="<kind>:<id>"` are selectable (click / Shift+click) and pass `item` to the context. Modules in `core/`:
 `commands.js` (registry, keymap), `menus.js` (popups, menu bar), `palette.js` (palette, find, prompt/pick, cheat
 sheet), `history.js` (undo/redo), `selection.js`, `projects.js` (projects, snapshots, exports), `dock.js` (stub),

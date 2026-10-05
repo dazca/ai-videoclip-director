@@ -3,7 +3,8 @@
 // stagesView "shown": empty / in progress / needs you / ready to mark done / done / done ⚠ changed since), never from
 // the stored mark alone; the tooltip lists the counts and the blockers. Hidden with
 // the top bar (`), or on its own (View > Stage rail). A click opens the stage workspace (tabs/stage.js); every action is
-// a command (palette "Go to stage: Lyrics", Alt+Shift+1..7, right-click on a stage).
+// a command (palette "Go to stage: Lyrics", Alt+Shift+1..7, right-click on a stage). Each stage shows its open notes
+// (notes.json v2, the stage's Notes column) as a small count: the groundwork of the review rounds (B6).
 //   WB.stages: { open(id), current(), view(), setStatus(id, status) }
 import { commands } from './commands.js';
 import { menus } from './menus.js';
@@ -15,9 +16,10 @@ import '../tabs/charstage.js';   // and the characters stage
 import '../tabs/scenery.js';   // and the scenery stage (locations, props)
 import '../tabs/storyboard.js';   // and the storyboard stage
 import { STAGES, STATUS_LABEL, stagesView, projectFacts, stageById, stageTip } from '../js/flow.js';
+import { openCounts } from '../js/notes.js';
 
 const WB = () => window.WB;
-const facts = () => projectFacts({ song: store.song, script: store.script, shots: store.shots, entities: store.entities, lyrics: store.lyrics, scenes: store.scenes, breakdown: store.breakdown, storyboard: store.board, approvals: store.approvals });
+const facts = () => projectFacts({ song: store.song, script: store.script, shots: store.shots, entities: store.entities, lyrics: store.lyrics, scenes: store.scenes, breakdown: store.breakdown, storyboard: store.board, approvals: store.approvals, notes: store.notes });
 const view = () => stagesView(store.stages, facts());
 const current = () => { const s = prefs.get('stage', 'lyrics'); return stageById(s) ? s : 'lyrics'; };
 const onStage = (c) => (c || WB().context()).tab === 'stage';
@@ -38,8 +40,8 @@ let el = null;
 function render() {
   if (!el || !store.stages) return;
   const v = view(), cur = WB()?.app?.active() === 'stage' ? current() : null;
-  const next = v.next;
-  el.innerHTML = v.stages.map(s => `<a data-stage="${s.id}" data-shown="${s.shown}" class="st-${s.shown}${s.id === cur ? ' on' : ''}" title="${esc(`${stageTip(s)}\n${stageById(s.id).does}\nAlt+Shift+${s.n} · right-click: status`)}"><i></i>${s.n} ${esc(s.title)}${s.shown === 'changed' ? '<b class="stw">⚠</b>' : ''}</a>`).join('')
+  const next = v.next, oc = openCounts(store.notes);
+  el.innerHTML = v.stages.map(s => { const k = oc.stages[s.id] || 0; return `<a data-stage="${s.id}" data-shown="${s.shown}" class="st-${s.shown}${s.id === cur ? ' on' : ''}" title="${esc(`${stageTip(s)}${k ? `\n${k} open note${k > 1 ? 's' : ''}` : ''}\n${stageById(s.id).does}\nAlt+Shift+${s.n} · right-click: status`)}"><i></i>${s.n} ${esc(s.title)}${s.shown === 'changed' ? '<b class="stw">⚠</b>' : ''}${k ? `<b class="rnc" title="${k} open note${k > 1 ? 's' : ''}">${k}</b>` : ''}</a>`; }).join('')
     + `<span class="next" data-stage="${esc(next?.id || '')}" title="${esc(next ? `next: ${next.title}${next.blockers.length ? '\n· ' + next.blockers.join('\n· ') : ''}` : 'every stage is done')}">${next ? `next: <b>${esc(next.title)}</b>${next.blockers.length ? ' · ' + esc(next.blockers[0]) : ''}` : 'all stages done'}</span>`;
 }
 export function mountRail() {
@@ -48,7 +50,7 @@ export function mountRail() {
   el.setAttribute('aria-label', 'stages');
   document.body.classList.toggle('norail', prefs.get('rail', true) === false);
   el.addEventListener('click', (e) => { const a = e.target.closest('[data-stage]'); if (a?.dataset.stage) stages.open(a.dataset.stage); });
-  store.on((w) => { if (['stages', 'lyrics', 'scenes', 'breakdown', 'board', 'entities', 'approvals', 'all'].includes(w)) render(); });
+  store.on((w) => { if (['stages', 'lyrics', 'scenes', 'breakdown', 'board', 'entities', 'approvals', 'notes', 'all'].includes(w)) render(); });
   document.addEventListener('wb:page', render);
   render();
 }

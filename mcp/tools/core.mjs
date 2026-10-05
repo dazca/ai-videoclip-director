@@ -93,7 +93,7 @@ mcp.registerTool('media_update', {
 
 mcp.registerTool('wait_for', {
   title: 'Wait until a request, stage or note changes',
-  description: 'Block until the item changes, instead of polling: request = a request id (its status), stage = a stage id (its status), note = a timeline note id (its status; a reply counts as a change). until = the statuses to wait for (e.g. ["approved", "rejected"]); default: any change from the status it has now. Returns at once when it already is in until. Wakes on the server\'s change feed (SSE) when the server runs, else polls the files. timeout_s up to 1800 (default 600): then it returns {timed_out: true} with the current state. Sends progress notifications while waiting (clients that reset their timeout on progress keep waiting).',
+  description: 'Block until the item changes, instead of polling: request = a request id (its status), stage = a stage id (its status), note = a note id of any stage (its status open / absorbed / dismissed; a reply counts as a change). until = the statuses to wait for (e.g. ["approved", "rejected"]); default: any change from the status it has now. Returns at once when it already is in until. Wakes on the server\'s change feed (SSE) when the server runs, else polls the files. timeout_s up to 1800 (default 600): then it returns {timed_out: true} with the current state. Sends progress notifications while waiting (clients that reset their timeout on progress keep waiting).',
   inputSchema: { project, request: z.string().optional(), stage: stageId.optional(), note: z.string().optional(), until: z.array(z.string()).optional(), timeout_s: z.number().min(1).max(1800).optional() },
 }, wrap(async (a, extra) => {
   const p = await projectOf(a), which = ['request', 'stage', 'note'].filter(k => a[k] != null);
@@ -102,8 +102,8 @@ mcp.registerTool('wait_for', {
   const look = async () => {
     if (kind === 'request') { const r = (await op('requests_list', { project: p })).find(x => x.id === id); if (!r) throw new S.WbError(404, `no request "${id}"`); return { status: r.status, key: r.status, item: r }; }
     if (kind === 'stage') { const st = (await op('stages_get', { project: p })).stages.find(x => x.id === id); if (!st) throw new S.WbError(404, `no stage "${id}"`); return { status: st.status, key: st.status, item: st }; }
-    const all = await op('notes_list', { project: p }), n = all.find(x => x.id === id); if (!n) throw new S.WbError(404, `no note "${id}"`);
-    const replies = all.filter(x => x.reply_to === id); return { status: n.status, key: `${n.status}/${replies.length}`, item: { ...n, replies } };
+    const n = (await op('notes_get', { project: p, note: id })).notes[0];
+    return { status: n.status, key: `${n.status}/${(n.replies || []).length}`, item: n };
   };
   const t0 = Date.now(), first = await look(), until = a.until?.length ? a.until : null;
   const done = (s) => (until ? until.includes(s.status) : s.key !== first.key);

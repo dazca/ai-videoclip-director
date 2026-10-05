@@ -13,15 +13,22 @@
 //             looks (wardrobe items of the breakdown are draft looks); a location's angle / time of day / weather; a
 //             prop's angle / state.
 //   Scenes    the scenes that use the asset (breakdown links) and the variant each one needs (the storyboard reads it).
-//   Notes     notes on the asset, a tree, a node or a scene; "ask the agent".
+//   Notes     every note on this asset, one row per thing it is on (the asset, a tree, a node, a scene's use), and the
+//             history of every act.
+// The Notes column (core/notescol.js) on the right is row-aligned: the asset's notes in its top row, a node's on the
+// strip of its branch (or on the open node, with numbered pins on its image: "📍 pin" then click the image), a scene's
+// on its row in Scenes. Right-click a node: + Add › note on this node.
 // Everything the director decides goes through POST /api/op/asset_act (the server accepts it from this page only);
 // requests are saved in requests.json like the Queue's. Formats: js/assets.js.
 import { store, prefs, toast, esc, mediaUrl, postJSON, isPrivatePath } from '../js/store.js';
 import { ui } from '../core/palette.js';
 import { commands } from '../core/commands.js';
+import { menus } from '../core/menus.js';
 import * as A from '../js/assets.js';
 import * as BD from '../js/breakdown.js';
 import * as SC from '../js/scenes.js';
+import * as N from '../js/notes.js';
+import { NotesColumn } from '../core/notescol.js';
 
 const WB = () => window.WB;
 const OPENVERSE = 'https://api.openverse.org/v1/images/';
@@ -69,8 +76,38 @@ export class AssetWorkspace {
     this.$ = (s) => el.querySelector(s);
     this.skHost = document.createElement('div'); this.skHost.className = 'chsk';
     this.wire();
-    store.on((w) => { if (['all', 'requests', 'breakdown', 'scenes'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
+    this.nc = new NotesColumn({ stage: this.stage, scroller: this.$('.chbody'), active: () => !!this.ent(),
+      scope: (n) => n.target.kind === 'stage' || this.mine(n),
+      top: () => { const e = this.ent(); return { label: e ? `notes on ${e.name || e.id}` : 'notes', targets: e ? [this.tg('asset'), { stage: this.stage, kind: 'stage', id: null }] : [{ stage: this.stage, kind: 'stage', id: null }],
+        match: (n) => n.target.kind === 'asset' || n.target.kind === 'stage', sub: (n) => n.target.kind === 'stage' ? `all ${this.stage}` : '' }; },
+      rows: () => this.noteRows(), current: () => this.sel ? this.tg('node', this.sel) : null });
+    store.on((w) => { if (['all', 'requests', 'breakdown', 'scenes', 'notes'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
     this.render();
+  }
+  // ---------------------------------------------------------------- notes (notes.json v2, the Notes column)
+  // a target on this asset: tg('asset'), tg('node', 'n03'), tg('tree', 'look:x'), tg('use', 'sc02')
+  tg(kind, sub, extra) { const e = this.ent(); return { stage: this.stage, kind, id: kind === 'asset' ? e.id : `${e.id}/${sub}`, ...(extra || {}) }; }
+  mine(n, e = this.ent()) { return !!e && N.assetStage(e.kind) === n.target.stage && (n.target.id === e.id || String(n.target.id || '').startsWith(e.id + '/')); }
+  myNotes(status) { return store.notesOn({ stage: this.stage, ...(status ? { status } : {}) }).filter(n => this.mine(n)); }
+  nodePins(nodeId) { return this.myNotes().filter(n => n.target.kind === 'node' && n.target.pin && N.splitId(n.target.id)[1] === nodeId && n.status !== 'dismissed'); }
+  // the rows: the open node (its notes and pins), the branches of the tree shown (each with its nodes' notes; the first
+  // with the tree's), the scenes (Scenes tab), the things notes are on (Notes tab)
+  noteRows() {
+    const e = this.ent(); if (!e) return [];
+    const out = [], sub = (n) => N.splitId(n.target.id)[1];
+    const np = this.el.querySelector('.chbody .chnp[data-node]');
+    if (np) { const id = np.dataset.node, pins = this.nodePins(id); out.push({ el: np, targets: [this.tg('node', id)], match: (n) => n.target.kind === 'node' && sub(n) === id, sub: (n) => n.target.pin ? `📍${pins.indexOf(pins.find(x => x.id === n.id)) + 1}` : '' }); }
+    const tree = this.tree;
+    [...this.el.querySelectorAll('.chbody .chstrip')].forEach((st, i) => {
+      const ids = [...st.querySelectorAll('[data-node]')].map(x => x.dataset.node);
+      out.push({ el: st, targets: [...ids.map(id => this.tg('node', id)), ...(i === 0 ? [this.tg('tree', tree)] : [])],
+        match: (n) => (n.target.kind === 'node' && ids.includes(sub(n))) || (i === 0 && n.target.kind === 'tree' && sub(n) === tree),
+        sub: (n) => n.target.kind === 'node' ? sub(n) + (n.target.pin ? ' 📍' : '') : 'tree',
+        targetAt: (x) => { const d = x.closest?.('[data-node]'); return d ? this.tg('node', d.dataset.node) : this.tg('tree', tree); } });
+    });
+    for (const r of this.el.querySelectorAll('.chbody .asuse[data-scene]')) out.push({ el: r, targets: [this.tg('use', r.dataset.scene)] });
+    for (const r of this.el.querySelectorAll('.chbody .chnrow[data-tk]')) { const [kind, id] = r.dataset.tk.split('|'); out.push({ el: r, targets: [{ stage: this.stage, kind, id }], sub: (n) => n.target.pin ? '📍' : '' }); }
+    return out;
   }
   typing() { const a = document.activeElement; return !!a && this.el.contains(a) && a.matches('input:not([type=range]):not([type=checkbox]), textarea, select') && !this.sk?.api.el.contains(a); }
   // ---------------------------------------------------------------- data
@@ -308,7 +345,7 @@ export class AssetWorkspace {
   renderBar() {
     const e = this.ent(), bar = this.$('.chbar');
     if (!e) { bar.innerHTML = `<span class="dim">no ${this.types.map(t => t).join(' / ')} selected</span>`; return; }
-    const T = this.T, U = this.U, it = this.iter(e), st = A.assetStatus(e, store.requests, e.kind), rA = A.treeState(it, T.root).approved, notes = it.notes.filter(n => n.status === 'open').length;
+    const T = this.T, U = this.U, it = this.iter(e), st = A.assetStatus(e, store.requests, e.kind), rA = A.treeState(it, T.root).approved, notes = this.myNotes('open').length;
     const label = (k, l) => k === U.rootTab ? `${l}${rA ? ' ✓' : ''}` : k === U.vTab ? `${l} ${this.vlist(e).length}` : k === 'notes' ? `${l} ${notes || ''}` : k === 'scenes' ? `${l} ${A.sceneUses(e, this.scenesOf(e), [], e.kind).length || ''}` : l;
     const tab = (k, l) => `<a data-tab="${k}" class="${this.tab === k ? 'on' : ''}">${label(k, l)}</a>`;
     const tree = this.tree, tA = A.treeState(it, tree).approved, word = A.isRoot(tree) ? T.rootWord : T.vWord;
@@ -420,7 +457,7 @@ export class AssetWorkspace {
       + (!locked ? `<button data-a="edit" class="${this.mode === 'edit' ? 'on' : ''}" title="text + a sketch over this image + an optional mask + pins → a draft request">Edit from ${esc(n.id)}</button>` : '')
       + (!locked && n.id !== st.head && !isPending ? `<button data-a="tohead" title="continue from this node (revert to it)">Make head</button>` : '')
       + (!locked && n.id === st.head && A.treeNodes(it, n.tree).length ? `<button data-a="approve" class="pri">Approve ${word}</button>` : '')
-      + `<button data-a="nnote" title="a note on this node">✉</button><b class="sctool" data-a="nclose" title="close (Esc)">▴</b></div>`;
+      + `<button data-a="nnote" title="a note on this node, in the Notes column (Alt+N)">✉</button><button data-a="pinnote" class="${this.pinMode ? 'on' : ''}" title="pin a note on the image: click here, then on the image">📍 pin</button><b class="sctool" data-a="nclose" title="close (Esc)">▴</b></div>`;
     const pv = n.provenance, prov = n.origin === 'imported' ? `<div class="chnedit"><span class="dim">imported (no request):</span> ${esc(pv?.media || '')} <span class="dim">${esc(pv?.path || '')}</span>${pv?.job ? ` · job ${esc(pv.job)}` : ''}${pv?.request ? ` · request ${esc(pv.request)}` : ''} · ${pv?.cost ? `cost on record ${usd(pv.cost.usd)} (${esc(pv.cost.source)}${pv.cost.via ? ' via ' + esc(pv.cost.via) : ''})` : 'no cost row'}${n.proposal ? ` · proposed by ${esc(n.proposed_by || 'agent')} (${esc(n.proposal)})` : ''}${n.note ? ` · ${esc(n.note)}` : ''}</div>` : '';
     const edit = n.edit && (n.edit.text || n.edit.pins?.length || n.edit.png || n.edit.mask) ? `<div class="chnedit"><span class="dim">edit:</span> ${esc(n.edit.text || '(sketch only)')}${(n.edit.pins || []).map(p => `<span class="chpin"><b>${p.n}</b>${esc(p.text)}</span>`).join('')}${n.edit.png ? ` <a href="${esc(imgUrl(n.edit.png))}" target="_blank" rel="noopener">sketch</a>` : ''}${n.edit.mask ? ` <a href="${esc(imgUrl(n.edit.mask))}" target="_blank" rel="noopener">mask</a>` : ''}${n.note ? `<span class="dim"> · agent: ${esc(n.note)}</span>` : ''}</div>` : '';
     let main = '';
@@ -431,7 +468,10 @@ export class AssetWorkspace {
         <button data-a="reqedit" class="pri" title="${esc(`${est.tool}: ${est.why}`)}">Request edit · est ${usd(est.usd)}</button><span class="dim">${esc(est.tool)}</span><a data-a="skclose">cancel</a></div></div>`;
     } else if ((this.mode === 'compare' || isPending) && parent) {
       main = this.compareHtml(parent, n, isPending && !locked);
-    } else main = `<div class="chbig">${lock(n.image, n.private)}<img src="${esc(imgUrl(n.image))}" alt=""></div>`;
+    } else {
+      const pins = this.nodePins(n.id).map((x, i) => `<i class="chnpin${x.status === 'open' ? '' : ' done'}" data-nid="${esc(x.id)}" style="left:${(x.target.pin.x * 100).toFixed(2)}%;top:${(x.target.pin.y * 100).toFixed(2)}%" title="${esc(`${i + 1}: ${x.text}`)}">${i + 1}</i>`).join('');
+      main = `<div class="chbig">${lock(n.image, n.private)}<span class="chpinw${this.pinMode ? ' pinning' : ''}" title="${this.pinMode ? 'click where the note goes' : ''}"><img src="${esc(imgUrl(n.image))}" alt="">${pins}</span></div>`;
+    }
     return `<div class="chnp" data-node="${esc(n.id)}">${head}${prov}${edit}${main}</div>`;
   }
   compareHtml(a, b, choose) {
@@ -497,11 +537,13 @@ export class AssetWorkspace {
       + (rows || `<div class="scempty">No scene uses ${esc(e.name)} yet: link it in the Breakdown, or add a scene here.</div>`)
       + (others.length ? `<div class="asuse add"><span class="dim">add a scene</span><select class="asuseadd"><option value="">…</option>${others.map(s => `<option value="${esc(s.id)}">${esc(s.id)} · ${esc(SC.span(s.t0, s.t1))} · ${esc(s.title)}</option>`).join('')}</select></div>` : '');
   }
+  // the Notes tab: one row per thing this asset's notes are on (the Notes column holds the notes), then the history
   notesHtml(e) {
-    const it = this.iter(e), ns = [...it.notes].reverse();
-    const who = (x) => x.via === 'agent' ? '<span class="who ag">agent</span>' : '<span class="who dr">director</span>';
-    return `<div class="chnotes"><div class="chnadd"><textarea class="chntext" rows="2" placeholder="a note on ${esc(e.name)}${this.sel ? ' (node ' + esc(this.sel) + ')' : ''}… (Ctrl+Enter)" spellcheck="false"></textarea><label class="dim"><input type="checkbox" class="chnask"> ask the agent</label><button data-a="addnote">Add</button></div>`
-      + (ns.length ? ns.map(n => `<div class="lynote ${n.status}${n.to === 'agent' ? ' ask' : ''}" data-note="${esc(n.id)}"><div class="lynh">${who(n)}${n.to === 'agent' ? '<span class="to">→ agent</span>' : ''}<span>${esc(n.node || n.tree || n.scene || e.kind)}</span><span class="sp"></span><span class="dim">${when(n.at)}</span><b data-a="nresolve" title="${n.status === 'open' ? 'resolve' : 'reopen'}">${n.status === 'open' ? '✓' : '↺'}</b></div><div class="lynt">${esc(n.text)}</div>${(n.replies || []).map(r => `<div class="lynr">${who(r)} ${esc(r.text)}</div>`).join('')}</div>`).join('') : '<div class="dim lyno">No notes yet.</div>')
+    const it = this.iter(e), seen = new Map();
+    for (const n of this.myNotes()) { if (n.target.kind === 'asset') continue; const k = `${n.target.kind}|${n.target.id}`; if (!seen.has(k)) seen.set(k, n.target); }
+    const label = (t) => { const s = N.splitId(t.id)[1]; return t.kind === 'node' ? `node ${s}${A.nodeById(it, s) ? ' · ' + (A.nodeById(it, s).tree) : ' · gone'}` : t.kind === 'tree' ? `tree ${s}` : t.kind === 'use' ? `in scene ${s}` : t.kind; };
+    const rows = [...seen.values()].map(t => `<div class="chnrow" data-tk="${esc(t.kind)}|${esc(t.id)}"><span>${esc(label(t))}</span>${t.kind === 'node' && A.nodeById(it, N.splitId(t.id)[1]) ? `<a data-node="${esc(N.splitId(t.id)[1])}">open</a>` : ''}</div>`).join('');
+    return `<div class="chnotes"><div class="chsh">notes <span class="dim">on ${esc(e.name)} (top row of the Notes column), its trees, nodes and scenes · click a cell to write · Alt+N on the open node</span></div>${rows || '<div class="dim lyno">No notes on its trees, nodes or scenes yet.</div>'}`
       + `<div class="chsh">history <span class="dim">(every act, newest first)</span></div>` + it.log.slice(-30).reverse().map(x => `<div class="chlog"><span class="dim">${when(x.at)}</span> ${x.via === 'agent' ? 'agent' : 'director'} <b>${esc(x.act)}</b> ${esc(x.tree || '')} ${esc(x.node || '')} <span class="dim">${esc(x.detail || '')}</span></div>`).join('') + '</div>';
   }
   // ---------------------------------------------------------------- events
@@ -553,9 +595,12 @@ export class AssetWorkspace {
       if (a === 'keep' || a === 'branch' || a === 'revert') return this.choose(this.sel, { keep: 'kept', branch: 'branch', revert: 'reverted' }[a]);
       if (a === 'tohead') { await this.act('head', { node: this.sel }); return toast(`${this.sel} is the head`); }
       if (a === 'nclose') { if (this.sk) await this.closeSketch(); this.sel = null; this.mode = 'view'; return this.render(); }
-      if (a === 'nnote') { const text = await ui.prompt({ title: `Note on ${this.sel}`, placeholder: 'note (Enter saves)' }); if (text) await this.act('note', { node: this.sel, text }); return; }
-      if (a === 'addnote') { const ta = this.$('.chntext'); if (!ta.value.trim()) return ta.focus(); await this.act('note', { text: ta.value.trim(), ...(this.sel ? { node: this.sel } : {}), ...(this.$('.chnask')?.checked ? { to: 'agent' } : {}) }); ta.value = ''; return; }
-      if (a === 'nresolve') return this.act('resolve', { note: t.closest('[data-note]').dataset.note });
+      if (a === 'nnote') return this.nc.edit(this.tg('node', this.sel));
+      if (a === 'pinnote') { this.pinMode = !this.pinMode; if (this.mode !== 'view') this.mode = 'view'; return this.render(); }
+      // pin mode: a click on the open node's image pins a note there (x, y as fractions of the image)
+      const pimg = this.pinMode && t.closest('.chpinw img');
+      if (pimg) { const r = pimg.getBoundingClientRect(); this.pinMode = false; this.render(); return this.nc.edit(this.tg('node', this.sel, { pin: { x: +((ev.clientX - r.left) / r.width).toFixed(4), y: +((ev.clientY - r.top) / r.height).toFixed(4) } })); }
+      const pin = t.closest('.chnpin[data-nid]'); if (pin) { const c = this.nc.layer.querySelector(`[data-nid="${CSS.escape(pin.dataset.nid)}"]`); c?.scrollIntoView({ block: 'nearest' }); c?.classList.add('flash'); setTimeout(() => c?.classList.remove('flash'), 1200); return; }
       const cat = t.closest('[data-cat]'); if (cat) { const x = this.cat.items.find(i => i.id === cat.dataset.cat); return this.toggleRef({ path: 'catalog/' + x.file, source: 'catalog', title: x.title, licence: x.licence, creator: x.author, url: x.source, catalog_id: x.id }); }
       const ov = t.closest('[data-ov]'); if (ov) return this.useOpenverse(ov.dataset.ov);
       const lk = t.closest('.chlook[data-look]'); if (lk) { this.vid = lk.dataset.look; this.sel = null; this.mode = 'view'; return this.render(); }
@@ -585,9 +630,9 @@ export class AssetWorkspace {
       const t = ev.target;
       if (this.sk?.api?.el.contains(t)) return;
       if (t.matches('.chovq')) { ev.stopPropagation(); if (ev.key === 'Enter') this.searchOpenverse(t.value); return; }
-      if (t.matches('.chntext')) { ev.stopPropagation(); if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) this.$('[data-a=addnote]').click(); return; }
       if (t.matches('.asvname, .asvnotes, .asaxc')) { ev.stopPropagation(); if (ev.key === 'Enter') { if (t.matches('.asaxc')) this.vf.axes[t.dataset.ax] = t.value; this.createVariant(); } if (ev.key === 'Escape') { this.vf = null; this.render(); } return; }
       if (t.matches('input, textarea, select')) { ev.stopPropagation(); if (ev.key === 'Escape') t.blur(); if (ev.key === 'Enter' && t.matches('.chppath')) this.addPhotoPath(t.value); return; }
+      if (ev.key === 'Escape' && this.pinMode) { ev.stopPropagation(); this.pinMode = false; return this.render(); }
       if (ev.key === 'Escape' && this.sel) { ev.stopPropagation(); this.sel = null; this.mode = 'view'; this.render(); }
     });
     el.addEventListener('focusout', () => setTimeout(() => { if (this.pending && !this.typing()) this.render(); }, 0));
@@ -616,7 +661,10 @@ export function assetCommands({ pre, group, stage, get, ids, root, vWord, what }
     { id: `${pre}.keep`, group, title: `${group}: keep the new node (it becomes the head)`, when: (c) => V() && A.pending(get().iter(), node(c)), run: (c) => get().choose(node(c).id, 'kept') },
     { id: `${pre}.branch`, group, title: `${group}: keep the new node as a branch`, when: (c) => V() && A.pending(get().iter(), node(c)), run: (c) => get().choose(node(c).id, 'branch') },
     { id: `${pre}.revert`, group, title: `${group}: revert (drop the new node)`, when: (c) => V() && A.pending(get().iter(), node(c)), run: (c) => get().choose(node(c).id, 'reverted') },
+    { id: `${pre}.noteNode`, group, title: `${group}: note on this node (Notes column)`, when: (c) => V() && !!node(c), run: (c) => { const S = get(); S.nc.edit(S.tg('node', node(c).id)); } },
+    { id: `${pre}.pinNote`, group, title: `${group}: pin a note on the open node's image`, when: () => V() && !!get().sel, run: () => { const S = get(); S.pinMode = true; S.mode = 'view'; S.render(); } },
     { id: `${pre}.abFlip`, group, title: `${group}: A/B compare mode (slider, toggle, side by side)`, when: () => V() && get().mode === 'compare', run: () => { const S = get(); S.ab = { slider: 'toggle', toggle: 'side', side: 'slider' }[S.ab]; prefs.set(S.pf + 'AB', S.ab); S.render(); } },
   ]);
-  window.WB = Object.assign(window.WB || {}, { stageActions: { ...(window.WB?.stageActions || {}), [stage]: { canSave: () => V() && !!get().sk && get().mode === 'edit', save: () => get().requestEdit(), canNote: () => V() && !!get().ent(), note: () => get().setTab('notes') } } });
+  window.WB = Object.assign(window.WB || {}, { stageActions: { ...(window.WB?.stageActions || {}), [stage]: { canSave: () => V() && !!get().sk && get().mode === 'edit', save: () => get().requestEdit(), canNote: () => V() && !!get().ent(), note: () => get().nc.editCurrent() } } });
+  menus.contribute('chnode', [(c) => V() ? [{ label: '+ Add', submenu: [{ cmd: `${pre}.noteNode`, label: '+ note on this node' }, { cmd: `${pre}.pinNote`, label: '+ pinned note (click the image)' }, '-', { cmd: 'notes.addHere', label: '+ note here' }] }] : []]);
 }

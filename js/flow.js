@@ -19,6 +19,7 @@ import { currentScript, gaps as scriptGaps, intakeOpen, INTAKE } from './scenes.
 import { currentBreakdown, PROMOTABLE } from './breakdown.js';
 import { currentBoard } from './storyboard.js';
 import * as A from './assets.js';
+import { isV2 as notesV2, openAsks } from './notes.js';
 
 export const STAGES = [
   { id: 'lyrics', title: 'Lyrics', n: 1, does: 'the poem: lines, sections, notes, versions; the song file when you have it' },
@@ -73,7 +74,9 @@ function assetFact(e, approvals) {
 
 // what the project files already hold (the page passes its store, the server reads the files). `entities` are the full
 // entity files (the page) or only entities/index.json (then assetsKnown is false: the identity / base trees are unknown).
-export function projectFacts({ song, script, shots, entities, lyrics, scenes, breakdown, storyboard, approvals }) {
+// `notes` = notes.json v2 (js/notes.js): the open asks for the agent per stage come from it (else from the old stores)
+export function projectFacts({ song, script, shots, entities, lyrics, scenes, breakdown, storyboard, approvals, notes }) {
+  const askN = (stage, old) => notesV2(notes) ? openAsks(notes, stage).length : (old?.notes || []).filter(n => n.status === 'open' && n.to === 'agent').length;
   const ents = (entities || []).filter(e => e && typeof e === 'object');
   const bitems = (currentBreakdown(breakdown)?.items || []).filter(i => !i.dropped);
   const sv = currentScript(scenes), dur = song?.duration_ms || 0;
@@ -83,23 +86,23 @@ export function projectFacts({ song, script, shots, entities, lyrics, scenes, br
   return {
     scenes: sv?.scenes?.length || 0, gapMs: sv ? scriptGaps(sv.scenes, dur).reduce((a, [x, y]) => a + y - x, 0) : dur,
     intakeOpen: scenes ? intakeOpen(scenes).length : 0, intakeAnswered: scenes ? INTAKE.length - intakeOpen(scenes).length : 0,
-    sceneAsks: (scenes?.notes || []).filter(n => n.status === 'open' && n.to === 'agent').length,
+    sceneAsks: askN('script', scenes),
     scenesNeedYou: sv ? sv.scenes.filter(s => scenes?.states?.[s.id]?.status === 'needs_you').length : 0,
     lines: song?.lines?.length || 0, hasSong: !!song?.audio?.mix, timing: song?.timing || null,
     script: script?.lines?.length || 0, shots: shots?.length || 0,
     characters: ents.filter(e => e.kind === 'character').length, locations: ents.filter(e => e.kind === 'location').length,
     props: ents.filter(e => e.kind === 'prop').length,
-    agentAsks: (lyrics?.notes || []).filter(n => n.status === 'open' && n.to === 'agent').length,
+    agentAsks: askN('lyrics', lyrics),
     items: bitems.length, itemsToPromote: bitems.filter(i => PROMOTABLE.includes(i.kind) && !breakdown?.states?.[i.id]?.entity_id).length,
     itemsReview: bitems.filter(i => bstate(i) === 'review').length, itemsDraft: bitems.filter(i => bstate(i) === 'draft').length,
     sceneryToPromote: bitems.filter(i => (i.kind === 'location' || i.kind === 'prop') && !breakdown?.states?.[i.id]?.entity_id).length,
-    breakdownAsks: (breakdown?.notes || []).filter(n => n.status === 'open' && n.to === 'agent').length,
+    breakdownAsks: askN('breakdown', breakdown),
     // stages 4 and 5: per asset, where its identity / base stands (assetApproval)
     assetsKnown, assets: { character: af('character'), location: af('location'), prop: af('prop') },
     // stage 6: the storyboard (a project without storyboard.json reads its shots from shots.json)
     ...(() => { const bs = currentBoard(storyboard)?.shots || [];
       return { boardShots: bs.length, scenesNoShots: sv && storyboard ? sv.scenes.filter(s => !bs.some(x => x.scene === s.id)).length : 0, shotsNoFrame: bs.filter(s => !s.sketch && !s.thumb).length,
-        boardAsks: (storyboard?.notes || []).filter(n => n.status === 'open' && n.to === 'agent').length }; })(),
+        boardAsks: askN('storyboard', storyboard) }; })(),
   };
 }
 const asks = (n) => n ? [`${pl(n, 'open ask')} for the agent`] : [];

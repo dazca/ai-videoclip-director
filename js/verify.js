@@ -12,7 +12,7 @@ export function installVerify(ctx) {
     const out = [];
     const wrapped = lyr.items.filter(it => !it.first);            // wrapped visual lines ("letters jump")
     if (wrapped.length) out.push(wrapped[Math.floor(wrapped.length * 0.2)].t0, wrapped[Math.floor(wrapped.length * 0.7)].t0);
-    const notesT = new Set(store.notes.notes.map(n => n.t));
+    const notesT = new Set(store.notes.notes.map(n => n.target?.t));
     const nl = store.song.lines.find(l => notesT.has(l.t0) && l.t0 > 20000); if (nl) out.push(nl.t0);
     const S = store.song.sections, L = store.song.lines;
     for (const i of [3, 10]) if (S[i]) out.push(S[i].t0);          // section starts = shot cuts = downbeats

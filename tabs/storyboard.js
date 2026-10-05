@@ -5,7 +5,9 @@
 // status (approvals.json "shot:<id>", the director's) and its generation request or clip. Side panel: the selected shot
 // (times, kind, still / video, text, camera, frame, assets with a per-shot variant override, requests, split / merge /
 // move / delete), Gaps (everything still missing across the stages, each with a jump link, and the estimate against the
-// cost cap; "Fill the gaps" asks the agent for draft requests), Notes (+ "Ask the agent"), Versions (diff, restore).
+// cost cap; "Fill the gaps" asks the agent for draft requests), Versions (diff, restore). The Notes column
+// (core/notescol.js) on the right is row-aligned with the scenes: a scene's notes and its shots' (tagged sh03) sit on its
+// row; Alt+N notes the selected shot. Right-click: + Add › shot / note (undoable).
 // "Shots from beats" proposes one shot per scene beat or group of beats (js/storyboard.js shotsFromBeats). Edits collect
 // in a draft (kept in this browser) until "Save version" (Ctrl+Enter): every save is a new version in storyboard.json.
 // MCP: storyboard_get, shots_update, shot_note_add / shot_note_resolve, gaps_get. Format: js/storyboard.js.
@@ -18,6 +20,8 @@ import * as F from '../js/flow.js';
 import * as SC from '../js/scenes.js';
 import * as SB from '../js/storyboard.js';
 import * as A from '../js/assets.js';
+import { NotesColumn } from '../core/notescol.js';
+import { history } from '../core/history.js';
 
 const WB = () => window.WB;
 const visible = () => WB()?.app?.active() === 'stage' && WB().stages?.current() === 'storyboard';
@@ -44,21 +48,39 @@ let S = null;
 
 class Board {
   constructor(el, ctx) {
-    this.el = el; this.ctx = ctx; this.side = prefs.get('boardSide', 'shot'); this.filter = 'open';
+    this.el = el; this.ctx = ctx; this.side = ['shot', 'gaps', 'versions'].includes(prefs.get('boardSide', 'shot')) ? prefs.get('boardSide', 'shot') : 'shot';
     this.sel = prefs.get('boardSel:' + PROJECT, null); this.snap = prefs.get('boardSnap', 'beats');
     this.compare = null; this.ab = { a: null, b: null }; this.sk = null; this.skVer = {}; this.pending = false;
     el.classList.add('sbws');
     el.innerHTML = `<div class="sbmain"><div class="lybar sbbar"></div><div class="sblist" tabindex="-1"></div></div>
-      <div class="lyside sbside"><div class="lytabs"><a data-side="shot">Shot</a><a data-side="gaps">Gaps</a><a data-side="notes">Notes</a><a data-side="versions">Versions</a></div>
-      <div class="lylist"></div>
-      <div class="lyask"><textarea rows="2" placeholder="Ask the agent… (Ctrl+Enter sends)"></textarea><button data-a="ask" title="writes a note addressed to the agent (MCP storyboard_get lists it); nothing is generated or paid">Ask the agent</button></div></div>`;
+      <div class="lyside sbside"><div class="lytabs"><a data-side="shot">Shot</a><a data-side="gaps">Gaps</a><a data-side="versions">Versions</a></div>
+      <div class="lylist"></div></div>`;
     this.$ = (s) => el.querySelector(s);
     this.skHost = document.createElement('div'); this.skHost.className = 'scskhost sbskhost';
     this.loadDraft();
     this.wire();
+    // the Notes column: one row per scene (its shots' notes tagged with the shot id); the top row: the whole storyboard
+    const sceneT = (id) => ({ stage: 'storyboard', kind: 'scene', id }), shotT = (id) => ({ stage: 'storyboard', kind: 'shot', id });
+    this.nc = new NotesColumn({ stage: 'storyboard', scroller: this.$('.sblist'), active: () => !this.compare,
+      top: { label: 'notes on the whole storyboard', targets: [{ stage: 'storyboard', kind: 'stage', id: null }] },
+      rows: () => [...this.el.querySelectorAll('.sblist > .sbscene')].map(e => {
+        const sc = e.dataset.scene, shots = sc ? this.inScene(sc) : this.orphans(), ids = new Set(shots.map(s => s.id));
+        if (!sc && !shots.length) return null;
+        return { el: e, targets: [...(sc ? [sceneT(sc)] : []), ...shots.map(s => shotT(s.id))],
+          match: (n) => (sc && n.target.kind === 'scene' && n.target.id === sc) || (n.target.kind === 'shot' && (ids.has(n.target.id) || (!!sc && n.target.scene === sc && !this.shot(n.target.id)))),
+          sub: (n) => n.target.kind === 'shot' ? n.target.id : '',
+          targetAt: (x) => { const c = x.closest?.('[data-shot]'); return c ? shotT(c.dataset.shot) : sc ? sceneT(sc) : null; } }; }).filter(Boolean),
+      current: () => this.sel && this.shot(this.sel) ? shotT(this.sel) : null });
     store.on((w) => { if (['board', 'scenes', 'all', 'approvals', 'requests', 'breakdown', 'costs'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
     this.render();
   }
+  // a draft edit from "+ Add" (a shot) and the other structural edits: one undo step (Ctrl+Z puts the draft back)
+  undoable(label, fn) {
+    const before = structuredClone(this.draft); const r = fn(); const after = structuredClone(this.draft);
+    if (JSON.stringify(before) !== JSON.stringify(after)) history.push({ label, undo: () => this.setDraft(before), redo: () => this.setDraft(after) });
+    return r;
+  }
+  setDraft(d) { this.draft = structuredClone(d); this.saveDraft(); if (this.sel && !this.shot(this.sel)) this.sel = null; this.render(); }
   get doc() { return store.board; }
   get cur() { return SB.currentBoard(this.doc); }
   get song() { return store.song; }
@@ -116,7 +138,7 @@ class Board {
     const s = this.shot(id);
     this.sel = s ? id : null; prefs.set('boardSel:' + PROJECT, this.sel);
     if (this.sk && this.sk.shot !== this.sel && !this.sk.api.dirty) this.closeSketch(true);
-    if (s && this.side !== 'shot' && this.side !== 'notes') this.setSide('shot', false);
+    if (s && this.side !== 'shot') this.setSide('shot', false);
     if (s && seek) this.ctx.timeline?.seek(s.t0);
     this.render();
     if (s && scroll) this.el.querySelector(`.sbcard[data-shot="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'nearest' });
@@ -134,7 +156,16 @@ class Board {
     const g = this.inScene(sceneId);
     if (g.length) return this.split(g[g.length - 1].id);
     const id = SB.nextShotId(this.doc, this.draft);
-    if (this.edit((d) => { d.push({ ...SB.NEW_SHOT(), id, scene: sceneId, t0: sc.t0, t1: sc.t1, kind: 'wide', gen: 'video', beats: sc.beats.map(b => b.id), text: sc.text ? sc.text.slice(0, 400) : '', ...this.needs(sceneId) }); })) this.select(id);
+    if (this.undoable(`add shot ${id}`, () => this.edit((d) => { d.push({ ...SB.NEW_SHOT(), id, scene: sceneId, t0: sc.t0, t1: sc.t1, kind: 'wide', gen: 'video', beats: sc.beats.map(b => b.id), text: sc.text ? sc.text.slice(0, 400) : '', ...this.needs(sceneId) }); }))) this.select(id);
+    return id;
+  }
+  // "+ shot here" at a time (the timeline): the shot there is cut at that time (on the grid), else the scene there gets one
+  addShotAt(t) {
+    const s = this.draft.find(x => x.t0 <= t && t < x.t1);
+    if (s) return this.split(s.id, t);
+    const sc = this.scenes.find(x => x.t0 <= t && t < x.t1);
+    if (!sc) return toast('no scene at this time: + scene first (the script)');
+    return this.addShot(sc.id);
   }
   // the cut nearest to `at` (default: the playhead when it is inside the shot, else the middle) on the beat grid
   split(id, at) {
@@ -145,19 +176,19 @@ class Board {
     for (const mode of [this.snap, 'beats', 'off']) { const x = SB.snapGrid(want, this.song, mode), mm = mode === 'off' ? 250 : mode === 'bars' ? SB.barMs(this.song) : SB.beatMs(this.song); if (x - s.t0 >= mm * 0.99 && s.t1 - x >= mm * 0.99) { t = x; break; } }
     if (t == null) return toast(`${id} is too short to split (${secs(s.t1 - s.t0)})`);
     const nid = SB.nextShotId(this.doc, this.draft), bt = (b) => this.beatT(s.scene, b) ?? s.t0;
-    if (this.edit((d) => { d.push({ ...structuredClone(s), id: nid, t0: t, title: '', text: '', camera: '', sketch: null, clips: [], beats: s.beats.filter(b => bt(b) >= t) }); s.beats = s.beats.filter(b => bt(b) < t); s.t1 = t; })) { this.select(nid); toast(`${id} split at ${clk(t)}: ${nid}`); }
+    if (this.undoable(`split ${id}: ${nid}`, () => this.edit((d) => { d.push({ ...structuredClone(s), id: nid, t0: t, title: '', text: '', camera: '', sketch: null, clips: [], beats: s.beats.filter(b => bt(b) >= t) }); s.beats = s.beats.filter(b => bt(b) < t); s.t1 = t; }))) { this.select(nid); toast(`${id} split at ${clk(t)}: ${nid}`); return nid; }
   }
   neighbours(s) { const g = s.scene && this.scene(s.scene) ? this.inScene(s.scene) : this.orphans(), i = g.indexOf(s); return { g, i, prev: g[i - 1] || null, next: g[i + 1] || null }; }
   merge(id) {
     const s = this.shot(id); if (!s) return;
     const { next } = this.neighbours(s); if (!next || next.scene !== s.scene) return toast('no next shot in this scene to merge with');
     const join = (a, b, sep) => [a, b].filter(Boolean).join(sep);
-    if (this.edit((d) => {
+    if (this.undoable(`merge ${next.id} into ${id}`, () => this.edit((d) => {
       s.t1 = next.t1; s.title = s.title || next.title; s.text = join(s.text, next.text, '\n'); s.camera = join(s.camera, next.camera, '; '); s.sketch = s.sketch || next.sketch;
       for (const k of ['beats', 'cast', 'locations', 'props', 'clips']) s[k] = [...new Set([...(s[k] || []), ...(next[k] || [])])];
       s.variants = { ...(next.variants || {}), ...(s.variants || {}) };
       d.splice(d.indexOf(next), 1);
-    })) { this.select(id); toast(`${next.id} merged into ${id}`); }
+    }))) { this.select(id); toast(`${next.id} merged into ${id}`); }
   }
   // swap with the neighbour: the two keep their lengths and trade places in the scene
   move(id, dir) {
@@ -170,7 +201,7 @@ class Board {
     const s = this.shot(id); if (!s) return;
     if ((s.text || s.sketch || s.camera) && !(await ui.confirm(`Remove shot ${id}${s.title ? ` “${s.title}”` : ''} from the draft? (saved versions keep it; its time goes to the neighbour)`))) return;
     const { prev, next } = this.neighbours(s);
-    if (this.edit((d) => { if (prev && prev.scene === s.scene) prev.t1 = s.t1; else if (next && next.scene === s.scene) next.t0 = s.t0; d.splice(d.indexOf(s), 1); })) this.select(prev?.id || next?.id || null, { seek: false });
+    if (this.undoable(`remove shot ${id}`, () => this.edit((d) => { if (prev && prev.scene === s.scene) prev.t1 = s.t1; else if (next && next.scene === s.scene) next.t0 = s.t0; d.splice(d.indexOf(s), 1); }))) this.select(prev?.id || next?.id || null, { seek: false });
   }
   // a boundary moves both shots that share it; the first shot starts with its scene, the last ends with it
   setTimes(id, t0, t1) {
@@ -208,13 +239,13 @@ class Board {
     if (had && !(await ui.confirm(`Replace the ${nn(had, 'shot')} of ${targets.join(', ')} with shots from the beats? (saved versions keep them; their frame sketches stay on disk)`))) return;
     let made = 0;
     const snap = this.snap === 'off' ? 'beats' : this.snap;
-    const ok = this.edit((d) => {
+    const ok = this.undoable(`shots from beats (${targets.length === 1 ? targets[0] : targets.length + ' scenes'})`, () => this.edit((d) => {
       for (const id of targets) {
         const sc = this.scene(id); if (!sc) continue;
         for (const x of d.filter(s => s.scene === id)) d.splice(d.indexOf(x), 1);
         for (const p of SB.shotsFromBeats(sc, this.song, { assets: SB.sceneAssets(id, store.breakdown, store.entities), snap })) { d.push({ ...p, id: SB.nextShotId(this.doc, d) }); made++; }
       }
-    });
+    }));
     if (ok) { toast(`${nn(made, 'shot')} from the beats of ${targets.length === 1 ? targets[0] : targets.length + ' scenes'} · unsaved: Save version (Ctrl+Enter) keeps them`); const f = this.inScene(targets[0])[0]; if (f) this.select(f.id, { seek: false }); }
   }
   // ---------------------------------------------------------------- generation requests (drafts: the director approves them here, the agent runs them)
@@ -290,24 +321,12 @@ class Board {
     await this.saveSketch(shotId, sk, png, mask);
   }
   // ---------------------------------------------------------------- notes and asks
-  addNote({ shot = null, scene = null, text, to, kind, gaps }) {
-    return store.mutate('storyboard.json', (d) => {
-      d.notes.push({ id: SB.nextNoteId(d), shot, ...(scene ? { scene } : {}), text, by: 'director', ...(to ? { to, kind: kind || 'request' } : {}), ...(gaps ? { gaps } : {}), status: 'open', at: nowIso(), version: d.current, replies: [] });
-    }, { label: to ? 'ask the agent' : 'shot note' });
-  }
-  reply(id, text) { return store.mutate('storyboard.json', (d) => { const n = d.notes.find(x => x.id === id); if (n) (n.replies ||= []).push({ id: `${n.id}.${(n.replies?.length || 0) + 1}`, text, by: 'director', at: nowIso() }); }, { label: 'reply ' + id }); }
-  resolve(id) { return store.mutate('storyboard.json', (d) => { const n = d.notes.find(x => x.id === id); if (n) { n.status = n.status === 'open' ? 'resolved' : 'open'; n.resolved_by = 'director'; n.resolved_at = nowIso(); } }, { label: 'resolve ' + id }); }
-  async noteOnShot(id = this.sel) {
-    const s = this.shot(id); if (!s) return toast('select a shot first');
-    const text = await ui.prompt({ title: `Note on ${s.id}${s.title ? ` “${s.title}”` : ''}`, placeholder: 'note (Enter saves)' }); if (!text) return;
-    await this.addNote({ shot: s.id, scene: s.scene, text }); this.setSide('notes');
-  }
-  async ask() {
-    const ta = this.$('.lyask textarea'), text = ta.value.trim(); if (!text) { ta.focus(); return; }
-    const s = this.cur?.shots.find(x => x.id === this.sel);
-    await this.addNote({ shot: s ? s.id : null, scene: s?.scene || null, text, to: 'agent' });
-    ta.value = ''; toast('asked the agent (a note it reads with storyboard_get)');
-  }
+  // an ask for the agent on the whole storyboard (storyboard, fill the gaps): written at once (notes.json v2)
+  addAsk({ text, ask = 'request', gaps }) { return store.noteAdd({ stage: 'storyboard', kind: 'stage', id: null }, text, { to: 'agent', ask, version: this.doc.current, ...(gaps ? { gaps } : {}) }); }
+  hasAsk(ask, text) { return store.notesOn({ stage: 'storyboard', status: 'open' }).some(n => n.ask === ask && n.text === text); }
+  // a note on a shot (the Notes column, the shot's scene row), else the whole storyboard
+  noteOnShot(id = this.sel) { const s = this.shot(id); this.nc.edit(s ? { stage: 'storyboard', kind: 'shot', id: s.id, ...(s.scene ? { scene: s.scene } : {}) } : { stage: 'storyboard', kind: 'stage', id: null }); }
+  ask() { const s = this.shot(this.sel); this.nc.edit(s ? { stage: 'storyboard', kind: 'shot', id: s.id, ...(s.scene ? { scene: s.scene } : {}) } : { stage: 'storyboard', kind: 'stage', id: null }, { to: true }); }
   async askStoryboard() {
     if (this.dirty) return toast('save your edits first: the agent reads the saved version');
     const none = this.scenes.filter(sc => !this.inScene(sc.id).length);
@@ -315,9 +334,9 @@ class Board {
     const text = none.length
       ? `Storyboard ${none.map(s => s.id).join(', ')}: propose shots from their beats (one shot per beat or group of beats, tiled to the scene, cut on the beat grid), each with a kind, the action, camera / motion, the cast / locations / props it needs (and the variant when it differs from the scene's) and a frame sketch where it helps (sketch_save, then sketch on the shot). Write them with shots_update.`
       : 'Storyboard pass: go through every scene\'s shots: complete the action, camera / motion and assets, propose frame sketches for the shots without a frame, and flag what does not work (shot_note_add). Write changes with shots_update.';
-    if (this.doc.notes.some(n => n.status === 'open' && n.kind === 'storyboard' && n.text === text)) return toast('already asked: the agent has this open ask');
-    await this.addNote({ text, to: 'agent', kind: 'storyboard', ...(none.length ? { gaps: { scenes: none.map(s => s.id) } } : {}) });
-    this.setSide('notes'); toast(`asked the agent to storyboard${none.length ? ' ' + nn(none.length, 'scene') : ''}`);
+    if (this.hasAsk('storyboard', text)) return toast('already asked: the agent has this open ask');
+    await this.addAsk({ text, ask: 'storyboard', ...(none.length ? { gaps: { scenes: none.map(s => s.id) } } : {}) });
+    toast(`asked the agent to storyboard${none.length ? ' ' + nn(none.length, 'scene') : ''} (Notes column, top row)`);
   }
   async fillGaps() {
     if (this.dirty) return toast('save your edits first: the agent reads the saved version');
@@ -326,9 +345,9 @@ class Board {
     const text = `Fill the gaps: ${g.no_request.length ? `draft a generation request (request_create, target "shot:<id>") for each of the ${nn(g.no_request.length, 'shot')} without a request or clip (${g.no_request.map(x => `${x.shot} ${x.gen} ~$${x.usd.toFixed(2)}`).join(', ')}): still or video as listed, an honest est_cost, refs = the approved variant / look images (+ the frame sketch); gaps_get has the drafts. Estimate ~$${g.estimate.usd.toFixed(2)}: spent $${cv.spent.toFixed(2)} + committed $${cv.committed.toFixed(2)} + this = $${total.toFixed(2)} of the cap $${cv.cap.toFixed(2)}.` : 'every shot has a request or a clip.'}`
       + (g.assets.length ? ` ${nn(g.assets.length, 'asset')} not approved yet (${g.assets.map(a => `${a.name}${a.variant ? ' / ' + a.variant_name : ''}`).join(', ')}): propose their sheets first (asset_get, request_create).` : '')
       + (g.no_shots.length ? ` Scenes without shots: ${g.no_shots.map(x => x.scene).join(', ')} (shots_update).` : '') + (g.no_frame.length ? ` ${nn(g.no_frame.length, 'shot')} without a frame sketch.` : '');
-    if (this.doc.notes.some(n => n.status === 'open' && n.kind === 'fill_gaps' && n.text === text)) return toast('already asked: the agent has an open "fill the gaps" ask for these gaps');
-    await this.addNote({ text, to: 'agent', kind: 'fill_gaps', gaps: { shots: g.no_request.map(x => x.shot), assets: g.assets.map(a => `${a.type}:${a.id}${a.variant ? ':' + a.variant : ''}`), scenes: g.no_shots.map(x => x.scene), est_usd: g.estimate.usd } });
-    this.setSide('notes'); toast(`asked the agent to fill the gaps (est ${usd(g.estimate.usd)})`);
+    if (this.hasAsk('fill_gaps', text)) return toast('already asked: the agent has an open "fill the gaps" ask for these gaps');
+    await this.addAsk({ text, ask: 'fill_gaps', gaps: { shots: g.no_request.map(x => x.shot), assets: g.assets.map(a => `${a.type}:${a.id}${a.variant ? ':' + a.variant : ''}`), scenes: g.no_shots.map(x => x.scene), est_usd: g.estimate.usd } });
+    toast(`asked the agent to fill the gaps (est ${usd(g.estimate.usd)}; Notes column, top row)`);
   }
   gapsNow(shots = this.draft) { return SB.boardGaps({ song: this.song, scenes: this.scenes, shots, entities: store.entities, approvals: store.approvals, requests: store.requests }); }
   setSide(s, render = true) { this.side = s; prefs.set('boardSide', s); if (render) this.renderSide(); }
@@ -428,17 +447,14 @@ class Board {
       <div class="lydc"><div class="lydl">${side('-', 'del')}</div><div class="lydr">${side('+', 'add')}</div></div></div>`;
   }
   renderSide() {
-    const open = this.doc.notes.filter(x => x.status === 'open').length, g = this.gapsNow();
+    const g = this.gapsNow();
     for (const a of this.el.querySelectorAll('.sbside .lytabs [data-side]')) {
       a.classList.toggle('on', a.dataset.side === this.side);
-      const n = { shot: this.sel || '', gaps: g.total, notes: open, versions: this.doc.versions.length }[a.dataset.side];
-      a.innerHTML = `${{ shot: 'Shot', gaps: 'Gaps', notes: 'Notes', versions: 'Versions' }[a.dataset.side]}<i>${esc(n)}</i>`;
+      const n = { shot: this.sel || '', gaps: g.total, versions: this.doc.versions.length }[a.dataset.side];
+      a.innerHTML = `${{ shot: 'Shot', gaps: 'Gaps', versions: 'Versions' }[a.dataset.side]}<i>${esc(n)}</i>`;
     }
-    this.$('.lyask').style.display = this.side === 'notes' ? '' : 'none';
-    const ta = this.$('.lyask textarea'), os = this.sel && this.shot(this.sel);
-    ta.placeholder = os ? `Ask the agent about ${os.id}… (Ctrl+Enter sends)` : 'Ask the agent about the storyboard… (Ctrl+Enter sends)';
     const list = this.$('.sbside .lylist'), keep = list.scrollTop;
-    list.innerHTML = this.side === 'gaps' ? this.gapsHtml(g) : this.side === 'notes' ? this.notesHtml() : this.side === 'versions' ? this.versionsHtml() : this.shotHtml();
+    list.innerHTML = this.side === 'gaps' ? this.gapsHtml(g) : this.side === 'versions' ? this.versionsHtml() : this.shotHtml();
     list.scrollTop = keep;
   }
   shotHtml() {
@@ -498,15 +514,6 @@ class Board {
       + grp('Assets not approved', g.assets.map(a => R(`asset:${a.type}:${a.id}:${a.variant || ''}`, `<i class="sbat k-${esc(a.type)}">${TL[a.type]}</i>${esc(a.name)}`, `${a.variant ? esc(a.variant_name) + ' · ' : ''}${esc(a.why || '')}`, `${nn(a.shots.length, 'shot')}`, a.missing ? 'fix' : a.type === 'character' ? 'characters' : 'scenery')), 'every asset the shots need is approved')
       + grp('Shots without a request or clip', g.no_request.map(x => R(`shot:${x.shot}`, esc(x.shot), `${esc(x.kind)} · ${x.gen === 'video' ? '▶ video' : '▣ still'}`, usd(x.usd), 'shot')), 'every shot has a request or a clip');
   }
-  notesHtml() {
-    const ns = this.doc.notes.filter(x => this.filter === 'all' || x.status === this.filter).sort((x, y) => String(y.at).localeCompare(String(x.at)));
-    const opt = (v, l) => `<option value="${v}"${v === this.filter ? ' selected' : ''}>${l}</option>`;
-    return `<div class="lyvh"><span class="dim">${nn(ns.length, 'note')}</span><select class="sbflt" title="which notes">${opt('open', 'open')}${opt('all', 'all')}${opt('resolved', 'resolved')}</select></div>` + (ns.length ? ns.map(x => {
-      const where = x.shot ? `<a data-go="shot:${esc(x.shot)}">${esc(x.shot)}</a>` : x.scene ? `<a data-go="scene:${esc(x.scene)}">${esc(x.scene)}</a>` : `<span>${x.kind === 'fill_gaps' ? 'fill the gaps' : x.kind === 'storyboard' ? 'storyboard' : 'whole board'}</span>`;
-      return `<div class="lynote ${x.status}${x.to === 'agent' ? ' ask' : ''}" data-note="${esc(x.id)}"><div class="lynh">${who(x)}${x.to === 'agent' ? '<span class="to">→ agent</span>' : ''}${where}<span class="sp"></span><span class="dim">${when(x.at)}</span><b data-a="resolve" title="${x.status === 'open' ? 'resolve' : 'reopen'}">${x.status === 'open' ? '✓' : '↺'}</b></div>
-        <div class="lynt">${esc(x.text)}</div>${(x.replies || []).map(rp => `<div class="lynr">${who(rp)} ${esc(rp.text)} <span class="dim">${when(rp.at)}</span></div>`).join('')}<input class="lyrep" placeholder="reply (Enter)" spellcheck="false"></div>`;
-    }).join('') : `<div class="dim lyno">${this.filter === 'open' ? 'No open notes. Select a shot and press ✉ (Alt+N), or ask the agent below.' : 'No notes.'}</div>`);
-  }
   versionsHtml() {
     const vs = [...this.doc.versions].reverse(), { a, b } = this.ab;
     return `<div class="lyvh"><span class="dim">pick A and B, or click a row (it vs the one before)</span><button data-a="ab" ${a && b && a !== b ? '' : 'disabled'}>Compare A → B</button></div>` + (vs.length ? vs.map(v => `<div class="lyv${v.id === this.doc.current ? ' cur' : ''}" data-v="${esc(v.id)}">
@@ -530,8 +537,6 @@ class Board {
       if (act === 'beats') return this.fromBeats();
       if (act === 'askboard') return this.askStoryboard();
       if (act === 'fill') return this.fillGaps();
-      if (act === 'ask') return this.ask();
-      if (act === 'resolve') return this.resolve(t.closest('[data-note]').dataset.note);
       if (act === 'skclose') { if (await this.closeSketch()) this.render(); return; }
       if (act === 'skwin' && this.sk) { const { id, shot } = this.sk; if (this.sk.api.dirty) await this.sk.api.save().catch(() => {}); await this.closeSketch(true); this.render(); return this.openSketchFor(shot, id, { window: true }); }
       if (grp && !card && (act === 'frombeats' || act === 'addshot')) { const scId = grp.dataset.scene; return act === 'frombeats' ? this.fromBeats([scId]) : this.addShot(scId); }
@@ -578,7 +583,6 @@ class Board {
     el.addEventListener('change', (e) => {
       const t = e.target;
       if (t.matches('.sbsnap')) { this.snap = t.value; prefs.set('boardSnap', t.value); return this.renderBar(); }
-      if (t.matches('.sbflt')) { this.filter = t.value; return this.renderSide(); }
       const sid = t.closest('.sbins')?.dataset.shot; if (!sid) return;
       if (t.matches('.sbin-t0, .sbin-t1')) { const v = parseT(t.value); if (v == null) { toast('time: m:ss.mmm or seconds'); return this.render(); } return t.matches('.sbin-t0') ? this.setTimes(sid, v, null) : this.setTimes(sid, null, v); }
       if (t.matches('.sbin-kind')) { const k = t.value.trim().toLowerCase(); if (!SB.KIND_RE.test(k)) { toast('kind: a short lower-case word'); return this.render(); } return this.setField(sid, 'kind', k, true); }
@@ -589,8 +593,6 @@ class Board {
     el.addEventListener('keydown', (e) => {
       const t = e.target;
       if (t.closest('.sk')) return;
-      if (t.matches('.lyrep')) { e.stopPropagation(); if (e.key === 'Enter' && t.value.trim()) { this.reply(t.closest('[data-note]').dataset.note, t.value.trim()); t.value = ''; } if (e.key === 'Escape') t.blur(); return; }
-      if (t.matches('.lyask textarea')) { e.stopPropagation(); if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.ask(); } return; }
       if (t.matches('.lymsg')) { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); this.save(); } return; }
       if (t.matches('input, textarea, select')) {
         e.stopPropagation();
@@ -636,10 +638,16 @@ commands.register([
   { id: 'storyboard.pasteFrame', group: 'Storyboard', title: 'Paste the copied frame into the shot', when: (c) => V() && !!shotOf(c), run: (c) => S.pasteSketch(shotOf(c)) },
   { id: 'storyboard.request', group: 'Storyboard', title: 'Request the shot\'s next generation (draft)', when: (c) => V() && !!shotOf(c), run: (c) => S.requestGen(shotOf(c)) },
   { id: 'storyboard.approve', group: 'Storyboard', title: 'Approve the shot', when: (c) => V() && !!shotOf(c) && store.state('shot:' + shotOf(c)) !== 'approved', run: (c) => S.setStatus(shotOf(c), 'approved') },
-  { id: 'storyboard.note', group: 'Storyboard', title: 'Note on the shot', when: (c) => V() && !!shotOf(c), run: (c) => S.noteOnShot(shotOf(c)) },
+  { id: 'storyboard.note', group: 'Storyboard', title: 'Note on the shot (Notes column)', when: (c) => V() && !!shotOf(c), run: (c) => S.noteOnShot(shotOf(c)) },
+  { id: 'storyboard.askNote', group: 'Storyboard', title: 'Ask the agent about the selected shot / the storyboard…', run: async () => (await ensure())?.ask() },
+  // "+ shot": on a shot, a new one cut from it (on the grid); on a scene, one more (its last shot split, else one for the scene)
+  { id: 'storyboard.addShot', group: 'Storyboard', title: 'Add a shot (this scene / after this shot)', when: (c) => V() && !!(c?.shotId || c?.sceneId || S.sel), run: (c) => c?.shotId && S.shot(c.shotId) ? S.split(c.shotId) : c?.sceneId ? S.addShot(c.sceneId) : S.split(S.sel) },
 ]);
 // Ctrl+Enter / Alt+N: the rail's stage.save / stage.note ask the visible stage (core/rail.js)
-window.WB = Object.assign(window.WB || {}, { stageActions: { ...(window.WB?.stageActions || {}), storyboard: { canSave: () => V() && S.dirty, save: () => S.save(), canNote: () => V() && !!S.sel, note: () => S.noteOnShot() } } });
+window.WB = Object.assign(window.WB || {}, { stageActions: { ...(window.WB?.stageActions || {}), storyboard: { canSave: () => V() && S.dirty, save: () => S.save(), canNote: () => V(), note: () => S.nc.editCurrent() } } });
+const ADD = { label: '+ Add', when: () => V(), submenu: [{ cmd: 'storyboard.addShot', label: '+ shot' }, '-', { cmd: 'notes.addHere', label: '+ note here' }] };
+// a scene strip or a shot card of the board (contextArgs names both sbscene): + Add first
+menus.contribute('sbscene', [ADD, 'storyboard.fromBeats', 'storyboard.askNote']);
 menus.contribute('shot', ['-', 'storyboard.openShot', 'storyboard.frame', 'storyboard.split', 'storyboard.merge', 'storyboard.moveLeft', 'storyboard.moveRight', 'storyboard.copyFrame', 'storyboard.pasteFrame', 'storyboard.request', 'storyboard.note', 'storyboard.delete']);
 
 export default {

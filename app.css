@@ -139,12 +139,19 @@ body.notop .tl .picker { right: 24px; }
 /* cost, notes */
 .tl .cost, .tl .run { font-size: 11px; line-height: 13px; white-space: nowrap; overflow: hidden; }
 .tl .cost b { font-weight: normal; color: #cfae80; } .tl .run { color: var(--dim); }
-.tl .note { font-size: 11.5px; line-height: 13px; padding: 0 1px 1px 1px; }
-.tl .note b { font-weight: 600; color: #d1b480; }
-.tl .note.n-resolved { opacity: .45; }
+.tl .col-notes .body { cursor: text; }
+.tl .note { font-size: 11px; line-height: 13px; padding: 0 1px 1px 3px; border-left: 2px solid #b8913a; cursor: default; overflow-wrap: anywhere; }
+.tl .note.ag { border-left-color: #8a63c0; }
+.tl .note.ask { background: #1c1826; }
+.tl .note.other { color: #b9bdc3; }
+.tl .note.n-absorbed { opacity: .45; }
 .tl .nst { color: var(--acc); cursor: pointer; margin-right: 2px; font-size: 9px; }
-.tl .note.n-resolved .nst { color: #2e6b45; }
-.noteedit { position: fixed; z-index: 30; height: 60px; background: var(--bg3); border: 1px solid var(--acc); }
+.tl .note.n-absorbed .nst { color: #2e6b45; }
+.tl .nstg { font-style: normal; font-size: 9.5px; color: #9db7d6; margin-right: 3px; cursor: pointer; }
+.tl .nask { font-style: normal; font-size: 9.5px; color: #d6c6f5; margin-right: 3px; }
+.tl .nrep { padding-left: 6px; color: #a9adb3; font-size: 10.5px; box-shadow: inset 1px 0 0 #b8913a66; }
+.tl .nrep.ag { box-shadow: inset 1px 0 0 #8a63c0aa; }
+.noteedit { position: fixed; z-index: 30; height: 44px; background: var(--bg3); border: 1px solid var(--acc); font: 11px/13px "Segoe UI", Arial, sans-serif; color: var(--fg); resize: none; padding: 1px 3px; }
 
 /* strips */
 .tl .head.strip .nm, .tl .head.strip .hb { display: none; }
@@ -388,6 +395,10 @@ body.notop #rail, body.norail #rail { display: none; }
 #rail a.st-changed { color: #e8c88a; }
 .stw { color: #e0a03a; font-weight: 600; }
 #rail a .stw { margin-left: 1px; font-size: 10px; }
+#rail a .rnc { font-weight: normal; font-size: 9px; line-height: 11px; min-width: 11px; text-align: center; padding: 0 2px; border-radius: 6px; background: #4a3a14; color: #f3d9a6; }
+#top .opennotes { padding: 0 7px; color: #f3d9a6; white-space: nowrap; cursor: pointer; border-left: 1px solid var(--line2); margin-left: auto; }
+#top .opennotes.none { color: var(--dim); }
+#top .opennotes:hover { text-decoration: none; background: var(--bg3); }
 .chst.s-legacy, .chip.s-legacy { color: #e8c88a; } .chdot.s-legacy { background: transparent; border: 1px dashed #e0a03a; }
 .chrow .chimp { margin-left: 4px; font-size: 10px; height: 14px; line-height: 12px; padding: 0 4px; cursor: pointer; }
 #rail .next { flex: 1; min-width: 0; padding: 0 8px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; cursor: pointer; }
@@ -962,3 +973,64 @@ button.on { color: var(--acc); }
 .costs .costsum td { border-top: 1px solid var(--line); }
 .costs h4 { margin: 8px 4px 2px; font-size: 11px; color: var(--dim); }
 .costs details { margin: 6px 4px; font-size: 11px; }
+/* ---------------- the Notes column (core/notescol.js): row-aligned notes on the right of every stage's rows */
+.nchost { position: relative; --ncw: 236px; padding-right: var(--ncw) !important; }
+.nchost.ncoff { padding-right: 0 !important; }
+.ncstage { min-height: 15px; line-height: 15px; font-size: 10.5px; padding: 0 6px; border-bottom: 1px solid var(--line2); }
+.nclayer { position: absolute; top: 0; right: 0; width: var(--ncw); min-height: 100%; background: #121316; box-shadow: inset 1px 0 0 var(--line); z-index: 3; font-size: 11px; line-height: 13px; }
+.nchead { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 4px; height: 15px; padding: 0 4px 0 5px; background: var(--bg2); box-shadow: inset 1px 0 0 var(--line), 0 1px 0 var(--line); font-size: 10px; line-height: 15px; color: var(--dim); }
+.nchead b { font-weight: 600; color: var(--fg); }
+.nchead .sp { flex: 1; }
+.nchead a { cursor: pointer; color: var(--dim); padding: 0 2px; }
+.nchead a:hover { color: var(--acc); text-decoration: none; }
+.nccell { position: absolute; left: 1px; right: 0; box-shadow: inset 0 -1px 0 var(--line2); cursor: text; overflow: hidden; }
+.nccell.top { padding-top: 15px; }
+.ncadd { color: transparent; font-size: 10px; line-height: 12px; padding: 0 5px; user-select: none; }
+.nccell:hover .ncadd { color: var(--dim); }
+.nccell.empty .ncadd { line-height: 15px; }
+.nccell:not(.empty) .ncadd { position: absolute; right: 0; bottom: 0; line-height: 11px; padding: 0 4px; background: transparent; }
+.nccell:not(.empty):hover .ncadd { background: var(--bg3); }
+/* asset workspace: the Notes tab's rows, the pins on the open node's image */
+.chnrow { display: flex; gap: 8px; align-items: center; min-height: 18px; padding: 0 8px; font-size: 11px; border-bottom: 1px solid var(--line2); }
+.chnrow a { color: #9db7d6; cursor: pointer; }
+.chpinw { position: relative; display: inline-block; line-height: 0; }
+.chpinw.pinning img { cursor: crosshair; outline: 1px dashed var(--acc); }
+.chnpin { position: absolute; transform: translate(-50%, -50%); font-style: normal; font-size: 10px; line-height: 14px; min-width: 14px; text-align: center; border-radius: 7px; background: #b8913a; color: #111; box-shadow: 0 0 0 1px #000a; cursor: pointer; }
+.chnpin.done { opacity: .5; }
+.ncn.flash { animation: lyflash 1.2s; }
+/* stage 7 (final, a placeholder): the shots and their states */
+.fnws { display: flex; flex-direction: column; height: 100%; }
+.fnlist { flex: 1; overflow: auto; min-height: 0; padding-bottom: 40px; outline: none; }
+.fnrow { display: flex; align-items: center; gap: 6px; min-height: 19px; padding: 0 6px; font-size: 12px; border-bottom: 1px solid var(--line2); white-space: nowrap; cursor: default; }
+.fnrow.on { background: #1c2230; }
+.fnrow .fnt { color: #9db7d6; cursor: pointer; font-variant-numeric: tabular-nums; }
+.fnrow .fnk { width: 70px; overflow: hidden; text-overflow: ellipsis; }
+.fnrow .fntx { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* the poem is narrow (sections up to 780 px): its notes sit right next to it */
+.lypoem > .nclayer { right: auto; left: min(790px, calc(100% - var(--ncw))); }
+.ncn { position: relative; padding: 1px 4px; border-left: 2px solid #b8913a; overflow-wrap: anywhere; white-space: pre-wrap; cursor: default; }
+.ncn.ag { border-left-color: #8a63c0; }
+.ncn.ask { background: #1c1826; }
+.ncn + .ncn { box-shadow: inset 0 1px 0 var(--line2); }
+.ncn.s-absorbed, .ncn.s-dismissed { opacity: .5; }
+.ncn.s-dismissed .ncb { text-decoration: line-through; }
+.ncs { font-style: normal; color: #9db7d6; margin-right: 3px; font-size: 10px; }
+.nca { font-style: normal; color: #d6c6f5; margin-right: 3px; font-size: 10px; }
+.ncst { font-style: normal; color: #3fae6a; margin-right: 2px; }
+.ncr { padding-left: 7px; color: #a9adb3; font-size: 10.5px; box-shadow: inset 1px 0 0 #b8913a66; margin-left: 1px; }
+.ncr.ag { box-shadow: inset 1px 0 0 #8a63c0aa; }
+.ncx { display: none; position: absolute; right: 0; top: 0; background: var(--bg3); box-shadow: -2px 0 2px #0006; }
+.ncn:hover .ncx { display: inline-flex; }
+.ncx b { font-weight: normal; cursor: pointer; padding: 0 3px; color: var(--dim); line-height: 13px; }
+.ncx b:hover { color: var(--acc); }
+.ncedw { box-shadow: inset 2px 0 0 var(--acc); background: var(--bg3); }
+.ncedh { display: flex; align-items: center; gap: 3px; padding: 0 3px 0 5px; font-size: 10px; line-height: 14px; color: var(--dim); }
+.ncedh .sp { flex: 1; }
+.ncpick { height: 14px; font-size: 10px; padding: 0; max-width: 150px; }
+.ncon { color: #9db7d6; }
+.ncto { cursor: pointer; color: var(--dim); padding: 0 2px; }
+.ncto.on { color: #d6c6f5; background: #3a2d55; }
+.nced { display: block; width: 100%; box-sizing: border-box; resize: none; font: 11px/13px "Segoe UI", Arial, sans-serif; border: 0; border-top: 1px solid var(--line); background: #0d0e10; color: var(--fg); padding: 1px 4px; outline: none; overflow: hidden; }
+.nced.rep { border: 0; box-shadow: inset 0 0 0 1px var(--acc); margin-top: 1px; }
+.nc-grown { align-items: flex-start !important; }
+.nc-hl { background: #2a2416 !important; }

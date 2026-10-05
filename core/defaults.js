@@ -10,6 +10,9 @@ import { projects, exporter, slugId } from './projects.js';
 import { store, toast, PROJECT, prefs } from '../js/store.js';
 import { fmt, upperBound } from '../js/timeline.js';
 import { PAGES } from '../tabs/registry.js';
+import { columnAt, visibleColumn, columns as noteColumns } from './notescol.js';
+import { noteTime } from '../js/notes.js';
+import { currentScript } from '../js/scenes.js';
 
 const REPO_URL = 'https://github.com/dazca/ai-videoclip-director';
 
@@ -27,7 +30,7 @@ export function timeOfKey(key) {
   if (k === 'shot') return store.shots.find(s => s.id === id)?.t0;
   if (k === 'use') return store.uses.find(u => u.id === id)?.t0;
   if (k === 'script') return store.script.lines.find(s => s.id === id)?.t0;
-  if (k === 'note') return store.notes.notes.find(n => n.id === id)?.t;
+  if (k === 'note') { const n = store.notes.notes.find(x => x.id === id); return n ? noteTime(n, { song: song(), scenes: currentScript(store.scenes)?.scenes || [], shots: store.boardShots() }) ?? undefined : undefined; }
   if (k === 'section') return song().sections.find(s => s.id === id)?.t0;
   if (k === 'line') return song().lines.find(l => l.id === id)?.t0;
   return undefined;
@@ -183,11 +186,21 @@ add('Timeline', [
   { id: 'loop.line', title: 'Loop line', when: (c) => !!c.tl && !!c.line, run: (c) => { setLoop(c, { t0: c.line.t0, t1: c.line.t1 }); c.tl.seek(c.line.t0); } },
   { id: 'loop.selection', title: 'Loop selection', when: () => !!selection.range, run: (c) => setLoop(c, { ...selection.range }) },
   { id: 'marker.add', title: 'Add marker at the playhead', keys: ['M'], when: TL, run: (c) => store.addNote(c.t, '◆ marker', song().lines[lineIndexAt(c.t)]?.id, { kind: 'marker' }) },
+  // "+ Add" on the timeline (right-click): a note typed in the notes column at the clicked time, a scene / a shot there
+  { id: 'timeline.addNote', title: 'Add a note at this time (notes column)', when: TL, run: (c) => { if (c.tab !== 'timeline') tabs().show('timeline'); return c.tl.noteAt(c.t); } },
+  { id: 'timeline.addScene', title: 'Add a scene here (script draft)', when: TL, run: async (c) => { const t = c.t; await WB().stages.open('script'); return WB().script?.ws?.addSceneHere(t); } },
+  { id: 'timeline.addShot', title: 'Add a shot here (storyboard draft)', when: (c) => !!c.tl && !!currentScript(store.scenes)?.scenes?.length, run: async (c) => { const t = c.t; await WB().stages.open('storyboard'); return WB().storyboard?.ws?.addShotAt(t); } },
   { id: 'note.add', title: 'New note…', keys: ['N'], when: TL, run: async (c) => { const t = c.line && c.contextLine ? c.line.t0 : c.t; const v = await ui.prompt({ title: `Note at ${fmt(t, true)}`, placeholder: 'note text (Enter saves)' }); if (v) store.addNote(t, v, c.line?.id); } },
   { id: 'line.editTiming', title: 'Edit timing… (request)', when: (c) => !!c.line, run: async (c) => { const v = await ui.prompt({ title: `${c.line.id} "${c.line.text.slice(0, 40)}": new t0 t1 in ms (song.json is the importer's: this queues a request)`, value: `${c.line.t0} ${c.line.t1}` }); if (v) request('edit-timing', 'line:' + c.line.id, { prompt: `set ${c.line.id} to ${v}` }); } },
   { id: 'section.rename', title: 'Rename section…', when: (c) => !!c.section, run: async (c) => { const v = await ui.prompt({ title: `Rename section ${c.section.id}`, value: store.secLabel(c.section) }); if (v) store.setSection(c.section.id, { label: v }); } },
   { id: 'section.fold', title: 'Collapse section (fold)', when: (c) => !!c.tl && !!c.section, checked: (c) => c.tl.folds.has(c.section.id), run: (c) => c.tl.toggleFold(c.section.id) },
   { id: 'section.variant', title: 'Duplicate as variant (request)', when: (c) => !!c.section, run: (c) => request('section-variant', 'section:' + c.section.id, { ask: true, prompt: `variant of ${store.secLabel(c.section)}` }) },
+]);
+
+add('Notes', [
+  { id: 'notes.addHere', title: 'Add a note here (Notes column)', when: (c) => !!(c.ncCol || visibleColumn()), run: (c) => { const col = c.ncCol || visibleColumn(); return c.ncTarget ? col.edit(c.ncTarget) : col.editCurrent(); } },
+  { id: 'notes.column', title: 'Notes column (every stage)', checked: () => [...noteColumns][0]?.on ?? true, run: () => { const on = !([...noteColumns][0]?.on ?? true); for (const c of noteColumns) { c.setOn(on); break; } if (!noteColumns.size) prefs.set('ncOn', on); toast(on ? 'notes column on' : 'notes column off'); } },
+  { id: 'notes.review', title: 'All notes (Review › Notes)', run: () => tabs().show('notes') },
 ]);
 
 add('Item', [
@@ -258,6 +271,8 @@ menus.contribute('menubar:Window', [() => tabs().pages().slice(0, 9).map((p, i) 
 menus.contribute('menubar:Help', ['window.cheat', 'view.palette', 'edit.keybindings', 'help.menu', '-', 'help.readme', 'help.source', 'help.issue', 'help.about']);
 
 // ------------------------------------------------------------------ context menus
+// the timeline's + Add comes first on any right-click on the sheet (contextArgs puts "tladd" before the item's own context)
+menus.contribute('tladd', [{ label: '+ Add', submenu: [{ cmd: 'timeline.addNote', label: '+ note at this time' }, { cmd: 'timeline.addScene', label: '+ scene here' }, { cmd: 'timeline.addShot', label: '+ shot here' }] }]);
 menus.contribute('timeline', ['marker.add', 'note.add', 'loop.fromHere', 'edit.selectSection', 'view.zoomSection', 'edit.copyTime']);
 menus.contribute('ruler', ['transport.playFrom', 'loop.section', 'loop.selection', 'view.zoomSel']);
 menus.contribute('lyric', ['transport.playFrom', 'loop.line', { cmd: 'note.add', args: { contextLine: true }, label: 'Add note to this line…' }, 'line.editTiming', 'edit.copyText']);
@@ -270,13 +285,18 @@ menus.contribute('shot', itemMenu);
 menus.contribute('clip', itemMenu);
 const looksOf = (e) => (e.looks || e.costumes || []).map(l => typeof l === 'string' ? l : l.name || l.id);
 menus.contribute('cast', ['entity.open', { label: 'Swap costume', submenu: (c) => { const L = looksOf(c.entity); return [...(L.length ? L.map(l => ({ cmd: 'cast.swap', args: { look: l }, label: l })) : [{ label: '(no looks yet)', disabled: true }]), '-', 'gen.newCostume']; } }, 'item.preview']);
-menus.contribute('note', ['edit.rename', 'edit.delete', 'edit.copyText', { label: 'Resolved', checked: (c) => c.note.status === 'resolved', run: (c) => store.toggleNote(c.note.id) }]);
+menus.contribute('note', ['edit.rename', 'edit.delete', 'edit.copyText', { label: 'Done (absorbed)', checked: (c) => c.note.status !== 'open', run: (c) => store.toggleNote(c.note.id) }, { label: 'Dismiss', when: (c) => c.note.status === 'open', run: (c) => store.noteStatus(c.note.id, 'dismissed') }]);
 menus.contribute('header', ['col.hide', 'col.collapse', 'col.mode', { label: 'Width', submenu: (c) => [3, 10, 24, 40, 60, 90, 120, 180, 240, 320].map(w => ({ label: `${w} px`, checked: () => Math.round(c.col.vw) === w, run: () => c.tl.setWidth(c.col.id, w) })).concat(['-', 'col.autofit']) },
   'col.moveLeft', 'col.moveRight', '-', 'col.settings', 'col.reset']);
 menus.contribute('entity', ['entity.open', 'item.preview', 'edit.duplicate', 'gen.newCostume', 'gen.request', '-', 'edit.approve', 'edit.changes', 'entity.archive', 'item.reveal']);
 menus.contribute('empty', ['view.showTopbar', 'view.showHeader', 'edit.paste', { label: 'Show hidden columns', when: (c) => !!c.tl?.cols.some(k => k.hidden), submenu: (c) => c.tl.cols.filter(k => k.hidden).map(k => ({ label: k.def.title, run: () => c.tl.setHidden(k.id, false) })).concat(['-', 'col.showAll']) }]);
 menus.contribute('global', ['edit.undo', 'edit.redo', '-', 'view.palette', 'edit.find', 'window.cheat', '-', 'view.showTopbar']);
+// any row with a Notes column: "+ Add › + note here" (a context with its own + Add menu lists it there)
+menus.contribute('noterow', [(c) => c.hasAdd ? [] : [{ label: '+ Add', submenu: [{ cmd: 'notes.addHere', label: '+ note here' }] }]]);
+menus.contribute('menubar:View', ['-', 'notes.column', 'notes.review']);
 
+// the contexts whose menu has its own "+ Add" submenu (with "+ note here" in it)
+const ADD_CTX = new Set(['lyline', 'lysec', 'lystage', 'scene', 'scgap', 'sbscene', 'shot', 'bditem', 'bdstage', 'chnode']);
 // right-click: work out what was clicked, select it, open the menu for its contexts
 export function contextArgs(target, clientX, clientY) {
   const tl = WB().timeline, names = [], args = { target };
@@ -310,20 +330,36 @@ export function contextArgs(target, clientX, clientY) {
     if (args.col && (args.col.def.kind === 'lane' || args.col.strip)) names.push('ruler');
     names.push('timeline');
     if (!selEl && !cast) names.push('empty');
+    names.unshift('tladd');
     return { names, args };
   }
   // the stage rail (core/rail.js) and a stage workspace (tabs/stage.js)
   const st = target.closest('#rail [data-stage]');
   if (st?.dataset.stage) { names.push('stage'); args.stageId = st.dataset.stage; return { names, args }; }
+  // the stage workspaces' rows: a lyric line / section tag (tabs/lyrics.js), a gap of the script, a storyboard scene, the
+  // breakdown, and the Notes column (core/notescol.js) row under the pointer ("+ note here")
+  const ly = target.closest('.lyws .lyl[data-line]');
+  if (ly) { names.push('lyline'); args.lineId = ly.dataset.line; }
+  const lh = !ly && target.closest('.lyws .lyhead');
+  if (lh) { names.push('lysec'); args.secId = lh.closest('.lysec')?.dataset.sec; }
+  if (!ly && !lh && target.closest('.lyws .lypoem')) names.push('lystage');
+  const gp = target.closest('.scws .scrow.gap[data-gap]');
+  if (gp) { names.push('scgap'); args.gap = gp.dataset.gap.split(',').map(Number); }
+  const sbs = target.closest('.sbws .sbscene[data-scene]');
+  if (sbs?.dataset.scene) { names.push('sbscene'); args.sceneId = sbs.dataset.scene; }
+  if (target.closest('.bdws .bdbody') && !target.closest('.bdws [data-item]')) names.push('bdstage');
+  const col = columnAt(target), row = col?.rowAt(target);
+  if (row) { names.push('noterow'); args.ncCol = col; args.ncTarget = col.targetAt(target); }
   const cn = target.closest('.chws [data-node]');   // a node of a character's iteration tree (tabs/charstage.js)
   if (cn?.dataset.node) { names.push('chnode'); args.nodeId = cn.dataset.node; }
   const bi = target.closest('.bdws [data-item]');   // an item in the breakdown stage (tabs/breakdown.js)
   if (bi?.dataset.item) { names.push('bditem'); args.itemId = bi.dataset.item; }
   const sh = target.closest('.sbws [data-shot]');   // a shot in the storyboard stage (tabs/storyboard.js)
   if (sh?.dataset.shot) { names.push('shot'); args.shotId = sh.dataset.shot; args.item = 'shot:' + sh.dataset.shot; args.shot = store.boardShots().find(s => s.id === sh.dataset.shot) || null; }
-  const sc = target.closest('.scws [data-scene], .bdws [data-scene]');   // a scene in the script stage (tabs/script.js) or a breakdown matrix column
+  const sc = sbs ? null : target.closest('.scws [data-scene], .bdws [data-scene]');   // a scene in the script stage (tabs/script.js) or a breakdown matrix column
   if (sc?.dataset.scene) { names.push('scene'); args.sceneId = sc.dataset.scene; }
   if (target.closest('.stagews')) { names.push('stage'); args.stageId = WB().stages?.current(); }
+  args.hasAdd = names.some(n => ADD_CTX.has(n));
   names.push('global');
   return { names, args };
 }

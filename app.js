@@ -45,7 +45,7 @@ function renderTop() {
   $top.querySelector('[data-gear]')?.classList.toggle('on', active === 'settings');
 }
 function buildTop() {
-  $top.innerHTML = `<nav></nav><span class="proj" title="project (File > Open)">${esc(PROJECT)}</span><span class="tr"><button data-play title="Space">▶</button><span class="clock">0:00.000</span><button data-cmd="view.linear" title="T: linear time">lin</button><button data-cmd="view.zoomOut" title="-">−</button><button data-cmd="view.zoomIn" title="+">+</button><button data-cmd="view.palette" title="Ctrl+K: command palette">⌘</button><button data-cmd="view.topbar" title="\`: hide this bar (the small ⌄ at the top right brings it back)">⌃</button><button data-gear data-cmd="edit.settings" title="Settings (Ctrl+,)">⚙</button></span>`;
+  $top.innerHTML = `<nav></nav><a class="opennotes" data-cmd="notes.review" title="open notes in every stage and the timeline (Review › Notes)"></a><span class="proj" title="project (File > Open)">${esc(PROJECT)}</span><span class="tr"><button data-play title="Space">▶</button><span class="clock">0:00.000</span><button data-cmd="view.linear" title="T: linear time">lin</button><button data-cmd="view.zoomOut" title="-">−</button><button data-cmd="view.zoomIn" title="+">+</button><button data-cmd="view.palette" title="Ctrl+K: command palette">⌘</button><button data-cmd="view.topbar" title="\`: hide this bar (the small ⌄ at the top right brings it back)">⌃</button><button data-gear data-cmd="edit.settings" title="Settings (Ctrl+,)">⚙</button></span>`;
   let lastRefresh = 0;
   renderMenuBar($top).addEventListener('pointerover', () => { if (Date.now() - lastRefresh > 3000) { lastRefresh = Date.now(); projects.refresh(); } });
   renderTop();
@@ -167,6 +167,9 @@ $top.addEventListener('click', (e) => {
 $panes.addEventListener('click', (e) => { const s = e.target.closest('.subnav [data-sub]'); if (s) show(s.dataset.sub); });
 // keep the sub-nav counts fresh
 store.on(() => { const p = pageById(active); if (p?.subs) renderSubnav(p); });
+// the top bar's "N open notes" (every stage and the timeline; the rail has the count per stage)
+function renderOpenNotes() { const a = $top.querySelector('.opennotes'); if (!a || !store.notes) return; const k = store.notes.notes.filter(n => n.status === 'open').length; a.textContent = k ? `${k} open note${k > 1 ? 's' : ''}` : 'no open notes'; a.classList.toggle('none', !k); }
+store.on((w) => { if (w === 'notes' || w === 'all') renderOpenNotes(); });
 
 // live UI channel: an agent's ui_focus (MCP) -> POST /api/ui -> SSE -> here. Apply it, then ack so the agent knows a
 // page showed it. {open_project?, view?, t?, range?: [t0, t1], select?: [keys], preview?: key | source | path, message?, play?}
@@ -215,6 +218,7 @@ addEventListener('keydown', (e) => {
     document.body.replaceChildren(pre); return;
   }
   keymap.rebuild();
+  renderOpenNotes();
   mountRail();
   const tData = performance.now() - t0;
   if (document.fonts) await document.fonts.ready;

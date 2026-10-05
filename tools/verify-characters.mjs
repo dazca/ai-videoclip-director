@@ -201,7 +201,7 @@ export async function verifyCharacters({ browser, BASE, DATA, OUT, post, writeHe
     const before = reqs().length; await click('.chedside [data-a=reqedit]');
     const R = (await fileUntil('requests.json', (j) => j.items.length > before)).items.at(-1);
     await click(`.chreq[data-r="${R.id}"] [data-a=reqok]`); await fileUntil('requests.json', (j) => j.items.find(r => r.id === R.id)?.status === 'approved');
-    await run(R.id, out); const n = (await agent('character_iteration_add', { id: 'mara', request: R.id })).body.node;
+    await run(R.id, out); const ia = await agent('character_iteration_add', { id: 'mara', request: R.id }); const n = ia.body?.node; if (!n) console.error('DEBUG iteration_add', ia.status, JSON.stringify(ia.body), JSON.stringify(R).slice(0, 300));
     await until((id) => !!document.querySelector(`.chws .chnode.new[data-node=${id}]`), n.id);
     await click(`.chws .chnode[data-node=${n.id}]`); await until(() => !!document.querySelector('.chcmpbar [data-a=keep]'));
     await click(`.chcmpbar [data-a=${choice}]`);

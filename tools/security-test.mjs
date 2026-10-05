@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Security regressions for the workbench server, the data layer and the page (audit F01-F15, NV1, NV2, the guided flow
-// stages 1-6; the exporter's
+// stages 1-6, notes.json v2 (target validation, the director's notes, stored payloads in every Notes column); the exporter's
 // F07/F08/F12 are in tools/security-exporter.mjs). Runs on a SCRATCH copy of data/demo with scratch media and config,
 // on free ports; never touches data/. Uses headless Chromium when one is found (tools/chrome.mjs), else skips the
 // browser checks.   node tools/security-test.mjs   (npm run test:security runs both files)
@@ -182,17 +182,26 @@ try {
   // ---------------------------------------------------------------- guided flow: only the page marks a stage done; saved lyrics versions and authors cannot be rewritten
   const sDone = await op('stage_update', { stage: 'final', status: 'done' });
   const sNeeds = await op('stage_update', { stage: 'final', status: 'needs_you', blockers: ['sec'] });
-  const lnA = (await op('lyrics_note_add', { line: 'verse/1', text: 'sec: an agent note' })).body;   // writes lyrics.json (v1 derived from the song)
-  const pl = await pageSave('lyrics.json', (d) => { d.versions[0].sections[0].lines[0].text = 'FORGED'; const a = d.notes.find(x => x.id === lnA.id); a.by = 'director'; a.via = 'page';
+  const lnA = (await op('lyrics_note_add', { line: 'verse/1', text: 'sec: an agent note' })).body;   // writes notes.json v2 (lyrics.json stays derived)
+  // the page's first save of the derived lyrics (v1 is then a saved version), then a save trying to rewrite it; an old
+  // page pushing a note into lyrics.json's own list is still stamped director / page
+  const ly0 = S.lyricsDoc(P); delete ly0.derived;
+  const pl0 = await post(`/api/save/lyrics.json?project=${P}`, { base_rev: 0, data: ly0 });
+  const pl = await pageSave('lyrics.json', (d) => { d.versions[0].sections[0].lines[0].text = 'FORGED';
     d.notes.push({ id: 'ln99', line: null, text: 'sec: page note claiming to be the agent', by: 'agent', via: 'agent', status: 'open', replies: [] }); });
   const LY = readP('lyrics.json');
+  // notes.json v2 from the page: an agent's note keeps its author and its words; a new note claiming to be the agent's is the director's
+  const pn = await pageSave('notes.json', (d) => { const a = d.notes.find(x => x.id === lnA.id); a.by = 'director'; a.via = 'page'; a.text = 'FORGED'; a.created = '2000-01-01T00:00:00';
+    d.notes.push({ id: 'ln98', target: { stage: 'lyrics', kind: 'stage', id: null }, text: 'sec: v2 page note claiming to be the agent', by: 'agent', via: 'agent', status: 'open', round: 1, replies: [] }); });
+  const NT = readP('notes.json');
   const badShape = await post(`/api/save/lyrics.json?project=${P}`, { base_rev: LY.rev, data: { versions: 'x' } });
   const ps = await pageSave('stages.json', (d) => { d.stages.find(x => x.id === 'final').status = 'done'; });
   const stg = readP('stages.json').stages.find(x => x.id === 'final');
-  check('flow: an agent cannot mark a stage done; a page save cannot rewrite a saved lyrics version or a note author, is stamped director/page, marks done; a malformed lyrics.json is refused',
-    sDone.status === 403 && sNeeds.status === 200 && pl.status === 200 && LY.versions[0].sections[0].lines[0].text !== 'FORGED' && LY.notes.find(x => x.id === lnA.id)?.via === 'agent'
-    && LY.notes.find(x => x.id === 'ln99')?.via === 'page' && LY.notes.find(x => x.id === 'ln99')?.by === 'director' && badShape.status === 400 && ps.status === 200 && stg.status === 'done' && stg.done_by === 'director' && stg.via === 'page',
-    { agentDone: sDone.status, v1: LY.versions[0].sections[0].lines[0].text, agentNote: LY.notes.find(x => x.id === lnA.id)?.via, pageNote: LY.notes.find(x => x.id === 'ln99'), badShape: badShape.status, stage: stg });
+  const nA = NT.notes.find(x => x.id === lnA.id), n98 = NT.notes.find(x => x.id === 'ln98');
+  check('flow: an agent cannot mark a stage done; a page save cannot rewrite a saved lyrics version nor a note\'s author or words (notes.json v2 and the old lyrics list), is stamped director/page, marks done; a malformed lyrics.json is refused',
+    sDone.status === 403 && sNeeds.status === 200 && pl0.status === 200 && pl.status === 200 && LY.versions[0].sections[0].lines[0].text !== 'FORGED' && pn.status === 200 && nA?.via === 'agent' && nA?.by === 'agent' && nA?.text === 'sec: an agent note' && nA?.created !== '2000-01-01T00:00:00'
+    && n98?.via === 'page' && n98?.by === 'director' && LY.notes.find(x => x.id === 'ln99')?.via === 'page' && LY.notes.find(x => x.id === 'ln99')?.by === 'director' && badShape.status === 400 && ps.status === 200 && stg.status === 'done' && stg.done_by === 'director' && stg.via === 'page',
+    { agentDone: sDone.status, v1: LY.versions[0].sections[0].lines[0].text, agentNote: nA && [nA.by, nA.via, nA.text], pageNote: n98 && [n98.by, n98.via], oldList: LY.notes.find(x => x.id === 'ln99')?.via, badShape: badShape.status, stage: stg });
   const snapS = (await post(`/api/snapshot?project=${P}`, { message: 'sec: final done' })).body;
   await pageSave('stages.json', (d) => { d.stages.find(x => x.id === 'final').status = 'in_progress'; });   // the director reopened it
   // content alone is never done (ROADMAP_v4 F1): the director marks lyrics done in the page, then the agent tries to move it
@@ -238,15 +247,15 @@ try {
   const sn = (await op('scene_note_add', { scene: 'sc01', text: 'sec: agent note' })).body;
   await op('intake_answer', { key: 'mood', text: 'sec: agent answer' });
   const okAgent = await op('scenes_update', { status: { sc01: 'ok' } });
-  const sp = await pageSave('scenes.json', (d) => { d.versions[0].scenes[0].title = 'FORGED'; const a = d.notes.find(x => x.id === sn.id); a.by = 'director'; a.via = 'page';
+  const sp = await pageSave('scenes.json', (d) => { d.versions[0].scenes[0].title = 'FORGED';
     d.notes.push({ id: 'sn99', scene: null, text: 'sec: page note claiming the agent', by: 'agent', via: 'agent', status: 'open', replies: [] });
     d.states.sc01 = { status: 'ok', by: 'agent', via: 'agent' }; d.intake.mood.via = 'page'; d.intake.mood.by = 'director'; d.intake.where = { text: 'sec: page answer', by: 'agent', via: 'agent' }; });
   const SCN = readP('scenes.json');
   const badScenes = await post(`/api/save/scenes.json?project=${P}`, { base_rev: SCN.rev, data: { versions: [{ id: 'v1', scenes: [{ id: '../x', t0: 5, t1: 1 }] }] } });
   check('scenes.json: an agent cannot mark a scene ok; a page save cannot rewrite a saved version or an author, is stamped director/page (status, answer, new note); a malformed file is refused',
-    okAgent.status === 403 && sp.status === 200 && SCN.versions[0].scenes[0].title !== 'FORGED' && SCN.notes.find(x => x.id === sn.id)?.via === 'agent' && SCN.notes.find(x => x.id === 'sn99')?.via === 'page'
+    okAgent.status === 403 && sp.status === 200 && SCN.versions[0].scenes[0].title !== 'FORGED' && readP('notes.json').notes.find(x => x.id === sn.id)?.via === 'agent' && SCN.notes.find(x => x.id === 'sn99')?.via === 'page'
     && SCN.states.sc01?.status === 'ok' && SCN.states.sc01.via === 'page' && SCN.intake.mood.via === 'agent' && SCN.intake.where.via === 'page' && SCN.intake.where.by === 'director' && badScenes.status === 400,
-    { okAgent: okAgent.status, v1: SCN.versions[0].scenes[0].title, note: SCN.notes.find(x => x.id === sn.id)?.via, pageNote: SCN.notes.find(x => x.id === 'sn99')?.via, state: SCN.states.sc01, mood: SCN.intake.mood, where: SCN.intake.where, bad: badScenes.status });
+    { okAgent: okAgent.status, v1: SCN.versions[0].scenes[0].title, note: readP('notes.json').notes.find(x => x.id === sn.id)?.via, pageNote: SCN.notes.find(x => x.id === 'sn99')?.via, state: SCN.states.sc01, mood: SCN.intake.mood, where: SCN.intake.where, bad: badScenes.status });
   const snapK = (await post(`/api/snapshot?project=${P}`, { message: 'sec: sc01 ok' })).body;
   await pageSave('scenes.json', (d) => { d.states.sc01 = { status: 'draft' }; });   // the director took the ok back
   await post(`/api/restore?project=${P}`, { snapshot: snapK.id, by: 'agent' });
@@ -286,14 +295,14 @@ try {
     && pc.status === 200 && pc.body?.entity_id === 'sec-ada' && entA?.status === 'draft' && entA.breakdown?.item === 'bi01' && pl.body?.look_id === 'sec-coat' && entA.looks?.[0]?.id === 'sec-coat' && again === 409 && !fs.existsSync(path.join(DATA, 'x.json')),
     { prom, offAgent, pc: pc.body, pl: pl.body, again, ent: entA && { status: entA.status, looks: entA.looks?.map(l => l.id) } });
   // page saves of breakdown.json: saved versions, note authors and entity links cannot be forged; statuses are stamped
-  const bp = await pageSave('breakdown.json', (d) => { d.versions[0].items[0].name = 'FORGED'; const a = d.notes.find(x => x.id === bn.id); a.by = 'director'; a.via = 'page';
+  const bp = await pageSave('breakdown.json', (d) => { d.versions[0].items[0].name = 'FORGED';
     d.notes.push({ id: 'bn99', item: null, text: 'sec: page note claiming the agent', by: 'agent', via: 'agent', status: 'open', replies: [] });
     d.states.bi02 = { status: 'ok', by: 'agent', via: 'agent', entity_id: 'forged-entity' }; d.states.bi01 = { status: 'ok' }; d.states.bi04 = { status: 'review', by: 'agent', via: 'agent', entity_id: 'forged-two' }; });
   const BDN = readP('breakdown.json');
   const badBd = await post(`/api/save/breakdown.json?project=${P}`, { base_rev: BDN.rev, data: { versions: [{ id: 'v1', items: [{ id: '../x', kind: 'prop', name: 'x', links: [] }] }], current: 'v1' } });
   const badSt = await post(`/api/save/breakdown.json?project=${P}`, { base_rev: BDN.rev, data: { ...BDN, states: { bi01: { status: 'approved' } } } });
   check('breakdown.json from the page: a saved version, a note author and an entity link cannot be forged (nor dropped); a changed status is stamped director / page; malformed refused (400); an agent cannot mark ok (403)',
-    okA.status === 403 && bp.status === 200 && BDN.versions[0].items[0].name === 'Sec Ada' && BDN.notes.find(x => x.id === bn.id)?.via === 'agent' && BDN.notes.find(x => x.id === 'bn99')?.via === 'page'
+    okA.status === 403 && bp.status === 200 && BDN.versions[0].items[0].name === 'Sec Ada' && readP('notes.json').notes.find(x => x.id === bn.id)?.via === 'agent' && BDN.notes.find(x => x.id === 'bn99')?.via === 'page'
     && BDN.states.bi02?.via === 'page' && !BDN.states.bi02.entity_id && BDN.states.bi01?.entity_id === 'sec-ada' && BDN.states.bi04?.via === 'page' && BDN.states.bi04.by === 'director' && !BDN.states.bi04.entity_id && badBd.status === 400 && badSt.status === 400,
     { okA: okA.status, v1: BDN.versions[0].items[0].name, states: BDN.states, bad: [badBd.status, badSt.status] });
   await pageSave('breakdown.json', (d) => { d.states.bi02 = { status: 'draft' }; });   // the director took the ok back
@@ -421,7 +430,7 @@ try {
     stA.status === 403 && stL.status === 403 && offA === 403 && readP('approvals.json').items['shot:s2-wall']?.state === apBefore, { stA: stA.status, stL: stL.status, offA });
   await op('shots_update', { upsert: [{ id: 's2-wall', text: 'sec: agent text' }], message: 'sec' });   // v2 (v1 derived from shots.json)
   const sn6 = (await op('shot_note_add', { shot: 's2-wall', text: 'sec: agent note' })).body;
-  const bp6 = await pageSave('storyboard.json', (d) => { d.versions[1].shots.find(s => s.id === 's2-wall').text = 'FORGED'; const a = d.notes.find(x => x.id === sn6.id); a.by = 'director'; a.via = 'page';
+  const bp6 = await pageSave('storyboard.json', (d) => { d.versions[1].shots.find(s => s.id === 's2-wall').text = 'FORGED';
     d.notes.push({ id: 'sbn99', shot: null, text: 'sec: page note claiming the agent', by: 'agent', via: 'agent', status: 'open', replies: [] }); });
   const SBF = readP('storyboard.json'), bads = {};
   for (const [k, fn] of Object.entries({ id: (d) => { d.versions.at(-1).shots[0].id = '../x'; }, times: (d) => { d.versions.at(-1).shots[0].t1 = -5; }, sketch: (d) => { d.versions.at(-1).shots[0].sketch = '../../x'; },
@@ -429,8 +438,54 @@ try {
     const cur = structuredClone(SBF); fn(cur); bads[k] = (await post(`/api/save/storyboard.json?project=${P}`, { base_rev: SBF.rev, data: cur })).status;
   }
   check('storyboard.json from the page: a saved version and a note author cannot be forged; a new note is stamped director / page; malformed files (bad ids, times, sketch / thumb paths, current, notes) refused (400)',
-    bp6.status === 200 && SBF.versions[1].shots.find(s => s.id === 's2-wall')?.text === 'sec: agent text' && SBF.notes.find(x => x.id === sn6.id)?.via === 'agent' && SBF.notes.find(x => x.id === 'sbn99')?.via === 'page' && SBF.notes.find(x => x.id === 'sbn99').by === 'director'
+    bp6.status === 200 && SBF.versions[1].shots.find(s => s.id === 's2-wall')?.text === 'sec: agent text' && readP('notes.json').notes.find(x => x.id === sn6.id)?.via === 'agent' && SBF.notes.find(x => x.id === 'sbn99')?.via === 'page' && SBF.notes.find(x => x.id === 'sbn99').by === 'director'
     && Object.values(bads).every(x => x === 400), { bp: bp6.status, text: SBF.versions[1].shots.find(s => s.id === 's2-wall')?.text, bads });
+  }
+
+  // ---------------------------------------------------------------- notes.json v2: target validation, the director's notes stay the director's
+  {
+    const nBefore = fs.readFileSync(path.join(D, 'notes.json'), 'utf8');
+    const T = (target, text = 'sec: x') => op('notes_add', { target, text });
+    const bad = {
+      stage: (await T({ stage: 'nowhere', kind: 'line', id: 'verse/0' })).status, kind: (await T({ stage: 'lyrics', kind: 'shot', id: 's1-intro' })).status,
+      dotdot: (await T({ stage: 'lyrics', kind: 'line', id: '../verse/0' })).status, dotSeg: (await T({ stage: 'characters', kind: 'node', id: 'ada/../n01' })).status,
+      beatNoScene: (await T({ stage: 'script', kind: 'beat', id: 'sc01' })).status, markup: (await T({ stage: 'breakdown', kind: 'item', id: '<img src=x>' })).status,
+      backslash: (await T({ stage: 'lyrics', kind: 'line', id: 'verse\\0' })).status, gone: (await T({ stage: 'lyrics', kind: 'line', id: 'verse/99' })).status,
+      noShot: (await T({ stage: 'storyboard', kind: 'shot', id: 'nope' })).status, noNode: (await T({ stage: 'characters', kind: 'node', id: 'ada/n99' })).status,
+      wrongStage: (await T({ stage: 'scenery', kind: 'asset', id: 'ada' })).status, words: (await T({ stage: 'lyrics', kind: 'line', id: 'verse/0', w: [3, 99] })).status,
+      wOnScene: (await T({ stage: 'script', kind: 'scene', id: 'sc01', w: [0, 1] })).status, tLate: (await T({ stage: 'timeline', kind: 'time', t: 99999999 })).status,
+      tMissing: (await T({ stage: 'timeline', kind: 'time' })).status, pin: (await T({ stage: 'characters', kind: 'asset', id: 'ada', pin: { x: 2, y: 0 } })).status,
+      pinOnLine: (await T({ stage: 'lyrics', kind: 'line', id: 'verse/0', pin: { x: 0.5, y: 0.5 } })).status, noText: (await T({ stage: 'lyrics', kind: 'stage' }, '   ')).status,
+      long: (await T({ stage: 'lyrics', kind: 'stage' }, 'x'.repeat(8001))).status, noTarget: (await op('notes_add', { text: 'x' })).status,
+    };
+    const expect404 = ['gone', 'noShot', 'noNode', 'wrongStage'];
+    check('notes_add: target validation (unknown stage / kind, ../, ., \\ and markup in ids, a beat without its scene, rows that do not exist (404), word ranges, times, pins, empty / too long text) refused; nothing written',
+      Object.entries(bad).every(([k, s]) => s === (expect404.includes(k) ? 404 : 400)) && fs.readFileSync(path.join(D, 'notes.json'), 'utf8') === nBefore, bad);
+    // a note of the director's (written by the page: stamped director / page whatever it claims) and one of the agent's
+    const dn = await pageSave('notes.json', (d) => { d.notes.push({ id: 'sec-dn', target: { stage: 'script', kind: 'scene', id: 'sc01' }, text: 'sec: the director', by: 'agent', via: 'agent', status: 'open', replies: [] }); });
+    const an = (await T({ stage: 'script', kind: 'scene', id: 'sc01' }, 'sec: the agent')).body;
+    const dis = await op('notes_status', { id: 'sec-dn', status: 'dismissed' });
+    let disOff = null; try { S.ops.notes_status(P, { id: 'sec-dn', status: 'dismissed' }); } catch (e) { disOff = e.code; }
+    const disClaim = await op('notes_status', { id: 'sec-dn', status: 'dismissed', via: 'page', by: 'director' });
+    const disOwn = await op('notes_status', { id: an?.id, status: 'dismissed' });
+    const abs = await op('notes_status', { id: 'sec-dn', status: 'absorbed', reply: 'sec: done in v3' });
+    await pageSave('notes.json', (d) => { d.notes.find(x => x.id === 'sec-dn').status = 'dismissed'; });
+    const reopen = await op('notes_status', { id: 'sec-dn', status: 'open' });
+    const NTs = readP('notes.json'), dnN = NTs.notes.find(x => x.id === 'sec-dn');
+    check('the director\'s notes: an agent cannot dismiss them (HTTP, offline, a claimed via "page": 403) nor reopen one the director dismissed (403); it may mark one absorbed with a reply and dismiss its own; a page note is stamped director / page',
+      dn.status === 200 && dnN?.by === 'director' && dnN.via === 'page' && dis.status === 403 && disOff === 403 && disClaim.status === 403 && disOwn.status === 200 && abs.status === 200 && reopen.status === 403 && dnN.status === 'dismissed' && dnN.replies.some(r => r.via === 'agent' && r.text === 'sec: done in v3'),
+      { dn: dn.status, author: dnN && [dnN.by, dnN.via], dis: dis.status, disOff, disClaim: disClaim.status, disOwn: disOwn.status, abs: abs.status, reopen: reopen.status, status: dnN?.status });
+    // the page's save of the list: an old (v1) list, a bad target, a bad status refused; a deleted migrated note never comes back
+    const v1save = await post(`/api/save/notes.json?project=${P}`, { base_rev: readP('notes.json').rev, data: { rev: 1, notes: [{ id: 'n1', t: 0, text: 'x', status: 'open' }] } });
+    const badT = await pageSave('notes.json', (d) => { d.notes.push({ id: 'sec-bad', target: { stage: 'lyrics', kind: 'line', id: '../../x' }, text: 'x', status: 'open' }); });
+    const badS = await pageSave('notes.json', (d) => { d.notes.push({ id: 'sec-bad2', target: { stage: 'lyrics', kind: 'stage' }, text: 'x', status: 'approved' }); });
+    const badId = await pageSave('notes.json', (d) => { d.notes.push({ id: '../n', target: { stage: 'lyrics', kind: 'stage' }, text: 'x', status: 'open' }); });
+    const seen0 = readP('notes.json').legacy_seen.length;
+    const shrink = await pageSave('notes.json', (d) => { d.legacy_seen = []; d.notes = d.notes.filter(x => x.id !== 'n01'); });
+    const after = readP('notes.json');
+    check('notes.json from the page: an old (v1) list, a bad target, status or id refused (400); legacy_seen only grows, so a deleted migrated note (n01) is not imported again',
+      v1save.status === 400 && badT.status === 400 && badS.status === 400 && badId.status === 400 && shrink.status === 200 && after.legacy_seen.length >= seen0 && !after.notes.some(x => x.id === 'n01') && !(await op('notes_get', { note: 'n01' })).body?.notes,
+      { v1save: v1save.status, badT: badT.status, badS: badS.status, badId: badId.status, seen: [seen0, after.legacy_seen.length] });
   }
 
   // ---------------------------------------------------------------- F09: the EDL extractor's server (source check: it needs the owner's render page)
@@ -501,7 +556,7 @@ try {
     await wait(1500);
     check('F01 ?project=<img onerror> runs nothing (redirected to the default project)', await pg.evaluate(() => window.__x === undefined && new URLSearchParams(location.search).get('project')) === P);
     await op('set_states', { keys: ['shot:s1-intro'], state: 'changes', comment: '"><img src=x onerror="window.__y=1">', by: '"><img src=x onerror="window.__y=2">' });
-    await pageSave('notes.json', (d) => { d.notes.push({ id: 'n99', t: 1000, by: '<img src=x onerror="window.__y=3">', text: '<img src=x onerror="window.__y=4">', status: 'open', at: 'x' }); });
+    await pageSave('notes.json', (d) => { d.notes.push({ id: 'n99', target: { stage: 'timeline', kind: 'time', t: 1000 }, by: '<img src=x onerror="window.__y=3">', text: '<img src=x onerror="window.__y=4">', status: 'open', replies: [{ id: 'n99.1', text: '<img src=x onerror="window.__y=5">' }] }); });
     await pg.goto(`${A.base}/?project=${P}`, { waitUntil: 'domcontentloaded' });
     await pg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 });
     await pg.evaluate(() => window.WB.app.show('approvals')); await wait(800);
@@ -600,6 +655,27 @@ try {
     check('F02 stored payloads in the storyboard stage (shot titles, text, camera, notes, version messages, asset names; board, Shot / Gaps / Notes / Versions, the timeline shots column) render as text',
       bInert && !bv.length, { bInert, bv: bv.slice(0, 2) });
     await bpg.close();
+    // notes.json v2: payloads in note texts, authors, replies and a quote, on every stage's Notes column, the timeline notes
+    // column and Review > Notes, render as text
+    const W = (n) => `<img src=x onerror="window.__nt=${n}">`;
+    const targets = [{ stage: 'lyrics', kind: 'stage' }, { stage: 'script', kind: 'scene', id: 'sc02' }, { stage: 'breakdown', kind: 'stage' }, { stage: 'characters', kind: 'asset', id: 'ada' }, { stage: 'scenery', kind: 'asset', id: 'sec-xloc' },
+      { stage: 'storyboard', kind: 'shot', id: 's2-wall' }, { stage: 'final', kind: 'shot', id: 's1-intro' }, { stage: 'timeline', kind: 'time', t: 3000 }];
+    const made = [];
+    for (const [i, target] of targets.entries()) { const r = await op('notes_add', { target, text: W(i), by: W(100 + i) }); if (r.status === 200) { made.push(target.stage); await op('notes_add', { reply_to: r.body.id, text: W(200 + i) }); } }
+    await pageSave('notes.json', (d) => { d.notes.push({ id: 'sec-q', target: { stage: 'lyrics', kind: 'line', id: d.notes.find(x => x.target.kind === 'line')?.target.id || 'verse/0', w: [0, 0], quote: W(300) }, text: W(301), status: 'open', replies: [] }); });
+    const npg = await browser.newPage(); const nv = [];
+    npg.on('console', m => { if (/Content Security Policy|Refused to/i.test(m.text())) nv.push(m.text()); });
+    await npg.goto(`${A.base}/?project=${P}`, { waitUntil: 'domcontentloaded' });
+    await npg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 });
+    let cells = 0;
+    for (const s of ['lyrics', 'script', 'breakdown', 'characters', 'scenery', 'storyboard', 'final']) { await npg.evaluate((x) => window.WB.stages.open(x), s); await wait(600); cells += await npg.evaluate(() => document.querySelectorAll('.nclayer .ncn').length); }
+    await npg.evaluate(() => window.WB.app.show('timeline')); await wait(700);
+    const tl = await npg.evaluate(() => document.querySelectorAll('.col-notes .note').length);
+    await npg.evaluate(() => window.WB.app.show('notes')); await wait(500);
+    const nInert = await npg.evaluate(() => window.__nt === undefined && !document.querySelector('.nclayer img, .col-notes img, .ntab img, img[src="x"]'));
+    check('F02 stored payloads in notes.json v2 (note text, author, replies, a word-range quote) render as text in every Notes column, the timeline notes column and Review > Notes',
+      nInert && !nv.length && made.length === targets.length && cells >= 7 && tl >= 1, { nInert, made, cells, tl, nv: nv.slice(0, 2) });
+    await npg.close();
   }
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {

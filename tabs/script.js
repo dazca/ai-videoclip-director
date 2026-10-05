@@ -3,9 +3,11 @@
 // title, from / to (snapped to lines, bars or sections), the text, timed beats, and its sketches (drawn inline with
 // the sketch tool, or in a floating window; copy a sketch from one scene and paste it into another). Edits collect in
 // a draft (kept in this browser) until "Save version" (Ctrl+Enter): every save is a new version in scenes.json. The
-// scene status (draft / needs you / ok) is saved at once (ok = the director's). Side panel: the intake questions,
-// notes per scene with threads and an "Ask the agent" box, versions with a side-by-side diff and restore. "Fill the
-// gaps" writes an ask for the agent listing the unscripted ranges (MCP script_get, scenes_update). Format: js/scenes.js.
+// scene status (draft / needs you / ok) is saved at once (ok = the director's). The Notes column (core/notescol.js) on
+// the right is row-aligned: a scene's notes (and its beats', tagged b1, b2…) sit on its row; click a cell or Alt+N.
+// Right-click: + Add › scene here / beat at this time / note (undoable). Side panel: the intake questions, versions with
+// a side-by-side diff and restore. "Fill the gaps" writes an ask for the agent listing the unscripted ranges (MCP
+// script_get / notes_get, scenes_update). Format: js/scenes.js, js/notes.js.
 import { store, prefs, toast, esc, PROJECT, postJSON, mediaUrl } from '../js/store.js';
 import { fmt } from '../js/timeline.js';
 import { commands } from '../core/commands.js';
@@ -13,6 +15,8 @@ import { menus } from '../core/menus.js';
 import { ui } from '../core/palette.js';
 import * as F from '../js/flow.js';
 import * as SC from '../js/scenes.js';
+import { NotesColumn } from '../core/notescol.js';
+import { history } from '../core/history.js';
 
 const WB = () => window.WB;
 const visible = () => WB()?.app?.active() === 'stage' && WB().stages?.current() === 'script';
@@ -39,17 +43,33 @@ class Workspace {
     this.compare = null; this.ab = { a: null, b: null }; this.pending = false; this.sk = null; this.skVer = {};
     el.classList.add('scws');
     el.innerHTML = `<div class="scmain"><div class="lybar scbar"></div><div class="sclist" tabindex="-1"></div></div>
-      <div class="lyside scside"><div class="lytabs"><a data-side="intake">Intake</a><a data-side="notes">Notes</a><a data-side="versions">Versions</a></div>
-      <div class="lylist"></div>
-      <div class="lyask"><textarea rows="2" placeholder="Ask the agent… (Ctrl+Enter sends)"></textarea><button data-a="ask" title="writes a note addressed to the agent (MCP script_get lists it); nothing is generated or paid">Ask the agent</button></div></div>`;
+      <div class="lyside scside"><div class="lytabs"><a data-side="intake">Intake</a><a data-side="versions">Versions</a></div>
+      <div class="lylist"></div></div>`;
     this.$ = (s) => el.querySelector(s);
     this.skHost = document.createElement('div'); this.skHost.className = 'scskhost';
     this.loadDraft();
     this.wire();
+    // the Notes column: one row per scene (its beats' notes tagged b1, b2…); the top row holds the notes on the whole script
+    const sceneT = (id) => ({ stage: 'script', kind: 'scene', id }), beatT = (sid, b) => ({ stage: 'script', kind: 'beat', id: `${sid}/${b}` });
+    this.nc = new NotesColumn({ stage: 'script', scroller: this.$('.sclist'), active: () => !this.compare,
+      top: { label: 'notes on the whole script', targets: [{ stage: 'script', kind: 'stage', id: null }] },
+      rows: () => [...this.el.querySelectorAll('.sclist > .scrow[data-scene]')].map(e => { const s = this.scene(e.dataset.scene); return {
+        el: e, targets: [sceneT(e.dataset.scene), ...(s?.beats || []).map(b => beatT(s.id, b.id))],
+        match: (n) => n.target.id === e.dataset.scene || (n.target.kind === 'beat' && n.target.id.startsWith(e.dataset.scene + '/')),
+        sub: (n) => n.target.kind === 'beat' ? n.target.id.split('/')[1] : '',
+        targetAt: (x) => { const b = x.closest?.('[data-beat]'); return b ? beatT(e.dataset.scene, b.dataset.beat) : sceneT(e.dataset.scene); } }; }),
+      current: () => this.open && this.scene(this.open) ? sceneT(this.open) : null });
     store.on((w) => { if (['scenes', 'all', 'song', 'media'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
     this.render();
   }
   get doc() { return store.scenes; }
+  // a draft edit from "+ Add" (scene, beat) or a removal: one undo step (Ctrl+Z puts the draft back)
+  undoable(label, fn) {
+    const before = structuredClone(this.draft); const r = fn(); const after = structuredClone(this.draft);
+    if (JSON.stringify(before) !== JSON.stringify(after)) history.push({ label, undo: () => this.setDraft(before), redo: () => this.setDraft(after) });
+    return r;
+  }
+  setDraft(d) { this.draft = structuredClone(d); this.saveDraft(); this.render(); }
   get cur() { return SC.currentScript(this.doc); }
   get song() { return store.song; }
   typing() { const a = document.activeElement; return !!a && this.el.contains(a) && a.matches('input, textarea, select') && !a.closest('.sk'); }
@@ -113,15 +133,33 @@ class Workspace {
     if (t1 - t0 < 200) t1 = Math.min(dur, t0 + 4000);
     if (t1 <= t0) return toast('no room for a scene there');
     const id = SC.nextSceneId(this.doc, this.draft);
-    this.edit((d) => { d.push({ id, t0, t1, title: '', text: '', line_ids: [], beats: [], sketches: [] }); }, { render: false });
+    this.undoable(`add scene ${id}`, () => this.edit((d) => { d.push({ id, t0, t1, title: '', text: '', line_ids: [], beats: [], sketches: [] }); }, { render: false }));
     this.focus(id);
     setTimeout(() => this.el.querySelector('.sccard.open .scin-title')?.focus(), 0);
+    return id;
+  }
+  // "+ scene here" at a time (a right-click on the script, or on the timeline): in a gap, a new scene from t (snapped) to
+  // the end of the gap (or its section); inside a scene, the scene is split at t (the new one takes the rest)
+  addSceneHere(t) {
+    const dur = this.song.duration_ms; t = Math.max(0, Math.min(dur - 200, Math.round(t ?? this.ctx.timeline?.player.time() ?? 0)));
+    const s = this.draft.find(x => x.t0 <= t && t < x.t1);
+    if (!s) { const g = SC.gaps(this.draft, dur, 1).find(([a, b]) => a <= t && t < b); const t0 = SC.snapTime(t, this.song, this.snap); return this.addScene(g ? Math.max(g[0], Math.min(t0, g[1] - 200)) : t0, g ? g[1] : null); }
+    let cut = SC.snapTime(t, this.song, this.snap); if (cut - s.t0 < 200 || s.t1 - cut < 200) cut = t;
+    if (cut - s.t0 < 200 || s.t1 - cut < 200) return toast(`${s.id} is too short to split there`);
+    const id = SC.nextSceneId(this.doc, this.draft);
+    this.undoable(`split ${s.id} at ${fmt(cut, true)}: ${id}`, () => this.edit((d) => {
+      d.push({ id, t0: cut, t1: s.t1, title: '', text: '', line_ids: [], beats: s.beats.filter(b => b.t >= cut), sketches: [] });
+      s.beats = s.beats.filter(b => b.t < cut); s.t1 = cut;
+    }, { render: false }));
+    this.focus(id); toast(`${s.id} split at ${fmt(cut, true)}: ${id} (unsaved: Save version keeps it)`);
+    setTimeout(() => this.el.querySelector('.sccard.open .scin-title')?.focus(), 0);
+    return id;
   }
   async deleteScene(id) {
     const s = this.scene(id); if (!s) return;
     if ((s.text || s.beats.length || s.sketches.length) && !(await ui.confirm(`Remove scene ${id}${s.title ? ` “${s.title}”` : ''} from the draft? (saved versions keep it)`))) return;
     if (this.open === id) this.setOpen(null);
-    this.edit((d) => { d.splice(d.indexOf(s), 1); });
+    this.undoable(`remove scene ${id}`, () => this.edit((d) => { d.splice(d.indexOf(s), 1); }));
   }
   setTimes(id, t0, t1) {
     const s = this.scene(id), dur = this.song.duration_ms; if (!s) return;
@@ -134,38 +172,32 @@ class Workspace {
     return store.mutate('scenes.json', (d) => { d.states[id] = { status, by: 'director', via: 'page', at: nowIso() }; }, { label: `scene ${id} ${status}` })
       .then(() => toast(`${id}: ${SC.SCENE_STATUS_LABEL[status]}`));
   }
-  addBeat(id) {
+  // a beat in a scene: at `at` (a time inside it: "+ beat at this time"), else after the last beat
+  addBeat(id, at) {
     const s = this.scene(id); if (!s) return;
-    const last = s.beats[s.beats.length - 1], t = Math.min(s.t1, last ? last.t + Math.max(500, Math.round((s.t1 - last.t) / 2)) : s.t0);
+    const last = s.beats[s.beats.length - 1], t = at != null ? Math.max(s.t0, Math.min(s.t1, Math.round(at))) : Math.min(s.t1, last ? last.t + Math.max(500, Math.round((s.t1 - last.t) / 2)) : s.t0);
     const bid = SC.nextBeatId(s);
-    this.edit(() => { s.beats.push({ id: bid, t, text: '' }); s.beats.sort((a, b) => a.t - b.t); });
+    if (this.open !== id) this.setOpen(id);
+    this.undoable(`add beat ${id}/${bid}`, () => this.edit(() => { s.beats.push({ id: bid, t, text: '' }); s.beats.sort((a, b) => a.t - b.t); }));
     setTimeout(() => this.el.querySelector(`.scbr[data-beat="${bid}"] .scin-btx`)?.focus(), 0);
+    return bid;
   }
-  // ---------------------------------------------------------------- notes
-  addNote({ scene = null, text, to, kind, gaps }) {
-    return store.mutate('scenes.json', (d) => {
-      d.notes.push({ id: SC.nextNoteId(d), scene, text, by: 'director', ...(to ? { to, kind: kind || 'request' } : {}), ...(gaps ? { gaps } : {}), status: 'open', at: nowIso(), version: d.current, replies: [] });
-    }, { label: to ? 'ask the agent' : 'scene note' });
+  // ---------------------------------------------------------------- notes (the Notes column: notes.json v2)
+  // an ask for the agent on the whole script (fill the gaps, draft from the intake): written at once
+  addAsk({ text, ask = 'request', gaps }) { return store.noteAdd({ stage: 'script', kind: 'stage', id: null }, text, { to: 'agent', ask, version: this.doc.current, ...(gaps ? { gaps } : {}) }); }
+  noteOnScene(id = this.open, beat) {
+    const s = id && this.scene(id); if (!s) return this.nc.edit({ stage: 'script', kind: 'stage', id: null });
+    this.nc.edit(beat ? { stage: 'script', kind: 'beat', id: `${s.id}/${beat}` } : { stage: 'script', kind: 'scene', id: s.id });
   }
-  reply(id, text) { return store.mutate('scenes.json', (d) => { const n = d.notes.find(x => x.id === id); if (n) (n.replies ||= []).push({ id: `${n.id}.${(n.replies?.length || 0) + 1}`, text, by: 'director', at: nowIso() }); }, { label: 'reply ' + id }); }
-  resolve(id) { return store.mutate('scenes.json', (d) => { const n = d.notes.find(x => x.id === id); if (n) { n.status = n.status === 'open' ? 'resolved' : 'open'; n.resolved_by = 'director'; n.resolved_at = nowIso(); } }, { label: 'resolve ' + id }); }
-  async noteOnScene(id = this.open) {
-    const s = id && this.scene(id); if (!s) return toast('open a scene first');
-    const text = await ui.prompt({ title: `Note on ${s.id}${s.title ? ` “${s.title}”` : ''}`, placeholder: 'note (Enter saves)' }); if (!text) return;
-    await this.addNote({ scene: s.id, text }); this.setSide('notes');
-  }
-  async ask() {
-    const ta = this.$('.lyask textarea'), text = ta.value.trim(); if (!text) { ta.focus(); return; }
-    await this.addNote({ scene: this.open && this.cur?.scenes.some(s => s.id === this.open) ? this.open : null, text, to: 'agent' });
-    ta.value = ''; toast('asked the agent (a note it reads with script_get)');
-  }
+  // "Ask the agent": an ask typed in the Notes column (on the open scene, else the whole script)
+  ask() { const s = this.open && this.cur?.scenes.some(x => x.id === this.open) ? this.open : null; this.nc.edit(s ? { stage: 'script', kind: 'scene', id: s } : { stage: 'script', kind: 'stage', id: null }, { to: true }); }
   fillGaps() {
     if (this.dirty) return toast('save your edits first: the agent reads the saved version');
     const g = SC.gaps(this.cur?.scenes || [], this.song.duration_ms);
     if (!g.length) return toast('every second of the song is scripted');
-    if (this.doc.notes.some(n => n.status === 'open' && n.kind === 'fill_gaps' && JSON.stringify(n.gaps) === JSON.stringify(g))) return toast('already asked: the agent has an open "fill the gaps" ask for these ranges');
+    if (store.notesOn({ stage: 'script', status: 'open' }).some(n => n.ask === 'fill_gaps' && JSON.stringify(n.gaps) === JSON.stringify(g))) return toast('already asked: the agent has an open "fill the gaps" ask for these ranges');
     const text = `Fill the gaps: script the unscripted ranges ${g.map(([a, b]) => SC.span(a, b)).join(', ')} so every second of the song is covered (keep the existing scenes; snap to lines or bars).`;
-    return this.addNote({ text, to: 'agent', kind: 'fill_gaps', gaps: g }).then(() => { this.setSide('notes'); toast(`asked the agent to fill ${g.length} gap${g.length > 1 ? 's' : ''}`); });
+    return this.addAsk({ text, ask: 'fill_gaps', gaps: g }).then(() => toast(`asked the agent to fill ${g.length} gap${g.length > 1 ? 's' : ''}`));
   }
   setSide(s) { this.side = s; prefs.set('scriptSide', s); this.renderSide(); }
   // ---------------------------------------------------------------- intake
@@ -254,8 +286,7 @@ class Workspace {
         + (rows[0] ? this.rowHtml(rows[0]) : '');
       return this.placeSketch();
     }
-    const openNotes = new Map(); for (const n of this.doc.notes) if (n.status === 'open' && n.scene) openNotes.set(n.scene, (openNotes.get(n.scene) || 0) + 1);
-    list.innerHTML = rows.map(r => this.rowHtml(r, openNotes)).join('');
+    list.innerHTML = rows.map(r => this.rowHtml(r)).join('');
     this.placeSketch();
     if (this.flash) { const e = list.querySelector(`[data-scene="${CSS.escape(this.flash)}"]`); e?.scrollIntoView({ block: 'center' }); e?.classList.add('flash'); setTimeout(() => e?.classList.remove('flash'), 1200); this.flash = null; }
   }
@@ -263,21 +294,21 @@ class Workspace {
     const L = SC.linesIn(this.song, t0, t1);
     return L.length ? L.map(l => `<div class="scl"><span class="lyt" data-t="${l.t0}" title="${fmt(l.t0, true)} (click: show in the timeline)">${l.timing === 'estimated' ? '~' : ''}${fmt(l.t0)}</span><span>${esc(l.text)}</span></div>`).join('') : '<div class="scl dim">(no lyrics)</div>';
   }
-  rowHtml(r, openNotes = new Map()) {
+  rowHtml(r) {
     if (r.gap) return `<div class="scrow gap" data-gap="${r.t0},${r.t1}"><div class="sclines">${this.linesHtml(r.t0, r.t1)}</div><div class="scgap"><span>unscripted ${SC.span(r.t0, r.t1)} · ${secs(r.t1 - r.t0)}</span><a data-a="addgap">+ scene here</a></div></div>`;
     const s = r.s, st = SC.sceneStatus(this.doc, s.id), saved = this.cur?.scenes.find(x => x.id === s.id), chg = !saved || JSON.stringify(saved) !== JSON.stringify(s);
-    const open = this.open === s.id, nn = openNotes.get(s.id) || 0;
+    const open = this.open === s.id;
     const sk = s.sketches.map(k => `<div class="scsk${this.sk?.id === k ? ' on' : ''}" data-sk="${esc(k)}"><img loading="lazy" src="${esc(this.skUrl(k))}" alt="" title="${esc(k)}"><span>${esc(k.replace(/^sk-/, ''))}</span>${open ? `<span class="sckl"><b data-a="skedit" title="edit inline">edit</b><b data-a="skwin" title="edit in a floating window">window</b><b data-a="skcopy" title="copy: paste it into another scene">copy</b><b data-a="skrm" title="remove from this scene (the files stay)">×</b></span>` : ''}</div>`).join('');
     const head = `<span class="scid">${esc(s.id)}</span>`;
     let card;
     if (!open) {
-      card = `<div class="sccard s-${st}${chg ? ' chg' : ''}" data-a="open" title="click: edit this scene"><div class="sch">${head}<b class="sct">${esc(s.title) || '<i class="dim">untitled</i>'}</b><span class="sctime">${SC.span(s.t0, s.t1)} · ${secs(s.t1 - s.t0)}</span><span class="scst s-${st}" title="${SC.SCENE_STATUS_LABEL[st]}"><i></i>${SC.SCENE_STATUS_LABEL[st]}</span>${nn ? `<span class="lynb" title="${nn} open note(s)">${nn}</span>` : ''}</div>`
+      card = `<div class="sccard s-${st}${chg ? ' chg' : ''}" data-a="open" title="click: edit this scene"><div class="sch">${head}<b class="sct">${esc(s.title) || '<i class="dim">untitled</i>'}</b><span class="sctime">${SC.span(s.t0, s.t1)} · ${secs(s.t1 - s.t0)}</span><span class="scst s-${st}" title="${SC.SCENE_STATUS_LABEL[st]}"><i></i>${SC.SCENE_STATUS_LABEL[st]}</span></div>`
         + (s.text ? `<div class="sctx">${esc(s.text)}</div>` : '')
-        + (s.beats.length ? `<div class="scbeats">${s.beats.map(b => `<div><span class="lyt" data-t="${b.t}">${fmt(b.t)}</span>${esc(b.text)}</div>`).join('')}</div>` : '')
+        + (s.beats.length ? `<div class="scbeats">${s.beats.map(b => `<div data-beat="${esc(b.id)}"><span class="lyt" data-t="${b.t}">${fmt(b.t)}</span>${esc(b.text)}</div>`).join('')}</div>` : '')
         + (sk ? `<div class="scsks">${sk}</div>` : '') + `</div>`;
     } else {
       const sb = (x, l) => `<button data-st="${x}" class="${st === x ? 'on s-' + x : ''}" title="${x === 'ok' ? 'the director signs this scene off' : ''}">${l}</button>`;
-      card = `<div class="sccard open s-${st}${chg ? ' chg' : ''}"><div class="sch">${head}<input class="scin-title" value="${esc(s.title)}" placeholder="title" spellcheck="false"><span class="scst s-${st}"><i></i></span>${sb('draft', 'draft')}${sb('needs_you', 'needs you')}${sb('ok', 'ok')}<b class="sctool" data-a="note" title="note on this scene (Alt+N)">✉${nn ? ' ' + nn : ''}</b><b class="sctool" data-a="del" title="remove the scene from the draft">×</b><b class="sctool" data-a="close" title="close (Esc)">▴</b></div>
+      card = `<div class="sccard open s-${st}${chg ? ' chg' : ''}"><div class="sch">${head}<input class="scin-title" value="${esc(s.title)}" placeholder="title" spellcheck="false"><span class="scst s-${st}"><i></i></span>${sb('draft', 'draft')}${sb('needs_you', 'needs you')}${sb('ok', 'ok')}<b class="sctool" data-a="note" title="note on this scene, in the Notes column (Alt+N)">✉</b><b class="sctool" data-a="del" title="remove the scene from the draft">×</b><b class="sctool" data-a="close" title="close (Esc)">▴</b></div>
         <div class="scf"><label>from <input class="scin-t0" value="${fmt(s.t0, true)}" spellcheck="false"></label><label>to <input class="scin-t1" value="${fmt(s.t1, true)}" spellcheck="false"></label><span class="dim">${secs(s.t1 - s.t0)} · ${s.line_ids.length} line${s.line_ids.length === 1 ? '' : 's'} · snap ${esc(this.snap)}</span><a data-a="t0play" title="set from to the playhead">from = playhead</a><a data-a="t1play" title="set to to the playhead">to = playhead</a></div>
         <textarea class="scin-text" rows="3" placeholder="what happens: the visual description (who, where, action, camera, mood)" spellcheck="false">${esc(s.text)}</textarea>
         <div class="scbh">beats <a data-a="addbeat">+ beat</a></div>
@@ -306,15 +337,13 @@ class Workspace {
       <div class="lydc"><div class="lydl">${side('-', 'del')}</div><div class="lydr">${side('+', 'add')}</div></div></div>`;
   }
   renderSide() {
-    const open = this.doc.notes.filter(x => x.status === 'open').length, unanswered = SC.intakeOpen(this.doc).length;
+    const unanswered = SC.intakeOpen(this.doc).length;
+    if (this.side !== 'intake' && this.side !== 'versions') this.side = 'intake';
     for (const a of this.el.querySelectorAll('.lytabs [data-side]')) {
       a.classList.toggle('on', a.dataset.side === this.side);
-      const n = a.dataset.side === 'notes' ? open : a.dataset.side === 'versions' ? this.doc.versions.length : `${SC.INTAKE.length - unanswered}/${SC.INTAKE.length}`;
-      a.innerHTML = `${{ intake: 'Intake', notes: 'Notes', versions: 'Versions' }[a.dataset.side]}<i>${n}</i>`;
+      const n = a.dataset.side === 'versions' ? this.doc.versions.length : `${SC.INTAKE.length - unanswered}/${SC.INTAKE.length}`;
+      a.innerHTML = `${{ intake: 'Intake', versions: 'Versions' }[a.dataset.side]}<i>${n}</i>`;
     }
-    this.$('.lyask').style.display = this.side === 'notes' ? '' : 'none';
-    const ta = this.$('.lyask textarea'), os = this.open && this.scene(this.open);
-    ta.placeholder = os ? `Ask the agent about ${os.id}${os.title ? ' “' + os.title + '”' : ''}… (Ctrl+Enter sends)` : 'Ask the agent about the whole script… (Ctrl+Enter sends)';
     const list = this.$('.lylist');
     if (this.side === 'intake') {
       list.innerHTML = `<div class="lyvh"><span class="dim">${unanswered ? `${unanswered} of ${SC.INTAKE.length} open · answer here or in a chat with the agent` : 'all answered'}</span><button data-a="askdraft" title="ask the agent to draft the scenes from these answers">Ask for a draft</button></div>`
@@ -322,24 +351,10 @@ class Workspace {
           return `<div class="scq${a.text ? ' done' : ''}" data-q="${q.id}"><div class="scqh"><b>${esc(q.q)}</b>${a.asked ? `<span class="to" title="${esc(`asked by ${a.asked.via === 'agent' ? 'the agent' : 'the director'} ${a.asked.at || ''}`)}">asked in chat</span>` : ''}<span class="sp"></span>${a.text ? who(a) : ''}</div><textarea rows="2" placeholder="${esc(q.hint)}" spellcheck="false">${esc(a.text || '')}</textarea></div>`; }).join('');
       return;
     }
-    if (this.side === 'versions') {
-      const vs = [...this.doc.versions].reverse(), { a, b } = this.ab;
-      list.innerHTML = `<div class="lyvh"><span class="dim">pick A and B, or click a row (it vs the one before)</span><button data-a="ab" ${a && b && a !== b ? '' : 'disabled'}>Compare A → B</button></div>` + (vs.length ? vs.map(v => `<div class="lyv${v.id === this.doc.current ? ' cur' : ''}" data-v="${esc(v.id)}">
-        <span class="lyvid">${v.id === this.doc.current ? '●' : ''}${esc(v.id)}</span><span class="lyvm">${esc(v.message || (v.from ? 'restore ' + v.from : ''))}<i>${when(v.created)} ${v.via === 'agent' ? '· agent' : v.by ? '· ' + esc(v.by) : ''} · ${v.scenes.length} scenes</i></span>
-        <b data-ab="a" class="${a === v.id ? 'on' : ''}">A</b><b data-ab="b" class="${b === v.id ? 'on' : ''}">B</b>${v.id === this.doc.current ? '' : `<b data-a="restore" data-v="${esc(v.id)}" title="copy it as a new version">restore</b>`}</div>`).join('') : '<div class="dim lyno">No versions yet: the first “Save version” makes v1.</div>');
-      return;
-    }
-    const order = new Map(this.draft.map((s, i) => [s.id, i]));
-    const ns = this.doc.notes.filter(x => (this.filter === 'all' || x.status === this.filter) && (this.scope === 'all' || x.scene === this.open))
-      .sort((x, y) => (order.get(x.scene) ?? -1) - (order.get(y.scene) ?? -1) || String(x.at).localeCompare(String(y.at)));
-    const opt = (v, l, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${l}</option>`;
-    list.innerHTML = `<div class="lyvh"><span class="dim">${ns.length} note${ns.length === 1 ? '' : 's'}</span><select class="scscope" title="whose notes">${opt('all', 'all scenes', this.scope)}${opt('scene', 'the open scene', this.scope)}</select><select class="scflt" title="which notes">${opt('open', 'open', this.filter)}${opt('all', 'all', this.filter)}${opt('resolved', 'resolved', this.filter)}</select></div>` + (ns.length ? ns.map(x => {
-      const s = x.scene && this.scene(x.scene), where = !x.scene ? (x.kind === 'fill_gaps' ? 'fill the gaps' : 'whole script') : s ? `${esc(s.id)}${s.title ? ' ' + esc(s.title) : ''}${x.beat ? ' / ' + esc(x.beat) : ''}` : `${esc(x.scene)} (not in the draft)`;
-      return `<div class="lynote ${x.status}${x.to === 'agent' ? ' ask' : ''}" data-note="${esc(x.id)}" data-scene="${esc(x.scene || '')}">
-        <div class="lynh">${who(x)}${x.to === 'agent' ? '<span class="to">→ agent</span>' : ''}<a data-go="${esc(x.scene || '')}">${where}</a><span class="sp"></span><span class="dim">${when(x.at)}</span><b data-a="resolve" title="${x.status === 'open' ? 'resolve' : 'reopen'}">${x.status === 'open' ? '✓' : '↺'}</b></div>
-        <div class="lynt">${esc(x.text)}</div>${(x.replies || []).map(rp => `<div class="lynr">${who(rp)} ${esc(rp.text)} <span class="dim">${when(rp.at)}</span></div>`).join('')}
-        <input class="lyrep" placeholder="reply (Enter)" spellcheck="false"></div>`;
-    }).join('') : `<div class="dim lyno">${this.filter === 'open' ? 'No open notes. Open a scene and press ✉ (Alt+N), or ask the agent below.' : 'No notes.'}</div>`);
+    const vs = [...this.doc.versions].reverse(), { a, b } = this.ab;
+    list.innerHTML = `<div class="lyvh"><span class="dim">pick A and B, or click a row (it vs the one before)</span><button data-a="ab" ${a && b && a !== b ? '' : 'disabled'}>Compare A → B</button></div>` + (vs.length ? vs.map(v => `<div class="lyv${v.id === this.doc.current ? ' cur' : ''}" data-v="${esc(v.id)}">
+      <span class="lyvid">${v.id === this.doc.current ? '●' : ''}${esc(v.id)}</span><span class="lyvm">${esc(v.message || (v.from ? 'restore ' + v.from : ''))}<i>${when(v.created)} ${v.via === 'agent' ? '· agent' : v.by ? '· ' + esc(v.by) : ''} · ${v.scenes.length} scenes</i></span>
+      <b data-ab="a" class="${a === v.id ? 'on' : ''}">A</b><b data-ab="b" class="${b === v.id ? 'on' : ''}">B</b>${v.id === this.doc.current ? '' : `<b data-a="restore" data-v="${esc(v.id)}" title="copy it as a new version">restore</b>`}</div>`).join('') : '<div class="dim lyno">No versions yet: the first “Save version” makes v1.</div>');
   }
   // ---------------------------------------------------------------- events
   wire() {
@@ -362,9 +377,7 @@ class Workspace {
       if (act === 'addscene') return this.addScene();
       if (act === 'addgap') { const [a, b] = row.dataset.gap.split(',').map(Number); return this.addScene(a, b); }
       if (act === 'fill') return this.fillGaps();
-      if (act === 'ask') return this.ask();
-      if (act === 'askdraft') return this.addNote({ text: 'Draft the scenes from the intake answers: cover the whole song, each scene bound to its lines, with beats and a short visual description.', to: 'agent', kind: 'request' }).then(() => { this.setSide('notes'); toast('asked the agent for a draft'); });
-      if (act === 'resolve') return this.resolve(t.closest('[data-note]').dataset.note);
+      if (act === 'askdraft') return this.addAsk({ text: 'Draft the scenes from the intake answers: cover the whole song, each scene bound to its lines, with beats and a short visual description.' }).then(() => toast('asked the agent for a draft (Notes column, top row)'));
       if (act === 'skclose') return this.closeSketch().then(ok => ok && this.render());
       if (act === 'skwin' && !skId && this.sk) { const { id, scene } = this.sk; if (this.sk.api.dirty) await this.sk.api.save().catch(() => {}); await this.closeSketch(true); this.render(); return this.openSketchFor(scene, id, { window: true }); }
       if (act === 'open' && sid) { this.setOpen(sid); return this.render(); }
@@ -373,7 +386,7 @@ class Workspace {
         if (act === 'del') return this.deleteScene(sid);
         if (act === 'note') return this.noteOnScene(sid);
         if (act === 'addbeat') return this.addBeat(sid);
-        if (act === 'delbeat') { const bid = t.closest('[data-beat]').dataset.beat; return this.edit(() => { const s = this.scene(sid); s.beats = s.beats.filter(b => b.id !== bid); }); }
+        if (act === 'delbeat') { const bid = t.closest('[data-beat]').dataset.beat; return this.undoable(`remove beat ${sid}/${bid}`, () => this.edit(() => { const s = this.scene(sid); s.beats = s.beats.filter(b => b.id !== bid); })); }
         if (act === 't0play' || act === 't1play') { const tp = this.ctx.timeline?.player.time() ?? 0; return act === 't0play' ? this.setTimes(sid, tp, null) : this.setTimes(sid, null, tp); }
         if (act === 'sknew') return this.openSketchFor(sid, null);
         if (act === 'skpaste') return this.pasteSketch(sid);
@@ -387,7 +400,6 @@ class Workspace {
       const ab = t.closest('[data-ab]'); if (ab) { const v = ab.closest('[data-v]').dataset.v; this.ab[ab.dataset.ab] = this.ab[ab.dataset.ab] === v ? null : v; return this.renderSide(); }
       const vrow = t.closest('.lyv[data-v]');
       if (vrow) { const i = this.doc.versions.findIndex(v => v.id === vrow.dataset.v); const prev = this.doc.versions[i - 1]; this.compare = prev ? { a: prev.id, b: vrow.dataset.v } : { a: vrow.dataset.v, b: this.doc.current }; return this.render(); }
-      const go = t.closest('[data-go]'); if (go?.dataset.go) { this.compare = null; this.flash = go.dataset.go; this.setOpen(go.dataset.go); return this.render(); }
     });
     // field edits: text as you type (no re-render), times / title on change
     el.addEventListener('input', (e) => {
@@ -399,8 +411,6 @@ class Workspace {
     el.addEventListener('change', (e) => {
       const t = e.target;
       if (t.matches('.scsnap')) { this.snap = t.value; prefs.set('scriptSnap', t.value); return this.renderList(); }
-      if (t.matches('.scflt')) { this.filter = t.value; return this.renderSide(); }
-      if (t.matches('.scscope')) { this.scope = t.value; return this.renderSide(); }
       if (t.matches('.scq textarea')) { const k = t.closest('[data-q]').dataset.q; if ((this.doc.intake[k]?.text || '') !== t.value) this.setAnswer(k, t.value.trim()); return; }
       const sid = t.closest('.scrow')?.dataset.scene, s = sid && this.scene(sid); if (!s) return;
       if (t.matches('.scin-t0, .scin-t1')) { const v = parseT(t.value); if (v == null) { toast('time: m:ss.mmm or seconds'); return this.render(); } return t.matches('.scin-t0') ? this.setTimes(sid, v, null) : this.setTimes(sid, null, v); }
@@ -414,8 +424,6 @@ class Workspace {
     el.addEventListener('keydown', (e) => {
       const t = e.target;
       if (t.closest('.sk')) return;
-      if (t.matches('.lyrep')) { e.stopPropagation(); if (e.key === 'Enter' && t.value.trim()) { this.reply(t.closest('[data-note]').dataset.note, t.value.trim()); t.value = ''; } if (e.key === 'Escape') t.blur(); return; }
-      if (t.matches('.lyask textarea')) { e.stopPropagation(); if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.ask(); } return; }
       if (t.matches('.lymsg')) { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); this.save(); } return; }
       if (t.matches('input, textarea, select')) {
         e.stopPropagation();
@@ -426,16 +434,14 @@ class Workspace {
       }
       if (e.key === 'Escape' && this.open) { e.stopPropagation(); this.setOpen(null); this.render(); }
     });
-    el.addEventListener('mouseover', (e) => {
-      const n = e.target.closest('.lynote'); for (const x of this.el.querySelectorAll('.scrow.hl')) x.classList.remove('hl');
-      if (n?.dataset.scene) this.el.querySelector(`.scrow[data-scene="${CSS.escape(n.dataset.scene)}"]`)?.classList.add('hl');
-    });
   }
 }
 
 // ------------------------------------------------------------------ commands (registered at load: core/rail.js imports this module)
 const V = () => visible() && !!S;
 const sceneOf = (c) => c?.sceneId || S?.open || null;
+// the time a right-click points at in the script: a lyric line's or a beat's time under the pointer
+const timeOf = (c) => { const e = c?.target?.closest?.('[data-t]'); return e && S?.el.contains(e) ? Number(e.dataset.t) : null; };
 const ensure = async () => { if (!visible()) await WB().stages.open('script'); return S; };
 commands.register([
   { id: 'script.save', group: 'Script', title: 'Save script version', when: () => V() && S.dirty, run: () => S.save() },
@@ -450,8 +456,11 @@ commands.register([
     S.compare = { a, b }; S.render();
   } },
   { id: 'script.intake', group: 'Script', title: 'Script intake questions', run: async () => { (await ensure())?.setSide('intake'); S?.$('.scq:not(.done) textarea')?.focus(); } },
-  { id: 'script.ask', group: 'Script', title: 'Ask the agent about the script…', run: async () => { (await ensure())?.setSide('notes'); S?.$('.lyask textarea')?.focus(); } },
-  { id: 'script.note', group: 'Script', title: 'Note on the open scene', when: (c) => V() && !!sceneOf(c), run: (c) => S.noteOnScene(sceneOf(c)) },
+  { id: 'script.ask', group: 'Script', title: 'Ask the agent about the script…', run: async () => (await ensure())?.ask() },
+  { id: 'script.note', group: 'Script', title: 'Note on the open scene (Notes column)', when: (c) => V() && !!sceneOf(c), run: (c) => S.noteOnScene(sceneOf(c)) },
+  // "+ Add" (right-click in the script): a scene at the clicked time (a gap: from there; a scene: split there), a beat
+  { id: 'script.addSceneHere', group: 'Script', title: 'Add a scene here (at this time)', when: () => V(), run: (c) => { const t = timeOf(c); return c?.gap && t == null ? S.addScene(c.gap[0], c.gap[1]) : S.addSceneHere(t ?? (c?.gap ? c.gap[0] : undefined)); } },
+  { id: 'script.addBeatHere', group: 'Script', title: 'Add a beat at this time (the scene)', when: (c) => V() && !!sceneOf(c), run: (c) => S.addBeat(sceneOf(c), timeOf(c) ?? undefined) },
   { id: 'script.openScene', group: 'Script', title: 'Open scene…', hidden: false, run: async (c) => {
     await ensure();
     const id = c?.sceneId || await ui.pick({ title: 'Open scene', items: S.draft.map(s => ({ label: `${s.id} ${s.title || ''}`, detail: SC.span(s.t0, s.t1), value: s.id })) });
@@ -464,8 +473,10 @@ commands.register([
   { id: 'script.sceneNeedsYou', group: 'Script', title: 'Flag the scene: needs you', hidden: true, when: (c) => V() && !!sceneOf(c), run: (c) => S.setStatus(sceneOf(c), 'needs_you') },
 ]);
 // Ctrl+Enter / Alt+N: the rail's stage.save / stage.note ask the visible stage (core/rail.js)
-window.WB = Object.assign(window.WB || {}, { stageActions: { ...(window.WB?.stageActions || {}), script: { canSave: () => V() && S.dirty, save: () => S.save(), canNote: () => V() && !!S.open, note: () => S.noteOnScene() } } });
-menus.contribute('scene', ['script.openScene', 'script.note', 'script.newSketch', 'script.pasteSketch', '-', 'script.sceneOk', 'script.sceneNeedsYou', 'script.deleteScene']);
+window.WB = Object.assign(window.WB || {}, { stageActions: { ...(window.WB?.stageActions || {}), script: { canSave: () => V() && S.dirty, save: () => S.save(), canNote: () => V(), note: () => S.nc.editCurrent() } } });
+const ADD = { label: '+ Add', when: () => V(), submenu: [{ cmd: 'script.addSceneHere', label: '+ scene here' }, { cmd: 'script.addBeatHere', label: '+ beat at this time' }, '-', { cmd: 'notes.addHere', label: '+ note here' }] };
+menus.contribute('scene', [(c) => V() ? [ADD] : [], 'script.openScene', 'script.note', 'script.newSketch', 'script.pasteSketch', '-', 'script.sceneOk', 'script.sceneNeedsYou', 'script.deleteScene']);
+menus.contribute('scgap', [{ label: '+ Add', submenu: [{ cmd: 'script.addSceneHere', label: '+ scene here' }] }, 'script.fillGaps']);
 
 export default {
   mount(el, ctx) { S = new Workspace(el, ctx); window.WB.script = { focus: (id) => S.focus(id), get ws() { return S; } }; },

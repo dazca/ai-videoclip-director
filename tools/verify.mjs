@@ -14,7 +14,8 @@
 // beats, tiling, edits, frame sketches, copy / paste, a per-shot variant, the gaps and the estimate vs the cap, the asks, the
 // agent's side, the timeline shots column), and (v10, tools/verify-dogfood.mjs) the dogfood frictions: the agent's base proposal
 // and image-import proposals accepted in the page, request warnings, the merged cost ledger, the photoreal recipe in the
-// Queue's request form, the stale-code bar.
+// Queue's request form, the stale-code bar, and (v11, tools/verify-notes.mjs) notes everywhere (SPEC v4 §1): the migration of
+// the old note stores, the Notes column in every stage and on the timeline, the right-click "+ Add" menus, the counters.
 //   node tools/verify.mjs [--project <id>] [outDir]     (default project: the server's default; npm run verify = demo)
 // Copies data/<project> (and data/_template) into a scratch data folder under the OS temp dir and starts serve.mjs
 // on free ports with WORKBENCH_DATA = that folder, so nothing under data/ is written and several runs (or a running
@@ -266,7 +267,7 @@ try {
     shot: { sel: '.col-shots .shot', labels: ['Preview', 'Approve', 'Request changes', 'Regenerate (queue a request)', 'Duplicate (request)', 'Copy id'] },
     clip: { sel: '.col-clips .use', labels: ['Preview', 'Show in Clips', 'Choose take', 'Set in-point… (request)', 'Approve', 'Regenerate (queue a request)', 'Open file location', 'Copy id'] },
     cast: { sel: '.col-cast .cast', labels: ['Open', 'Swap costume', 'Preview'] },
-    note: { sel: '.col-notes .note', labels: ['Rename…', 'Delete', 'Copy text', 'Resolved'] },
+    note: { sel: '.col-notes .note', labels: ['Rename…', 'Delete', 'Copy text', 'Done (absorbed)'] },
     header: { sel: '.head[data-col=script] .nm', labels: ['Hide column script', 'Collapse to strip', 'Drives the time axis', 'Width', 'Move left', 'Move right', 'Column settings…', 'Reset width and mode'] },
     empty: { sel: '.col-wave', labels: ['Paste (time code seeks, text becomes a note)', 'Add marker at the playhead'] },
   };
@@ -708,33 +709,39 @@ try {
     && L2.versions[1].via === 'page' && l2?.text === 'I count the lights I lost the most' && lNew?.timing === 'estimated' && lNew.t0 > l2.t0 && S3.lines.length === 5,
     { unsaved, current: L2.current, message: L2.versions[1]?.message, L2: l2 && [l2.t0, l2.t1, l2.text], newLine: lNew && [lNew.id, lNew.t0, lNew.timing] });
 
-  // 5. a note on a word range (select words -> "+ note"), stamped director / page; an agent note arrives live; reply; resolve
+  // 5. the Notes column (notes.json v2): select words -> "+ note" types a note on that word range in the line's cell
+  // (director / page); an agent note arrives live on its line; a reply; an ask for the agent ("Ask the agent": → agent)
   await pg.evaluate(() => { const ws = document.querySelectorAll('.lyl[data-line="L1"] .w'); const r = document.createRange(); r.setStart(ws[1].firstChild, 0); r.setEnd(ws[2].firstChild, ws[2].textContent.length); getSelection().removeAllRanges(); getSelection().addRange(r); document.querySelector('.lyws').dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); });
   await wait(60);
   const fab = await pg.evaluate(() => getComputedStyle(document.querySelector('.lyfab')).display !== 'none');
-  await pg.click('.lyfab'); await wait(80); await pg.keyboard.type('verify: "night bus" is the title; keep it'); await pg.keyboard.press('Enter');
-  await until(() => window.WB.store.lyrics.notes.length === 1);
+  await pg.click('.lyfab'); await wait(120);
+  const edOn = await pg.evaluate(() => ({ focus: document.activeElement?.matches('.nclayer .nced'), on: document.querySelector('.nclayer .ncedh')?.textContent || '' }));
+  await pg.keyboard.type('verify: "night bus" is the title; keep it'); await pg.keyboard.press('Enter');
+  await until(() => window.WB.store.notes.notes.some(n => n.target.stage === 'lyrics'));
   const H = await writeHeaders(BASE, NEW);
   const agentNote = await post(`/api/op/lyrics_note_add?project=${NEW}`, { line: 'L4', quote: 'nobody knows', text: 'verify agent: rhyme with "glows" is weak?' }, BASE, H);
-  const live = await until(() => !!document.querySelector('.lynote .who.ag'));
-  await pg.evaluate(() => { const i = document.querySelector('.lynote[data-note="ln01"] .lyrep'); i.style.display = 'block'; i.focus(); });
+  const live = await until(() => !!document.querySelector('.lypoem .nclayer .ncn.ag'));
+  const n1id = await pg.evaluate(() => window.WB.store.notes.notes.find(n => n.target.stage === 'lyrics' && n.target.id === 'L1')?.id);
+  await pg.evaluate((id) => document.querySelector(`.nclayer .ncn[data-nid="${id}"] [data-nc=reply]`).click(), n1id); await wait(80);
   await pg.keyboard.type('verify reply'); await pg.keyboard.press('Enter');
-  await until(() => window.WB.store.lyrics.notes.find(n => n.id === 'ln01')?.replies?.length === 1);
-  await pg.evaluate(() => { const ta = document.querySelector('.lyask textarea'); ta.value = 'verify: can you suggest a bridge?'; document.querySelector('.lyask [data-a=ask]').click(); });
-  await until(() => window.WB.store.lyrics.notes.some(n => n.to === 'agent'));
-  await pg.evaluate(() => window.WB.app.show('timeline')); await pg.evaluate(() => window.WB.stages.open('lyrics')); await wait(250);
+  await until((id) => window.WB.store.notes.notes.find(n => n.id === id)?.replies?.length === 1, n1id);
+  await pg.evaluate(() => window.WB.commands.run('lyrics.ask')); await wait(100);
+  await pg.keyboard.type('verify: can you suggest a bridge?'); await pg.keyboard.press('Enter');
+  await until(() => window.WB.store.notes.notes.some(n => n.to === 'agent'));
+  await pg.evaluate(() => window.WB.app.show('timeline')); await pg.evaluate(() => window.WB.stages.open('lyrics')); await wait(350);
   await pg.screenshot({ path: path.join(OUT, 'v4_lyrics_notes.png') });
-  const L3 = readJ(NEW, 'lyrics.json'), n1 = L3.notes.find(n => n.id === 'ln01'), ask = L3.notes.find(n => n.to === 'agent');
+  const NT = readJ(NEW, 'notes.json'), n1 = NT.notes.find(n => n.id === n1id), ask = NT.notes.find(n => n.to === 'agent');
   const marked = await pg.evaluate(() => [...document.querySelectorAll('.lyl[data-line="L1"] .w.nw')].map(w => w.textContent));
+  const aligned = await pg.evaluate((id) => { const c = document.querySelector(`.nclayer .ncn[data-nid="${id}"]`)?.closest('.nccell'), l = document.querySelector('.lyl[data-line="L1"]'); if (!c || !l) return null; return Math.abs(c.getBoundingClientRect().top - l.getBoundingClientRect().top); }, n1id);
   const asks = (await post(`/api/op/lyrics_get?project=${NEW}`, {}, BASE, H)).body?.asks_for_agent || [];
-  check('note on a word range (director, via page), agent note live, reply, ask the agent', fab && n1?.line === 'L1' && JSON.stringify(n1.w) === '[1,2]' && n1.quote === 'night bus' && n1.by === 'director' && n1.via === 'page'
-    && n1.replies?.[0]?.via === 'page' && agentNote.status === 200 && agentNote.body.via === 'agent' && live && JSON.stringify(marked) === '["night","bus"]' && ask?.via === 'page' && asks.some(a => a.text === 'verify: can you suggest a bridge?'),
-    { fab, note: n1 && { w: n1.w, quote: n1.quote, by: n1.by, via: n1.via, replies: n1.replies?.length }, agent: agentNote.body?.via, live, marked, asks: asks.length });
-  await pg.evaluate(() => document.querySelector('.lynote[data-note="ln02"] [data-a=resolve]').click());
-  await until(() => window.WB.store.lyrics.notes.find(n => n.id === 'ln02')?.status === 'resolved');
+  check('Notes column: a note on a word range typed in the line\'s cell (notes.json v2, director / page, row-aligned), an agent note live on its line, a reply, an ask for the agent', fab && edOn.focus && /night bus/.test(edOn.on) && n1?.target?.id === 'L1' && JSON.stringify(n1.target.w) === '[1,2]' && n1.target.quote === 'night bus' && n1.by === 'director' && n1.via === 'page'
+    && n1.replies?.[0]?.via === 'page' && agentNote.status === 200 && agentNote.body.via === 'agent' && live && JSON.stringify(marked) === '["night","bus"]' && aligned !== null && aligned < 1.5 && ask?.via === 'page' && asks.some(a => a.text === 'verify: can you suggest a bridge?') && !readJ(NEW, 'lyrics.json').notes.length,
+    { fab, edOn, note: n1 && { target: n1.target, by: n1.by, via: n1.via, replies: n1.replies?.length, replyVia: n1.replies?.[0]?.via }, agent: agentNote.body?.via, live, marked, aligned, asks: asks.map(a => a.text), ask: ask && [ask.via, ask.text], oldList: readJ(NEW, 'lyrics.json')?.notes?.length });
+  await pg.evaluate((id) => document.querySelector(`.nclayer .ncn[data-nid="${id}"] [data-nc=done]`).click(), agentNote.body?.id);
+  await until((id) => window.WB.store.notes.notes.find(n => n.id === id)?.status === 'absorbed', agentNote.body?.id);
 
   // 6. versions: the list, a side-by-side word diff of v1 -> v2, restore v1 as v3
-  await pg.evaluate(() => document.querySelector('.lytabs [data-side=versions]').click()); await wait(60);
+  await pg.evaluate(() => document.querySelector('.lybar [data-a=versions]').click()); await wait(80);
   await pg.evaluate(() => { document.querySelector('.lyv[data-v=v1] [data-ab=a]').click(); document.querySelector('.lyv[data-v=v2] [data-ab=b]').click(); document.querySelector('.lyvh [data-a=ab]').click(); }); await wait(150);
   const diff = await pg.evaluate(() => ({ del: [...document.querySelectorAll('.lydl .del')].map(x => x.textContent), add: [...document.querySelectorAll('.lydr .add')].map(x => x.textContent), cols: document.querySelectorAll('.lydc > div').length, head: document.querySelector('.lydh')?.textContent }));
   await pg.screenshot({ path: path.join(OUT, 'v4_lyrics_diff.png') });
@@ -855,8 +862,8 @@ try {
 
   // 4. Fill the gaps: an ask for the agent with the gaps; the agent fills them and the page follows live
   await pg.evaluate(() => document.querySelector('.scbar [data-a=fill]').click());
-  await until(() => window.WB.store.scenes.notes.some(n => n.kind === 'fill_gaps'));
-  await fileUntil(NP, 'scenes.json', (j) => j.notes.some(n => n.kind === 'fill_gaps'));
+  await until(() => window.WB.store.notes.notes.some(n => n.ask === 'fill_gaps'));
+  await fileUntil(NP, 'notes.json', (j) => j.notes.some(n => n.ask === 'fill_gaps'));
   const sg = (await op('script_get', {})).body;
   const ask = sg.asks_for_agent.find(a => a.kind === 'fill_gaps');
   const fill = await op('scenes_update', { upsert: sg.gaps.map((g, i) => ({ t0: g.t0, t1: g.t1, title: `verify agent ${i + 1}`, text: 'agent: ' + g.lines.map(l => l.text).join(' / '), beats: [{ t: g.t0, text: 'agent beat' }] })), snap: 'lines', message: 'verify: agent filled the gaps' });
@@ -896,19 +903,24 @@ try {
   check('copy a sketch from one scene, paste into another: a new sketch (own id, same strokes and pins) saved for sc02', !!pasted && pasted !== skId && pj?.strokes?.length === skJson?.strokes?.length && pj.pins.length === 1 && fs.existsSync(path.join(ND, `sketches/${pasted}.png`)),
     { pasted, strokes: pj?.strokes?.length });
 
-  // 6. notes: an agent note on a scene shows live; the director replies and asks the agent
+  // 6. the Notes column: an agent note on a scene shows live on its row; the director replies, then asks the agent (Alt+N
+  // on the open scene, "@agent ...")
   const an = await op('scene_note_add', { scene: 'sc01', text: 'verify agent: should the bus pass under the bridge on the chorus downbeat?' });
-  await pg.evaluate(() => document.querySelector('.scws .lytabs [data-side=notes]').click());
-  const liveNote = await until(() => !!document.querySelector('.scws .lynote .who.ag'));
-  await pg.evaluate(() => { const i = document.querySelector('.scws .lynote .lyrep'); i.style.display = 'block'; i.focus(); });
+  const liveNote = await until((id) => !!document.querySelector(`.scws .nclayer .ncn.ag[data-nid="${id}"]`), an.body?.id);
+  await pg.evaluate((id) => document.querySelector(`.scws .nclayer .ncn[data-nid="${id}"] [data-nc=reply]`).click(), an.body?.id); await wait(80);
   await pg.keyboard.type('verify reply: yes, on the downbeat'); await pg.keyboard.press('Enter');
-  await pg.evaluate(() => { window.WB.script.focus('sc01'); const ta = document.querySelector('.scws .lyask textarea'); ta.value = 'verify: add a beat for the bridge'; document.querySelector('.scws .lyask [data-a=ask]').click(); });
-  await until(() => window.WB.store.scenes.notes.some(n => n.text === 'verify: add a beat for the bridge'));
-  await wait(200);
+  await pg.evaluate(() => { window.WB.script.focus('sc01'); document.querySelector('.scws .sclist').focus(); }); await wait(100);
+  await combo(['Alt'], 'KeyN'); await wait(150);
+  const altN = await pg.evaluate(() => document.activeElement?.matches('.scws .nclayer .nced'));
+  await pg.keyboard.type('@agent verify: add a beat for the bridge'); await pg.keyboard.press('Enter');
+  await until(() => window.WB.store.notes.notes.some(n => n.text === 'verify: add a beat for the bridge'));
+  await wait(300);
   await pg.screenshot({ path: path.join(OUT, 'v5_notes.png') });
-  const N = (await fileUntil(NP, 'scenes.json', (j) => j.notes.some(n => n.text === 'verify: add a beat for the bridge') && j.notes.find(n => n.id === an.body?.id)?.replies?.length)).notes, nn = N.find(n => n.id === an.body?.id), ask2 = N.find(n => n.text === 'verify: add a beat for the bridge');
-  check('scene notes: an agent note arrives live; a reply and an ask from the page (scene-bound, director / page)', liveNote && nn?.replies?.[0]?.via === 'page' && ask2?.to === 'agent' && ask2.scene === 'sc01' && ask2.via === 'page',
-    { liveNote, reply: nn?.replies?.[0], ask: ask2 && [ask2.scene, ask2.via] });
+  const N = (await fileUntil(NP, 'notes.json', (j) => j.notes.some(n => n.text === 'verify: add a beat for the bridge') && j.notes.find(n => n.id === an.body?.id)?.replies?.length)).notes, nn = N.find(n => n.id === an.body?.id), ask2 = N.find(n => n.text === 'verify: add a beat for the bridge');
+  const rowAligned = await pg.evaluate((id) => { const c = document.querySelector(`.scws .nclayer .ncn[data-nid="${id}"]`)?.closest('.nccell'), r = document.querySelector('.scws .scrow[data-scene=sc01]'); return c && r ? Math.abs(c.getBoundingClientRect().top - r.getBoundingClientRect().top) : null; }, an.body?.id);
+  check('Notes column (script): an agent note arrives live on its scene\'s row (aligned); a reply; Alt+N on the open scene types a note there, "@agent" makes it an ask (scene-bound, director / page)',
+    liveNote && rowAligned !== null && rowAligned < 1.5 && nn?.replies?.[0]?.via === 'page' && altN && ask2?.to === 'agent' && ask2.target?.kind === 'scene' && ask2.target.id === 'sc01' && ask2.via === 'page',
+    { liveNote, rowAligned, reply: nn?.replies?.[0], altN, ask: ask2 && [ask2.target, ask2.via] });
 
   // 7. versions: a side-by-side diff v1 -> current with the scene changes
   await pg.evaluate(() => { document.querySelector('.scws .lytabs [data-side=versions]').click(); });
@@ -1062,7 +1074,7 @@ try {
   await pg.evaluate((id) => window.WB.commands.run('breakdown.drop', { itemId: id }), lamp); await wait(150);
   const restored = await pg.evaluate((id) => !window.WB.breakdown.ws.item(id).dropped, lamp);
   check('item context menu (rename, change kind, merge, split, drop, create entity, note); drop is soft (greyed) and restorable',
-    ['Rename the item', 'Change the kind…', 'Split the item…', 'Drop (soft: restorable)', 'Create entity…', 'Note on the item'].every(x => rowMenu.includes(x)) && dropped.flag && dropped.grey && restored, { rowMenu, dropped, restored });
+    ['Rename the item', 'Change the kind…', 'Split the item…', 'Drop (soft: restorable)', 'Create entity…', 'Note on the item (Notes column)', '+ Add'].every(x => rowMenu.includes(x)) && dropped.flag && dropped.grey && restored, { rowMenu, dropped, restored });
 
   // 7. Create entity: Mara becomes a character (Assets), her red raincoat a look on her; nothing generated or spent
   await pg.evaluate((id) => window.WB.breakdown.focus(id), mara); await wait(150);
@@ -1087,7 +1099,7 @@ try {
   // 8. Ask the agent to extract: an ask note; the agent answers with a new version (live, marked agent); the agent rules
   await pg.evaluate(() => window.WB.stages.open('breakdown')); await wait(300);
   await click('.bdbar [data-a=extract]');
-  await fileUntil(NP, 'breakdown.json', (j) => j.notes.some(n => n.kind === 'extract'));
+  await fileUntil(NP, 'notes.json', (j) => j.notes.some(n => n.ask === 'extract'));
   const bg = (await agent('breakdown_get', { with_script: false })).body, ask = bg.asks_for_agent.find(a => a.kind === 'extract');
   const au = await agent('breakdown_update', { upsert: [{ kind: 'prop', name: 'Bus ticket', description: 'verify agent: the ticket she keeps', links: [{ scene: 'sc04', beats: [] }] }], message: 'verify agent: the ticket' });
   await agent('breakdown_note_resolve', { id: ask?.id, reply: 'verify agent: added the ticket' });
@@ -1139,6 +1151,12 @@ catch (e) { v9.checks.aborted = blockFailed('v9', e); v9.pass = false; }
 const v10 = report.v10 = { checks: {} };
 try { const { verifyDogfood } = await import('./verify-dogfood.mjs'); Object.assign(v10, await verifyDogfood({ browser, OUT })); }
 catch (e) { v10.checks.aborted = blockFailed('v10', e); v10.pass = false; }
+// ---------------------------------------------------------------- v11: notes everywhere (SPEC v4 §1, ROADMAP_v4 B1-B5): the migration of the
+// old note stores on first load, the Notes column per stage (row-aligned) and on the timeline (time-aligned), the right-click
+// "+ Add" menus and Ctrl+Z, the counters: tools/verify-notes.mjs (also runnable alone; its own data + server). Screenshots v11_*.png.
+const v11 = report.v11 = { checks: {} };
+try { const { verifyNotes } = await import('./verify-notes.mjs'); Object.assign(v11, await verifyNotes({ browser, OUT })); }
+catch (e) { v11.checks.aborted = blockFailed('v11', e); v11.pass = false; }
 // write path: approve/needs-changes + a note, on another scratch copy (_verify, its own server), then a stale-rev POST must get 409
 try {
   const TMP = path.join(DATA, '_verify');
@@ -1165,8 +1183,8 @@ report.project = P;
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 1));
 const w = report.writes || {};
 const writesOk = w.noteSaved && w.noteShownInColumn && w.staleStatus === 409 && w.newState !== undefined && w.newState !== w.stateBefore && w.approvalsRev > w.approvalsRevBefore;
-console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· v7 (characters stage):', report.v7?.pass ? 'all PASS' : 'FAIL', '· v8 (scenery stage):', report.v8?.pass ? 'all PASS' : 'FAIL', '· v9 (storyboard stage):', report.v9?.pass ? 'all PASS' : 'FAIL', '· v10 (dogfood frictions):', report.v10?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
-process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && report.v7?.pass && report.v8?.pass && report.v9?.pass && report.v10?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
+console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· v7 (characters stage):', report.v7?.pass ? 'all PASS' : 'FAIL', '· v8 (scenery stage):', report.v8?.pass ? 'all PASS' : 'FAIL', '· v9 (storyboard stage):', report.v9?.pass ? 'all PASS' : 'FAIL', '· v10 (dogfood frictions):', report.v10?.pass ? 'all PASS' : 'FAIL', '· v11 (notes everywhere):', report.v11?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
+process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && report.v7?.pass && report.v8?.pass && report.v9?.pass && report.v10?.pass && report.v11?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
 await browser.close();
 for (const c of procs) c.kill();
 await new Promise(r => setTimeout(r, 300));   // let the servers release the scratch folder; cleanup() removes it on exit

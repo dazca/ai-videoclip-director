@@ -1,4 +1,7 @@
 {
+ "v": 2,
  "rev": 1,
- "notes": []
+ "round": 1,
+ "notes": [],
+ "legacy_seen": []
 }

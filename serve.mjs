@@ -46,6 +46,7 @@ import { checkLyrics } from './js/flow.js';
 import { checkScenes, SCENE_STATUSES } from './js/scenes.js';
 import { checkBreakdown, ITEM_STATUSES } from './js/breakdown.js';
 import { checkBoard } from './js/storyboard.js';
+import { checkNotes } from './js/notes.js';
 
 const { CFG, DATA_ROOT, WB_DIR: WB } = S;
 const ARGS = process.argv.slice(2);
@@ -174,6 +175,11 @@ function readBody(req, limit) {
 // item status is stamped director / page; entity_id / look_id are never taken from a page save (only the page's
 // "Create entity" op, breakdown_promote, sets them). storyboard.json (stage 6): versions and note authors the same; a
 // malformed file is refused (400). A shot's approval is approvals.json (stamped above), never storyboard.json.
+// notes.json (v2, one list for every stage and the timeline): new notes and replies are stamped by "director", via
+// "page" (round = the current round); an existing note keeps its author, via, created, target, round, legacy link and
+// absorbed_in, and an agent's note keeps its words (only the director's own text can be edited); a status change is
+// stamped closed_by director / via page; legacy_seen only grows (a deleted migrated note never comes back); anything that
+// is not a v2 doc (an old page saving the v1 list) is refused (400: reload).
 function stampPage(name, data, cur) {
   const at = new Date().toISOString().slice(0, 19);
   if (name === 'requests.json' && Array.isArray(data.items)) {
@@ -259,6 +265,23 @@ function stampPage(name, data, cur) {
     for (const [k, c] of Object.entries(cur.states || {})) if (c?.entity_id && !st[k]) st[k] = { ...c };
     data.states = st;
   }
+  if (name === 'notes.json') {
+    try { checkNotes(data, { duration: S.read(cur.__project, 'song.json')?.duration_ms }); } catch (e) { throw new S.WbError(400, e.message); }
+    const cn = new Map((cur.notes || []).map(n => [n.id, n]));
+    data.notes = data.notes.map(n => {
+      const c = cn.get(n.id), cr = new Map((c?.replies || []).map(r => [r.id, r]));
+      const replies = (Array.isArray(n.replies) ? n.replies : []).map((r, k) => { const o = cr.get(r.id); return o ? { ...o } : { id: typeof r.id === 'string' && r.id ? r.id.slice(0, 60) : `${n.id}.${k + 1}`, text: String(r.text).slice(0, 8000), by: 'director', via: 'page', at }; });
+      if (!c) { const { legacy: _l, absorbed_in: _a, closed_via: _v, ...x } = n; return { ...x, by: 'director', via: 'page', created: at, round: cur.round || 1, absorbed_in: null, replies, ...(n.status !== 'open' ? { closed_by: 'director', closed_via: 'page', closed_at: at } : {}) }; }
+      const out = { ...n, by: c.by, via: c.via, created: c.created, target: c.target, round: c.round, replies, text: c.via === 'agent' ? c.text : n.text };
+      for (const k of ['legacy', 'absorbed_in', 'reply_to']) { if (c[k] !== undefined) out[k] = c[k]; else delete out[k]; }
+      if (n.status !== c.status) { if (n.status === 'open') { delete out.closed_by; delete out.closed_via; delete out.closed_at; } else Object.assign(out, { closed_by: 'director', closed_via: 'page', closed_at: at }); }
+      else for (const k of ['closed_by', 'closed_via', 'closed_at']) { if (c[k] !== undefined) out[k] = c[k]; else delete out[k]; }
+      return out;
+    });
+    data.v = 2; data.round = cur.round || data.round || 1;
+    data.legacy_seen = [...new Set([...(cur.legacy_seen || []), ...(Array.isArray(data.legacy_seen) ? data.legacy_seen : [])].filter(x => typeof x === 'string'))];
+    if (cur.migrated) data.migrated = cur.migrated;
+  }
   if (name === 'storyboard.json') {
     try { checkBoard(data); } catch (e) { throw new S.WbError(400, e.message); }
     const cv = new Map((cur.versions || []).map(v => [v.id, v])), cn = new Map((cur.notes || []).map(n => [n.id, n]));
@@ -303,9 +326,10 @@ http.createServer(async (req, res) => {
         const name = p.slice('/api/save/'.length);
         if (!S.WRITABLE.has(name)) { res.writeHead(403); return res.end('not writable'); }
         const file = path.join(S.projDir(project), name);
+        if (name === 'notes.json') S.notesDoc(project);   // the old stores are migrated before a page save of the v2 list
         const cur = S.readJSON(file, { rev: 0 }, true) || { rev: 0 };
         if ((cur.rev || 0) !== body.base_rev) return json(res, 409, cur);
-        const data = stampPage(name, { ...body.data, rev: (cur.rev || 0) + 1 }, cur);
+        const data = stampPage(name, { ...body.data, rev: (cur.rev || 0) + 1 }, Object.defineProperty({ ...cur }, '__project', { value: project, enumerable: false }));
         S.writeJSON(file, data);
         S.afterPageSave(project, name, data, cur);   // lyrics.json: the song's lines follow the current version
         return json(res, 200, { rev: data.rev });
@@ -366,6 +390,8 @@ http.createServer(async (req, res) => {
       f = S.inside(pd, m[2]); if (!f) { res.writeHead(403); return res.end(); }
       const rel = S.relTo(pd, f);
       if (priv(rel, [m[1]]) || priv(`data/${m[1]}/${rel}`, [])) { res.writeHead(403); return res.end('private: local only'); }
+      // notes.json: the old note stores are migrated into it (v2) on its first read
+      if (m[2] === 'notes.json' && fs.existsSync(path.join(pd, 'song.json'))) { try { S.notesDoc(m[1]); } catch (e) { /* a broken file is served as it is */ } }
       // a writable state file that does not exist yet reads as null (the page uses its default; first save creates it)
       if (S.WRITABLE.has(m[2]) && !fs.existsSync(f)) return json(res, 200, null);
       // a remote (LAN) client reads the project's JSON without private paths or items flagged private (media.json,

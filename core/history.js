@@ -2,13 +2,15 @@
 // store.mutate() reports {file, field, label, before, after}; we keep only the keyed differences (approval items,
 // notes by id, requests by id, section overrides), so undo re-applies just those entries through store.mutate on the
 // CURRENT file: an agent's unrelated edits made in between are kept, and an entry it changed since is left alone.
+// A stage's draft edit (a line, a scene, a beat, an item, a shot added from "+ Add": the drafts live in the browser until
+// "Save version") is a custom step: history.push({label, undo(), redo()}).
 import { store, toast } from '../js/store.js';
 
-// a keyed view of each writable file's collection
+// a keyed view of each writable file's collection (notes.json v2: the notes by id, in the order they were written)
 const COLL = {
   approvals: { get: (d) => d.items, map: true },
   overrides: { get: (d) => (d.sections ||= {}), map: true },
-  notes: { get: (d) => d.notes, sort: (a, b) => a.t - b.t },
+  notes: { get: (d) => d.notes },
   requests: { get: (d) => d.items },
 };
 function entries(field, d) {
@@ -53,8 +55,19 @@ export const history = {
     this.redoStack = [];
     document.dispatchEvent(new CustomEvent('wb:history'));
   },
+  // a custom step (a stage draft edit): {label, undo, redo}
+  push(e) {
+    this.undoStack.push({ ...e, custom: true });
+    if (this.undoStack.length > this.limit) this.undoStack.shift();
+    this.redoStack = [];
+    document.dispatchEvent(new CustomEvent('wb:history'));
+  },
   async step(from, to, side, verb) {
     const e = from.pop(); if (!e) { toast(`nothing to ${verb}`); return false; }
+    if (e.custom) {
+      try { await (side === 'before' ? e.undo() : e.redo()); } catch (er) { toast(`not ${verb === 'undo' ? 'undone' : 'redone'}: ${er.message || er}`); document.dispatchEvent(new CustomEvent('wb:history')); return false; }
+      to.push(e); toast(`${verb}: ${e.label}`); document.dispatchEvent(new CustomEvent('wb:history')); return true;
+    }
     const ok = e.changes.filter(ch => unchanged(e.field, store[e.field], ch, side)), kept = e.changes.length - ok.length;
     if (!ok.length) { toast(`not ${verb === 'undo' ? 'undone' : 'redone'}: ${e.label} changed since`); document.dispatchEvent(new CustomEvent('wb:history')); return false; }
     await store.mutate(e.file, (d) => apply(e.field, d, ok, side), { record: false });

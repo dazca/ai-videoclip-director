@@ -2,15 +2,19 @@
 // (double-click / Enter / F2 on a line, Tab to the next, Shift+Enter adds a line below); add / remove / reorder lines and
 // sections; "Edit as text" for bulk edits and pasting. Edits collect in a draft (kept in this browser) until
 // "Save version" (Ctrl+Enter): every save is a new version in lyrics.json, and the server moves song.json's lines to it
-// (timings kept, the timeline lyrics column follows). Side panel: notes pinned to a line or to selected words (select
-// words -> "+ note" or Alt+N), threads with replies, resolve; an "Ask the agent" box (a note addressed to the agent,
-// read with the MCP tool lyrics_get); versions with a word-level side-by-side diff of any two and restore (as a new
-// version). Format and shared logic: js/flow.js.
+// (timings kept, the timeline lyrics column follows). The Notes column (core/notescol.js) on the right of the poem is
+// row-aligned: a note sits on its line (or section); select words -> "+ note" (or Alt+N) pins it to them; "@agent" (or
+// → agent) makes it an ask the agent reads (notes_get / lyrics_get). Right-click a line: + Add › line above / below,
+// verse, section, note (undoable: Ctrl+Z). The Versions panel (bar: Versions) lists the versions with a word-level
+// side-by-side diff of any two and restore (as a new version). Format and shared logic: js/flow.js, js/notes.js.
 import { store, prefs, toast, esc, PROJECT, postJSON } from '../js/store.js';
 import { fmt } from '../js/timeline.js';
 import { commands } from '../core/commands.js';
 import { ui } from '../core/palette.js';
 import * as F from '../js/flow.js';
+import { NotesColumn } from '../core/notescol.js';
+import { history } from '../core/history.js';
+import { menus } from '../core/menus.js';
 
 const WB = () => window.WB;
 const visible = () => WB()?.app?.active() === 'stage' && WB().stages?.current() === 'lyrics';
@@ -24,21 +28,36 @@ const when = (at) => at ? esc(String(at).replace('T', ' ').slice(5, 16)) : '';
 
 class Workspace {
   constructor(el, ctx) {
-    this.el = el; this.ctx = ctx; this.side = prefs.get('lyricsSide', 'notes'); this.filter = 'open';
+    this.el = el; this.ctx = ctx; this.side = prefs.get('lyricsSide', null) === 'versions' ? 'versions' : null;
     this.compare = null; this.textMode = false; this.editing = null; this.pending = false; this.sel = null; this.ab = { a: null, b: null };
     el.classList.add('lyws');
     el.innerHTML = `<div class="lymain"><div class="lybar"></div><div class="lysong"></div><div class="lypoem" tabindex="-1"></div></div>
-      <div class="lyside"><div class="lytabs"><a data-side="notes">Notes</a><a data-side="versions">Versions</a><span class="sp"></span><select class="lyflt" title="which notes"><option value="open">open</option><option value="all">all</option><option value="resolved">resolved</option></select></div>
-      <div class="lylist"></div>
-      <div class="lyask"><textarea rows="2" placeholder="Ask the agent… (about the selected words, the line, or the whole poem; Ctrl+Enter sends)"></textarea><button data-a="ask" title="writes a note addressed to the agent (MCP lyrics_get lists it); nothing is generated or paid">Ask the agent</button></div></div>
+      <div class="lyside"><div class="lytabs"><a data-side="versions">Versions</a><span class="sp"></span><a data-a="closeside" title="close the versions panel">×</a></div>
+      <div class="lylist"></div></div>
       <button class="lyfab" style="display:none" title="note on the selected words (Alt+N)">+ note</button>`;
     this.$ = (s) => el.querySelector(s);
     this.loadDraft();
     this.wire();
-    store.on((w) => { if (['lyrics', 'all', 'stages'].includes(w)) { if (this.editing) this.pending = true; else this.render(); } });
+    // the Notes column: one row per section tag and per line; the top row holds the notes on the whole poem
+    this.nc = new NotesColumn({ stage: 'lyrics', scroller: this.$('.lypoem'), active: () => !this.compare && !this.textMode && this.draft.length > 0,
+      top: { label: 'notes on the whole poem', targets: [{ stage: 'lyrics', kind: 'stage', id: null }] },
+      rows: () => [...this.el.querySelectorAll('.lypoem .lyhead, .lypoem .lyl')].map(e => e.classList.contains('lyl')
+        ? { el: e, targets: [{ stage: 'lyrics', kind: 'line', id: e.dataset.line }], sub: (n) => n.target.quote ? `“${n.target.quote}”${n.target.w && !F.anchorWords(this.findLine(e.dataset.line)?.l.text || '', n.target) ? ' (text changed)' : ''}` : '' }
+        : { el: e, targets: [{ stage: 'lyrics', kind: 'section', id: e.closest('.lysec').dataset.sec }] }),
+      current: () => { const s = this.sel, f = this.el.querySelector('.lyl:focus')?.dataset.line; const L = s && this.findLine(s.line)?.l;
+        return L ? { stage: 'lyrics', kind: 'line', id: s.line, w: [s.w0, s.w1], quote: F.words(L.text).slice(s.w0, s.w1 + 1).join(' ') } : f ? { stage: 'lyrics', kind: 'line', id: f } : null; } });
+    store.on((w) => { if (['lyrics', 'all', 'stages', 'notes'].includes(w)) { if (this.editing) this.pending = true; else this.render(); } });
     this.render();
   }
   get doc() { return store.lyrics; }
+  // the notes on the poem (notes.json v2): open ones per line, for the word marks
+  lineNotes() { const m = new Map(); for (const n of store.notesOn({ stage: 'lyrics', kind: 'line', status: 'open' })) (m.get(n.target.id) || m.set(n.target.id, []).get(n.target.id)).push(n); return m; }
+  // a draft edit from "+ Add" (and the other structural edits): one undo step (Ctrl+Z puts the draft back)
+  undoable(label, fn) {
+    const before = structuredClone(this.draft); fn(); const after = structuredClone(this.draft);
+    if (JSON.stringify(before) !== JSON.stringify(after)) history.push({ label, undo: () => this.setDraft(before), redo: () => this.setDraft(after) });
+  }
+  setDraft(d) { this.editing = null; this.draft = structuredClone(d); this.saveDraft(); this.render(); }
   get cur() { return F.currentVersion(this.doc); }
   // ---------------------------------------------------------------- the draft (unsaved edits, kept per project in this browser)
   loadDraft() {
@@ -77,24 +96,16 @@ class Workspace {
     return store.mutate('lyrics.json', (d) => { F.addVersion(d, v.sections, { by: 'director', via: 'page', message: `restore ${id}`, from: id }); }, { label: `restore lyrics ${id}` })
       .finally(() => { this.busy = false; }).then(() => { this.base = this.doc.current; this.draft = structuredClone(this.cur.sections); this.saveDraft(); toast(`restored ${id} as ${this.doc.current}`); this.render(); });
   }
-  // ---------------------------------------------------------------- notes
-  addNote({ line = null, w = null, quote = '', text, to }) {
-    return store.mutate('lyrics.json', (d) => {
-      const n = d.notes.reduce((m, x) => Math.max(m, Number(String(x.id).replace(/\D/g, '')) || 0), 0) + 1;
-      d.notes.push({ id: `ln${String(n).padStart(2, '0')}`, line, w, quote, text, by: 'director', ...(to ? { to, kind: 'request' } : {}), status: 'open', at: nowIso(), version: d.current, replies: [] });
-    }, { label: to ? 'ask the agent' : 'lyrics note' });
-  }
-  reply(id, text) { return store.mutate('lyrics.json', (d) => { const n = d.notes.find(x => x.id === id); if (n) (n.replies ||= []).push({ id: `${n.id}.${(n.replies?.length || 0) + 1}`, text, by: 'director', at: nowIso() }); }, { label: 'reply ' + id }); }
-  resolve(id) { return store.mutate('lyrics.json', (d) => { const n = d.notes.find(x => x.id === id); if (n) { n.status = n.status === 'open' ? 'resolved' : 'open'; n.resolved_by = 'director'; n.resolved_at = nowIso(); } }, { label: 'resolve ' + id }); }
-  async noteOnSelection() {
+  // ---------------------------------------------------------------- notes (the Notes column: notes.json v2)
+  // Alt+N / "+ note": the selected words, else the focused line, else the whole poem, typed in the Notes column
+  noteOnSelection(line0) {
     const s = this.sel || this.readSelection();
-    const line = s?.line || this.el.querySelector('.lyl:focus')?.dataset.line;
-    if (!line) return toast('select words in a line (or focus a line) first');
-    const L = this.findLine(line)?.l; if (!L) return;
+    const line = line0 || s?.line || this.el.querySelector('.lyl:focus')?.dataset.line;
+    const L = line && this.findLine(line)?.l;
+    if (!L) return this.nc.edit({ stage: 'lyrics', kind: 'stage', id: null });
     const w = s?.line === line ? [s.w0, s.w1] : null, quote = w ? F.words(L.text).slice(w[0], w[1] + 1).join(' ') : '';
-    const text = await ui.prompt({ title: w ? `Note on “${quote}”` : `Note on the line “${L.text.slice(0, 50)}”`, placeholder: 'note (Enter saves)' });
-    if (!text) return;
-    await this.addNote({ line, w, quote, text }); this.clearSel(); this.setSide('notes');
+    this.clearSel();
+    this.nc.edit({ stage: 'lyrics', kind: 'line', id: line, ...(w ? { w, quote } : {}) });
   }
   readSelection() {
     const sel = getSelection(); if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
@@ -108,7 +119,7 @@ class Workspace {
     return { line: la.dataset.line, w0, w1 };
   }
   clearSel() { this.sel = null; this.$('.lyfab').style.display = 'none'; try { getSelection().removeAllRanges(); } catch (e) { /* ignore */ } }
-  setSide(s) { this.side = s; prefs.set('lyricsSide', s); this.renderSide(); }
+  setSide(s) { this.side = s === 'versions' ? 'versions' : null; prefs.set('lyricsSide', this.side); this.renderSide(); this.renderBar(); }
   // ---------------------------------------------------------------- rendering
   render() {
     this.pending = false;
@@ -123,7 +134,7 @@ class Workspace {
     const ver = v ? `<b>${esc(v.id)}</b> <span class="dim">${esc(v.message || '')}${v.created ? ' · ' + when(v.created) : ''} · ${v.via === 'agent' ? 'agent' : esc(v.by || '')}</span>` : '<span class="dim">no version yet</span>';
     this.$('.lybar').innerHTML = `${ver}<span class="dim">· ${n} lines · ${this.draft.length} sections</span><span class="sp"></span>`
       + (this.dirty ? `<span class="unsaved">unsaved edits</span><input class="lymsg" placeholder="what changed (optional)" spellcheck="false"><button data-a="save" class="pri" title="Ctrl+Enter: a new version">Save version</button><button data-a="drdiff" title="compare the current version with your edits">diff</button><button data-a="discard">Discard</button>` : '')
-      + `<button data-a="text" class="${this.textMode ? 'on' : ''}" title="the whole poem as text with [Section] tags (paste, bulk edits)">Edit as text</button><button data-a="addsec" title="new section at the end">+ section</button><button data-a="compare" title="side-by-side word diff of two versions">Compare…</button>`;
+      + `<button data-a="text" class="${this.textMode ? 'on' : ''}" title="the whole poem as text with [Section] tags (paste, bulk edits)">Edit as text</button><button data-a="addsec" title="new section at the end">+ section</button><button data-a="compare" title="side-by-side word diff of two versions">Compare…</button><button data-a="versions" class="${this.side === 'versions' ? 'on' : ''}" title="the versions panel: diff any two, restore">Versions ${this.doc?.versions.length || 0}</button>`;
   }
   renderSong() {
     const s = store.song, has = !!s?.audio?.mix, n = s?.lines?.length || 0;
@@ -138,18 +149,17 @@ class Workspace {
       poem.innerHTML = `<div class="lyempty"><h4>Paste the lyrics</h4><textarea class="lypaste" rows="14" spellcheck="false" placeholder="[Verse 1]\nfirst line\nsecond line\n\n[Chorus]\n…"></textarea><div><button data-a="paste" class="pri">Save as the first version</button> <span class="dim">[Section] tags or blank lines split sections; LRC time tags are kept</span></div></div>`;
       return;
     }
-    const tm = songLines(), notes = this.doc.notes.filter(x => x.status === 'open'), byLine = new Map();
-    for (const x of notes) if (x.line) (byLine.get(x.line) || byLine.set(x.line, []).get(x.line)).push(x);
+    const tm = songLines(), byLine = this.lineNotes();
     let k = 0;
     poem.innerHTML = this.draft.map((s, si) => `<div class="lysec" data-sec="${esc(s.id)}"><div class="lyhead"><span class="lytag" title="double-click to rename">[${esc(s.label)}]</span>
       <span class="lytools"><b data-s="up" title="move section up">↑</b><b data-s="down" title="move section down">↓</b><b data-s="add" title="add a line at the end">+</b><b data-s="ren" title="rename">✎</b><b data-s="del" title="delete the section">×</b></span></div>`
       + s.lines.map((l) => {
         k++; const t = tm.get(l.id), ns = byLine.get(l.id) || [], marks = new Set();
-        for (const x of ns) { const r = F.anchorWords(l.text, x); if (r) for (let i = r[0]; i <= r[1]; i++) marks.add(i); }
+        for (const x of ns) { const r = x.target.w ? F.anchorWords(l.text, x.target) : null; if (r) for (let i = r[0]; i <= r[1]; i++) marks.add(i); }
         const ws = F.words(l.text).map((w, i) => `<span class="w${marks.has(i) ? ' nw' : ''}" data-i="${i}">${esc(w)}</span>`).join(' ');
         const changed = this.cur && !F.flatLines(this.cur).some(x => x.id === l.id && x.text === l.text);
-        return `<div class="lyl${ns.length ? ' hasn' : ''}${changed ? ' chg' : ''}" data-line="${esc(l.id)}" tabindex="0"><span class="lyn">${k}</span><span class="lyt" ${t ? `data-t="${t.t0}" title="${t.timing === 'estimated' ? 'estimated: ' : ''}${fmt(t.t0, true)} – ${fmt(t.t1, true)} (click: show in the timeline)"` : 'title="no timing yet (saved versions get one)"'}>${t ? (t.timing === 'estimated' ? '~' : '') + fmt(t.t0) : '·'}</span><span class="lytx">${ws || '<span class="dim">(empty)</span>'}</span>${ns.length ? `<span class="lynb" title="${ns.length} open note(s)">${ns.length}</span>` : ''}
-          <span class="lytools"><b data-l="up" title="move up (Alt+Up)">↑</b><b data-l="down" title="move down (Alt+Down)">↓</b><b data-l="add" title="add a line below (Shift+Enter)">+</b><b data-l="edit" title="edit (Enter, F2, double-click)">✎</b><b data-l="note" title="note on this line (Alt+N; select words first to pin it to them)">✉</b><b data-l="del" title="delete the line">×</b></span></div>`;
+        return `<div class="lyl${ns.length ? ' hasn' : ''}${changed ? ' chg' : ''}" data-line="${esc(l.id)}" tabindex="0"><span class="lyn">${k}</span><span class="lyt" ${t ? `data-t="${t.t0}" title="${t.timing === 'estimated' ? 'estimated: ' : ''}${fmt(t.t0, true)} – ${fmt(t.t1, true)} (click: show in the timeline)"` : 'title="no timing yet (saved versions get one)"'}>${t ? (t.timing === 'estimated' ? '~' : '') + fmt(t.t0) : '·'}</span><span class="lytx">${ws || '<span class="dim">(empty)</span>'}</span>
+          <span class="lytools"><b data-l="up" title="move up (Alt+Up)">↑</b><b data-l="down" title="move down (Alt+Down)">↓</b><b data-l="add" title="add a line below (Shift+Enter)">+</b><b data-l="edit" title="edit (Enter, F2, double-click)">✎</b><b data-l="note" title="note on this line, in the Notes column (Alt+N; select words first to pin it to them)">✉</b><b data-l="del" title="delete the line">×</b></span></div>`;
       }).join('') + `</div>`).join('');
     if (this.flash) { const e = poem.querySelector(`[data-line="${CSS.escape(this.flash)}"]`); e?.scrollIntoView({ block: 'center' }); e?.classList.add('flash'); setTimeout(() => e?.classList.remove('flash'), 1200); this.flash = null; }
   }
@@ -167,27 +177,13 @@ class Workspace {
       <div class="lydc"><div class="lydl">${side('-', 'del')}</div><div class="lydr">${side('+', 'add')}</div></div></div>`;
   }
   renderSide() {
-    for (const a of this.el.querySelectorAll('.lytabs [data-side]')) { a.classList.toggle('on', a.dataset.side === this.side); const n = a.dataset.side === 'notes' ? this.doc.notes.filter(x => x.status === 'open').length : this.doc.versions.length; a.innerHTML = `${a.dataset.side === 'notes' ? 'Notes' : 'Versions'}<i>${n}</i>`; }
-    this.$('.lyflt').style.display = this.side === 'notes' ? '' : 'none'; this.$('.lyflt').value = this.filter;
-    this.$('.lyask').style.display = this.side === 'notes' ? '' : 'none';
-    const list = this.$('.lylist');
-    if (this.side === 'versions') {
-      const vs = [...this.doc.versions].reverse(), { a, b } = this.ab;
-      list.innerHTML = `<div class="lyvh"><span class="dim">pick A and B, or click a row (it vs the one before)</span><button data-a="ab" ${a && b && a !== b ? '' : 'disabled'}>Compare A → B</button></div>` + vs.map(v => `<div class="lyv${v.id === this.doc.current ? ' cur' : ''}" data-v="${esc(v.id)}">
-        <span class="lyvid">${v.id === this.doc.current ? '●' : ''}${esc(v.id)}</span><span class="lyvm">${esc(v.message || (v.from ? 'restore ' + v.from : ''))}<i>${when(v.created)} ${v.via === 'agent' ? '· agent' : v.by ? '· ' + esc(v.by) : ''} · ${F.flatLines(v).length} lines</i></span>
-        <b data-ab="a" class="${a === v.id ? 'on' : ''}">A</b><b data-ab="b" class="${b === v.id ? 'on' : ''}">B</b>${v.id === this.doc.current ? '' : `<b data-a="restore" data-v="${esc(v.id)}" title="copy it as a new version">restore</b>`}</div>`).join('');
-      return;
-    }
-    const lines = F.flatLines({ sections: this.draft }), order = new Map(lines.map((l, i) => [l.id, i]));
-    const ns = this.doc.notes.filter(x => this.filter === 'all' || x.status === this.filter).sort((x, y) => (order.get(x.line) ?? -1) - (order.get(y.line) ?? -1) || String(x.at).localeCompare(String(y.at)));
-    list.innerHTML = ns.length ? ns.map(x => {
-      const L = lines.find(l => l.id === x.line), r = L ? F.anchorWords(L.text, x) : null;
-      const where = !x.line ? 'whole poem' : !L ? `${esc(x.line)} (not in the draft)` : `l.${order.get(x.line) + 1}${x.quote ? ` “${esc(x.quote)}”${x.w && !r ? ' <i class="dim">(text changed)</i>' : ''}` : ''}`;
-      return `<div class="lynote ${x.status}${x.to === 'agent' ? ' ask' : ''}" data-note="${esc(x.id)}" data-line="${esc(x.line || '')}">
-        <div class="lynh">${who(x)}${x.to === 'agent' ? '<span class="to">→ agent</span>' : ''}<a data-go="${esc(x.line || '')}">${where}</a><span class="sp"></span><span class="dim">${when(x.at)}</span><b data-a="resolve" title="${x.status === 'open' ? 'resolve' : 'reopen'}">${x.status === 'open' ? '✓' : '↺'}</b></div>
-        <div class="lynt">${esc(x.text)}</div>${(x.replies || []).map(rp => `<div class="lynr">${who(rp)} ${esc(rp.text)} <span class="dim">${when(rp.at)}</span></div>`).join('')}
-        <input class="lyrep" placeholder="reply (Enter)" spellcheck="false"></div>`;
-    }).join('') : `<div class="dim lyno">${this.filter === 'open' ? 'No open notes. Select words in a line and press “+ note” (Alt+N), or ask the agent below.' : 'No notes.'}</div>`;
+    const side = this.$('.lyside'); side.style.display = this.side === 'versions' ? '' : 'none';
+    if (this.side !== 'versions') return;
+    for (const a of this.el.querySelectorAll('.lytabs [data-side]')) { a.classList.add('on'); a.innerHTML = `Versions<i>${this.doc.versions.length}</i>`; }
+    const list = this.$('.lylist'), vs = [...this.doc.versions].reverse(), { a, b } = this.ab;
+    list.innerHTML = `<div class="lyvh"><span class="dim">pick A and B, or click a row (it vs the one before)</span><button data-a="ab" ${a && b && a !== b ? '' : 'disabled'}>Compare A → B</button></div>` + vs.map(v => `<div class="lyv${v.id === this.doc.current ? ' cur' : ''}" data-v="${esc(v.id)}">
+      <span class="lyvid">${v.id === this.doc.current ? '●' : ''}${esc(v.id)}</span><span class="lyvm">${esc(v.message || (v.from ? 'restore ' + v.from : ''))}<i>${when(v.created)} ${v.via === 'agent' ? '· agent' : v.by ? '· ' + esc(v.by) : ''} · ${F.flatLines(v).length} lines</i></span>
+      <b data-ab="a" class="${a === v.id ? 'on' : ''}">A</b><b data-ab="b" class="${b === v.id ? 'on' : ''}">B</b>${v.id === this.doc.current ? '' : `<b data-a="restore" data-v="${esc(v.id)}" title="copy it as a new version">restore</b>`}</div>`).join('');
   }
   // ---------------------------------------------------------------- inline editing
   editLine(id, { caretEnd = true } = {}) {
@@ -230,26 +226,35 @@ class Workspace {
     inp.addEventListener('blur', () => setTimeout(() => finish(true), 0));
   }
   moveLine(id, dir) {
-    this.edit(() => {
+    this.undoable(`move ${id}`, () => this.edit(() => {
       const f = this.findLine(id); if (!f) return;
       const si = this.draft.indexOf(f.s), j = f.i + dir;
       if (j >= 0 && j < f.s.lines.length) { const [l] = f.s.lines.splice(f.i, 1); f.s.lines.splice(j, 0, l); }
       else { const t = this.draft[si + dir]; if (!t) return; const [l] = f.s.lines.splice(f.i, 1); if (dir < 0) t.lines.push(l); else t.lines.unshift(l); }
-    });
+    }));
     this.el.querySelector(`.lyl[data-line="${CSS.escape(id)}"]`)?.focus();
   }
-  addLineAfter(id, sec) {
+  // "+ Add": a line below (above: before = true) a line, at the end of a section, or (no line) at the end of the poem
+  addLineAfter(id, sec, { before = false } = {}) {
     const nid = this.newLineId();
-    this.edit(() => { if (id) { const f = this.findLine(id); f.s.lines.splice(f.i + 1, 0, { id: nid, text: '' }); } else { const s = this.draft.find(x => x.id === sec); s.lines.push({ id: nid, text: '' }); } }, true);
-    this.render(); this.editLine(nid);
-  }
-  async addSection() {
-    const label = await ui.prompt({ title: 'New section: label (Verse 2, Chorus, Bridge…)', placeholder: 'section label' }); if (!label) return;
-    let id = F.slug(label); for (let n = 2; this.draft.some(s => s.id === id); n++) id = `${F.slug(label)}-${n}`;
-    const nid = this.newLineId();
-    this.edit(() => { this.draft.push({ id, label: label.replace(/[[\]]/g, '').trim(), lines: [{ id: nid, text: '' }] }); }, true);
+    this.undoable(before ? `add a line above ${id}` : 'add a line', () => this.edit(() => {
+      const f = id && this.findLine(id);
+      if (f) f.s.lines.splice(f.i + (before ? 0 : 1), 0, { id: nid, text: '' });
+      else { const s = this.draft.find(x => x.id === sec) || this.draft[this.draft.length - 1]; if (s) s.lines.push({ id: nid, text: '' }); else this.draft.push({ id: 'verse', label: 'Verse', lines: [{ id: nid, text: '' }] }); }
+    }, true));
     this.compare = null; this.textMode = false; this.render(); this.editLine(nid);
   }
+  // a new section (a label asked; verse = "Verse N" without asking) after the section of `after` (a line or section id), else at the end
+  async addSection({ label, after } = {}) {
+    if (label == null) label = await ui.prompt({ title: 'New section: label (Verse 2, Chorus, Bridge…)', placeholder: 'section label' }); if (!label) return;
+    label = label.replace(/[[\]]/g, '').trim();
+    let id = F.slug(label); for (let n = 2; this.draft.some(s => s.id === id); n++) id = `${F.slug(label)}-${n}`;
+    const nid = this.newLineId();
+    const at = after ? this.draft.findIndex(s => s.id === after || s.lines.some(l => l.id === after)) : -1;
+    this.undoable(`add section [${label}]`, () => this.edit(() => { this.draft.splice(at >= 0 ? at + 1 : this.draft.length, 0, { id, label, lines: [{ id: nid, text: '' }] }); }, true));
+    this.compare = null; this.textMode = false; this.render(); this.editLine(nid);
+  }
+  addVerse(after) { const n = this.draft.filter(s => /^verse\b/i.test(s.label)).length + 1; return this.addSection({ label: `Verse ${n}`, after }); }
   async songDialog() {
     const has = !!store.song?.audio?.mix;
     const p = await ui.prompt({ title: `${has ? 'Replace' : 'Add'} the song: path of the audio file on this machine (wav, mp3, m4a, flac, ogg)`, placeholder: 'C:\\music\\my-song.wav  or  audio/mix.wav (inside the project)' });
@@ -278,13 +283,11 @@ class Workspace {
       if (act === 'ab') { this.compare = { ...this.ab }; this.textMode = false; return this.render(); }
       if (act === 'song') return this.songDialog();
       if (act === 'paste') { const v = this.$('.lypaste').value; if (!v.trim()) return; this.draft = F.assignIds(F.parseText(v), null, this.doc).sections; this.saveDraft(); return this.save('first draft'); }
-      if (act === 'ask') return this.ask();
-      if (act === 'resolve') return this.resolve(t.closest('[data-note]').dataset.note);
-      const side = t.closest('[data-side]'); if (side) return this.setSide(side.dataset.side);
+      if (act === 'versions') return this.setSide(this.side === 'versions' ? null : 'versions');
+      if (act === 'closeside') return this.setSide(null);
       const ab = t.closest('[data-ab]'); if (ab) { const v = ab.closest('[data-v]').dataset.v; this.ab[ab.dataset.ab] = this.ab[ab.dataset.ab] === v ? null : v; return this.renderSide(); }
       const vrow = t.closest('.lyv[data-v]');
       if (vrow) { const i = this.doc.versions.findIndex(v => v.id === vrow.dataset.v); const prev = this.doc.versions[i - 1]; this.compare = prev ? { a: prev.id, b: vrow.dataset.v } : { a: vrow.dataset.v, b: this.doc.current }; this.textMode = false; return this.render(); }
-      const go = t.closest('[data-go]'); if (go?.dataset.go) { this.compare = null; this.textMode = false; this.flash = go.dataset.go; return this.render(); }
       const tm = t.closest('.lyt[data-t]'); if (tm) return this.ctx.goto(Number(tm.dataset.t));
       if (t === this.$('.lyfab')) return this.noteOnSelection();
       const lb = t.closest('[data-l]'), id = t.closest('.lyl')?.dataset.line;
@@ -293,16 +296,16 @@ class Workspace {
         if (a === 'up' || a === 'down') return this.moveLine(id, a === 'up' ? -1 : 1);
         if (a === 'add') return this.addLineAfter(id);
         if (a === 'edit') return this.editLine(id);
-        if (a === 'del') return this.edit((d) => { const f = this.findLine(id); f?.s.lines.splice(f.i, 1); });
-        if (a === 'note') { this.sel = null; this.el.querySelector(`.lyl[data-line="${CSS.escape(id)}"]`)?.focus(); return this.noteOnSelection(); }
+        if (a === 'del') return this.undoable(`delete ${id}`, () => this.edit((d) => { const f = this.findLine(id); f?.s.lines.splice(f.i, 1); }));
+        if (a === 'note') { this.sel = null; return this.noteOnSelection(id); }
       }
       const sb = t.closest('[data-s]'), sid = t.closest('.lysec')?.dataset.sec;
       if (sb && sid) {
         const a = sb.dataset.s, i = this.draft.findIndex(s => s.id === sid);
-        if (a === 'up' || a === 'down') { const j = i + (a === 'up' ? -1 : 1); if (j < 0 || j >= this.draft.length) return; return this.edit((d) => { const [s] = d.splice(i, 1); d.splice(j, 0, s); }); }
+        if (a === 'up' || a === 'down') { const j = i + (a === 'up' ? -1 : 1); if (j < 0 || j >= this.draft.length) return; return this.undoable(`move section ${sid}`, () => this.edit((d) => { const [s] = d.splice(i, 1); d.splice(j, 0, s); })); }
         if (a === 'add') return this.addLineAfter(null, sid);
         if (a === 'ren') return this.editSection(sid);
-        if (a === 'del') { const n = this.draft[i].lines.length; if (n && !(await ui.confirm(`Delete section [${this.draft[i].label}] and its ${n} line(s) from the draft?`))) return; return this.edit((d) => { d.splice(i, 1); }); }
+        if (a === 'del') { const n = this.draft[i].lines.length; if (n && !(await ui.confirm(`Delete section [${this.draft[i].label}] and its ${n} line(s) from the draft?`))) return; return this.undoable(`delete section ${sid}`, () => this.edit((d) => { d.splice(i, 1); })); }
       }
     });
     el.addEventListener('dblclick', (e) => {
@@ -316,10 +319,9 @@ class Workspace {
       const r = getSelection().getRangeAt(0).getBoundingClientRect(), host = this.el.getBoundingClientRect();
       fab.style.display = ''; fab.style.left = `${Math.min(host.width - 60, r.right - host.left + 4)}px`; fab.style.top = `${r.bottom - host.top + 2}px`;
     }, 0));
+    el.addEventListener('focusin', (e) => { const l = e.target.closest?.('.lyl[data-line]'); if (l) this.lastLine = l.dataset.line; });
     el.addEventListener('keydown', (e) => {
       const row = e.target.closest?.('.lyl');
-      if (e.target.matches('.lyrep')) { e.stopPropagation(); if (e.key === 'Enter' && e.target.value.trim()) { this.reply(e.target.closest('[data-note]').dataset.note, e.target.value.trim()); e.target.value = ''; } if (e.key === 'Escape') e.target.blur(); return; }
-      if (e.target.matches('.lyask textarea')) { e.stopPropagation(); if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.ask(); } return; }
       if (e.target.matches('.lymsg')) { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); this.save(); } return; }
       if (e.target.matches('textarea, .lypaste')) { e.stopPropagation(); if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.$('[data-a=textok], [data-a=paste]')?.click(); } return; }
       if (!row || e.target !== row) return;
@@ -330,30 +332,28 @@ class Workspace {
       if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return k(() => this.moveLine(id, e.key === 'ArrowUp' ? -1 : 1));
       if (!e.altKey && !e.ctrlKey && e.key === 'ArrowUp' && all[i - 1]) return k(() => all[i - 1].focus());
       if (!e.altKey && !e.ctrlKey && e.key === 'ArrowDown' && all[i + 1]) return k(() => all[i + 1].focus());
-      if (e.key === 'Delete' && !e.ctrlKey) return k(() => this.edit(() => { const f = this.findLine(id); f?.s.lines.splice(f.i, 1); }));
-    });
-    this.$('.lyflt').addEventListener('change', (e) => { this.filter = e.target.value; this.renderSide(); });
-    this.$('.lylist').addEventListener('mouseover', (e) => {
-      const n = e.target.closest('.lynote'); for (const x of this.el.querySelectorAll('.lyl.hl')) x.classList.remove('hl');
-      if (n?.dataset.line) this.el.querySelector(`.lyl[data-line="${CSS.escape(n.dataset.line)}"]`)?.classList.add('hl');
+      if (e.key === 'Delete' && !e.ctrlKey) return k(() => this.undoable(`delete ${id}`, () => this.edit(() => { const f = this.findLine(id); f?.s.lines.splice(f.i, 1); })));
     });
   }
-  async ask() {
-    const ta = this.$('.lyask textarea'), text = ta.value.trim(); if (!text) { ta.focus(); return; }
-    const s = this.sel, L = s ? this.findLine(s.line)?.l : null;
-    await this.addNote({ line: L ? s.line : null, w: L ? [s.w0, s.w1] : null, quote: L ? F.words(L.text).slice(s.w0, s.w1 + 1).join(' ') : '', text, to: 'agent' });
-    ta.value = ''; this.clearSel(); toast('asked the agent (a note it reads with lyrics_get)');
-  }
+  // "Ask the agent": an ask in the Notes column (on the selected words / line, else the whole poem)
+  ask() { const t = this.nc.o.current() || { stage: 'lyrics', kind: 'stage', id: null }; this.clearSel(); this.nc.edit(t, { to: true }); }
 }
 
 // ------------------------------------------------------------------ commands (registered at load: core/rail.js imports this module)
 const L = (c) => visible() && !!S;
+// the line / section a command acts on: the right-clicked row (c.lineId / c.secId), else the focused line or selected words
+// (from the palette: the line last focused, else the last line of the poem)
+const lineOf = (c) => c?.lineId || S?.el.querySelector('.lyl:focus')?.dataset.line || S?.sel?.line || (S?.lastLine && S.findLine(S.lastLine) ? S.lastLine : null) || S?.draft.at(-1)?.lines.at(-1)?.id || null;
+const secOf = (c) => c?.secId || (lineOf(c) && S?.draft.find(s => s.lines.some(l => l.id === lineOf(c)))?.id) || null;
 commands.register([
   { id: 'lyrics.save', group: 'Lyrics', title: 'Save lyrics version', when: () => L() && S.dirty, run: () => S.save() },
   { id: 'lyrics.discard', group: 'Lyrics', title: 'Discard unsaved lyrics edits', when: () => L() && S.dirty, run: () => S.discard() },
-  { id: 'lyrics.note', group: 'Lyrics', title: 'Note on the selected words / line', when: () => L(), run: () => S.noteOnSelection() },
+  { id: 'lyrics.note', group: 'Lyrics', title: 'Note on the selected words / line (Notes column)', when: () => L(), run: (c) => S.noteOnSelection(c?.lineId) },
+  { id: 'lyrics.addLineAbove', group: 'Lyrics', title: 'Add a lyric line above', when: (c) => L() && !S.textMode && !S.compare && !!lineOf(c), run: (c) => S.addLineAfter(lineOf(c), null, { before: true }) },
+  { id: 'lyrics.addLineBelow', group: 'Lyrics', title: 'Add a lyric line below', when: (c) => L() && !S.textMode && !S.compare && !!(lineOf(c) || secOf(c)), run: (c) => lineOf(c) ? S.addLineAfter(lineOf(c)) : S.addLineAfter(null, secOf(c)) },
+  { id: 'lyrics.addVerse', group: 'Lyrics', title: 'Add a verse (after this section)', when: () => L() && !S.textMode, run: (c) => S.addVerse(secOf(c) || undefined) },
   { id: 'lyrics.text', group: 'Lyrics', title: 'Edit lyrics as text', checked: () => !!S?.textMode, when: () => L(), run: () => { S.textMode = !S.textMode; S.compare = null; S.render(); } },
-  { id: 'lyrics.addSection', group: 'Lyrics', title: 'Add a lyrics section…', when: () => L(), run: () => S.addSection() },
+  { id: 'lyrics.addSection', group: 'Lyrics', title: 'Add a lyrics section…', when: () => L(), run: (c) => S.addSection({ after: secOf(c) || undefined }) },
   { id: 'lyrics.compare', group: 'Lyrics', title: 'Compare lyrics versions…', when: () => !!store.lyrics?.versions?.length, run: async () => {
     if (!visible()) await WB().stages.open('lyrics');
     const vs = [...store.lyrics.versions].reverse().map(v => ({ label: v.id, detail: `${v.message || ''} ${v.created ? v.created.replace('T', ' ') : ''}`, value: v.id }));
@@ -361,12 +361,18 @@ commands.register([
     const b = await ui.pick({ title: `Compare ${a} with (B)`, items: [{ label: 'your unsaved edits', detail: 'draft', value: 'draft' }, ...vs.filter(v => v.value !== a)] }); if (!b) return;
     S.compare = { a, b }; S.textMode = false; S.render();
   } },
-  { id: 'lyrics.ask', group: 'Lyrics', title: 'Ask the agent about the lyrics…', run: async () => { if (!visible()) await WB().stages.open('lyrics'); S?.setSide('notes'); S?.$('.lyask textarea')?.focus(); } },
+  { id: 'lyrics.ask', group: 'Lyrics', title: 'Ask the agent about the lyrics…', run: async () => { if (!visible()) await WB().stages.open('lyrics'); S?.ask(); } },
+  { id: 'lyrics.versions', group: 'Lyrics', title: 'Lyrics versions panel', checked: () => S?.side === 'versions', when: () => L(), run: () => S.setSide(S.side === 'versions' ? null : 'versions') },
   { id: 'lyrics.addSong', group: 'Lyrics', title: () => store.song?.audio?.mix ? 'Replace the song file…' : 'Add the song file…', run: async () => { if (!visible()) await WB().stages.open('lyrics'); S?.songDialog(); } },
 ]);
 
 // Ctrl+Enter and Alt+N in a stage workspace are the rail's stage.save / stage.note (core/rail.js): they ask the visible stage
 window.WB = Object.assign(window.WB || {}, { stageActions: { ...(window.WB?.stageActions || {}), lyrics: { canSave: () => L() && S.dirty, save: () => S.save(), canNote: () => L(), note: () => S.noteOnSelection() } } });
+// right-click a line / a section tag: + Add (core/defaults.js contextArgs names them "lyline" / "lysec")
+const ADD = { label: '+ Add', submenu: [{ cmd: 'lyrics.addLineAbove', label: '+ line above' }, { cmd: 'lyrics.addLineBelow', label: '+ line below' }, { cmd: 'lyrics.addVerse', label: '+ verse' }, { cmd: 'lyrics.addSection', label: '+ section…' }, '-', { cmd: 'notes.addHere', label: '+ note here' }] };
+menus.contribute('lyline', [ADD, 'lyrics.note', 'lyrics.ask']);
+menus.contribute('lysec', [ADD]);
+menus.contribute('lystage', [{ label: '+ Add', submenu: [{ cmd: 'lyrics.addVerse', label: '+ verse' }, { cmd: 'lyrics.addSection', label: '+ section…' }, '-', { cmd: 'notes.addHere', label: '+ note here' }] }, 'lyrics.ask', 'lyrics.versions']);
 
 export default {
   mount(el, ctx) { S = new Workspace(el, ctx); },

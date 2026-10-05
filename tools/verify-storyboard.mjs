@@ -181,8 +181,8 @@ export async function verifyStoryboard({ browser, BASE, DATA, OUT, post, writeHe
   // 7. the asks: "Fill the gaps" and "Ask the agent to storyboard" write notes for the agent
   await click('.sbbar [data-a=fill]'); await wait(300);
   await click('.sbbar [data-a=askboard]'); await wait(300);
-  const N = await fileUntil('storyboard.json', (j) => j.notes?.filter(n => n.to === 'agent').length >= 2);
-  const fillN = N?.notes.find(n => n.kind === 'fill_gaps'), boardN = N?.notes.find(n => n.kind === 'storyboard');
+  const N = await fileUntil('notes.json', (j) => j.notes?.filter(n => n.to === 'agent' && n.target?.stage === 'storyboard').length >= 2);
+  const fillN = N?.notes.find(n => n.ask === 'fill_gaps'), boardN = N?.notes.find(n => n.ask === 'storyboard');
   check('"Fill the gaps" writes an ask (kind fill_gaps: the shots, the assets, the estimate) and "Ask the agent to storyboard" another (kind storyboard), both by the director via page',
     !!fillN && fillN.gaps?.shots?.length >= 3 && fillN.gaps.assets.includes('location:the-pier:night') && fillN.gaps.est_usd > 0 && /cap \$5\.00/.test(fillN.text) && fillN.via === 'page' && !!boardN && boardN.via === 'page',
     { fill: fillN && { shots: fillN.gaps?.shots?.length, assets: fillN.gaps?.assets }, board: boardN?.text?.slice(0, 80) });

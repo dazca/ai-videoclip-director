@@ -2,7 +2,9 @@
 // Writable (shared with the agent, each {rev, ...}): approvals.json, notes.json, requests.json, overrides.json, settings.json,
 // lyrics.json, stages.json (the guided flow: js/flow.js), scenes.json (stage 2, the script draft: js/scenes.js), breakdown.json
 // (stage 3: js/breakdown.js), storyboard.json (stage 6: js/storyboard.js; its shots are what the timeline shots column
-// shows); a missing guided-flow file reads as derived from the other files.
+// shows); a missing guided-flow file reads as derived from the other files. notes.json is v2 (js/notes.js): ONE list of
+// notes for every stage and the timeline; the server migrates the old stores into it on its first read (the page does the
+// same in memory when it gets an old file, e.g. on a static host).
 // Every page edit goes through store.mutate(), which records an undo step (core/history.js) unless {record:false}.
 // the server redirects a bare / to ?project=<its default project>
 // same id rule as the server (lib/store.mjs validId); anything else falls back to the demo
@@ -10,6 +12,7 @@ import { normLyrics, normStages, projectFacts } from './flow.js';
 import { normScenes } from './scenes.js';
 import { normBreakdown } from './breakdown.js';
 import { normBoard, boardShots } from './storyboard.js';
+import * as N from './notes.js';
 const QP = new URLSearchParams(location.search).get('project');
 export const PROJECT = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/.test(QP || '') ? QP : 'demo';
 export const DATA = `data/${PROJECT}/`;
@@ -43,7 +46,7 @@ function b64ToInt8(s) { const bin = atob(s); const a = new Int8Array(bin.length)
 // file -> store field, and the default content when the file does not exist yet
 export const WRITABLE = {
   'approvals.json': ['approvals', { rev: 0, states: ['draft', 'review', 'changes', 'approved', 'locked', 'archived'], items: {} }],
-  'notes.json': ['notes', { rev: 0, notes: [] }],
+  'notes.json': ['notes', N.emptyNotes()],
   'requests.json': ['requests', { rev: 0, items: [] }],
   'overrides.json': ['overrides', { rev: 0, sections: {} }],
   'settings.json': ['settings', { rev: 0, keybindings: {} }],
@@ -59,7 +62,8 @@ const NORM = {
   'scenes.json': (s, v) => normScenes(v, s.song, s.script),
   'breakdown.json': (s, v) => normBreakdown(v),
   'storyboard.json': (s, v) => normBoard(v, { shots: s.shots }, s.scenes),
-  'stages.json': (s, v) => normStages(v, projectFacts({ song: s.song, script: s.script, shots: s.shots, entities: s.entities, lyrics: s.lyrics, scenes: s.scenes, breakdown: s.breakdown, storyboard: s.board })),
+  'stages.json': (s, v) => normStages(v, projectFacts({ song: s.song, script: s.script, shots: s.shots, entities: s.entities, lyrics: s.lyrics, scenes: s.scenes, breakdown: s.breakdown, storyboard: s.board, notes: s.notes })),
+  'notes.json': (s, v) => N.isV2(v) ? v : { ...N.migrate({ notes: v, lyrics: s.lyrics, scenes: s.scenes, breakdown: s.breakdown, board: s.board, entities: s.entities }), derived: true },
 };
 const FULL = /^(song|events|energy|script|shots|costs|media)\.json$|^entities\//;
 // PRIVATE files (e.g. crops of real photos): shown only in the local page (lock badge), never exported (see
@@ -89,7 +93,7 @@ export const store = {
       if (this._saving[f]) this._missed.add(f); else this[field] = v;   // a save is in flight: re-read it after
     }));
     this.entities = await Promise.all(index.map(e => getJSON(e.path)));
-    for (const f of ['lyrics.json', 'scenes.json', 'breakdown.json', 'storyboard.json', 'stages.json']) this[WRITABLE[f][0]] = NORM[f](this, this[WRITABLE[f][0]]);
+    for (const f of ['lyrics.json', 'scenes.json', 'breakdown.json', 'storyboard.json', 'notes.json', 'stages.json']) this[WRITABLE[f][0]] = NORM[f](this, this[WRITABLE[f][0]]);
     this.entityById = Object.fromEntries(this.entities.map(e => [e.id, e]));
     this.media = (await getJSON('media.json', { items: [] })).items || [];
     this.mediaById = Object.fromEntries(this.media.map(m => [m.id, m]));
@@ -150,19 +154,25 @@ export const store = {
     if (!next) { toast(`${key} is ${this.state(key)}: not changed by a click`); return Promise.resolve(); }
     return this.setState(key, next);
   },
-  // ---- notes
-  addNote(t, text, line_id, extra) {
-    return this.mutate('notes.json', (d) => {
-      const n = d.notes.reduce((m, x) => Math.max(m, Number(String(x.id).replace(/\D/g, '')) || 0), 0) + 1;
-      d.notes.push({ id: `n${String(n).padStart(2, '0')}`, t: Math.round(t), line_id: line_id || null, by: 'director', text, status: 'open', at: nowIso(), ...(extra || {}) });
-      d.notes.sort((a, b) => a.t - b.t);
-    }, { label: 'add note' });
+  // ---- notes (notes.json v2, js/notes.js: one list for every stage and the timeline; the director's writes)
+  // a note on any target {stage, kind, id, w?, quote?, t?, pin?}; opts {to: "agent", ask, gaps, marker, about}; -> its id
+  noteAdd(target, text, opts = {}) {
+    let id = null;
+    return this.mutate('notes.json', (d) => { const n = N.makeNote(d, { target, text, by: 'director', via: 'page', version: opts.version, ...opts }); id = n.id; d.notes.push(n); }, { label: opts.to ? 'ask the agent' : 'add note' }).then(() => id);
   },
-  toggleNote(id) {
-    return this.mutate('notes.json', (d) => { const x = d.notes.find(n => n.id === id); if (x) x.status = x.status === 'open' ? 'resolved' : 'open'; }, { label: 'toggle note ' + id });
+  // a timeline note at t (the old signature: the timeline column, markers, paste)
+  addNote(t, text, line_id, extra = {}) {
+    const { kind, ...rest } = extra || {};
+    return this.noteAdd({ stage: 'timeline', kind: 'time', id: null, t: Math.max(0, Math.round(t)), ...(line_id ? { line: line_id } : {}) }, text, { ...rest, ...(kind === 'marker' ? { marker: true } : {}) });
   },
+  noteReply(id, text) { return this.mutate('notes.json', (d) => { const n = d.notes.find(x => x.id === id); if (n) (n.replies ||= []).push(N.makeReply(n, { text })); }, { label: 'reply ' + id }); },
+  noteStatus(id, status) { return this.mutate('notes.json', (d) => { const n = d.notes.find(x => x.id === id); if (n) n.status = status; }, { label: `${status === 'open' ? 'reopen' : status} ${id}` }); },
+  // open -> absorbed (done); anything else -> open
+  toggleNote(id) { const n = this.notes?.notes.find(x => x.id === id); return this.noteStatus(id, n?.status === 'open' ? 'absorbed' : 'open'); },
   editNote(id, text) { return this.mutate('notes.json', (d) => { const x = d.notes.find(n => n.id === id); if (x) x.text = text; }, { label: 'edit note ' + id }); },
   deleteNotes(ids) { return this.mutate('notes.json', (d) => { d.notes = d.notes.filter(n => !ids.includes(n.id)); }, { label: `delete ${ids.length} note(s)` }); },
+  // the notes on a stage (+ kind / id), any status unless given
+  notesOn(q) { return N.notesOn(this.notes, q); },
   // ---- generation requests (the page never calls paid APIs; the agent picks up approved ones)
   addRequest(r) {
     const id = `r${Date.now().toString(36)}`;

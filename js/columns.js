@@ -6,6 +6,7 @@ import { mediaUrl, esc } from './store.js';
 import { currentScript, sceneStatus } from './scenes.js';
 import { currentBreakdown, KINDS, KIND_COLOR } from './breakdown.js';
 import { shotEstimate } from './storyboard.js';
+import { noteTime, STAGE_TITLE } from './notes.js';
 
 const LH = 14;              // lyric visual line height (px), 12 px type
 const RAMP = Array.from({ length: 32 }, (_, i) => { const a = i / 31; const l = 14 + a * 70; return `hsl(210, ${12 + a * 20}%, ${l}%)`; });
@@ -231,26 +232,37 @@ export function makeColumns(tl, store) {
         addItems(c, groups, (g) => g.list.map(x => `<div class="cost" data-act="seek" data-t="${num(g.t0)}" title="${esc(x.tool)} ${esc(x.date)}"><b>${num(x.usd).toFixed(2)}</b> ${esc(x.id)}</div>`).join('') + `<div class="run">Σ ${num(g.run).toFixed(2)} / ${esc(store.costs.cap_usd)}</div>`);
       }, act: seekAct },
 
-    // ---------------------------------------------------------------- notes (pinned to time; dblclick to add)
+    // ---------------------------------------------------------------- notes (notes.json v2, js/notes.js): every note with a
+    // song time sits at its time: the timeline's own, and the stages' notes on a lyric line, a scene, a beat or a shot
+    // (tagged with their stage). Click an empty spot of the column (or right-click > + Add > + note at this time) to type
+    // a note at that ms: Enter saves, Esc cancels. The dot: done (absorbed) / reopen.
     { id: 'notes', title: 'notes', kind: 'text', w: 180, mode: 'drive', stripColor: '#f5a524',
       build(c) {
-        addItems(c, store.notes.notes.map(n => ({ ...n, t0: n.t })), (n) => `<div class="note n-${esc(n.status)}" data-sel="note:${esc(n.id)}"><span class="nst" data-act="nt" data-id="${esc(n.id)}" title="${esc(n.status)} (click to toggle)">●</span><b>${esc(n.by)}</b> ${esc(n.text)}</div>`);
+        const ctx = { song, scenes: currentScript(store.scenes)?.scenes || [], shots: store.boardShots() };
+        const list = store.notes.notes.filter(n => n.status !== 'dismissed').map(n => ({ n, t0: noteTime(n, ctx) })).filter(x => x.t0 != null).sort((a, b) => a.t0 - b.t0);
+        addItems(c, list, ({ n }) => `<div class="note n-${esc(n.status)} ${n.via === 'agent' ? 'ag' : 'dr'}${n.target.stage !== 'timeline' ? ' other' : ''}${n.to === 'agent' ? ' ask' : ''}" data-sel="note:${esc(n.id)}" title="${esc(`${n.id} · ${n.via === 'agent' ? 'agent' : 'director'} · ${n.status}${n.target.stage !== 'timeline' ? ` · ${STAGE_TITLE[n.target.stage]} ${n.target.kind} ${n.target.id || ''}` : ''}`)}"><span class="nst" data-act="nt" data-id="${esc(n.id)}" title="${n.status === 'open' ? 'open (click: done)' : 'done (click: reopen)'}">●</span>${n.target.stage !== 'timeline' ? `<i class="nstg" data-act="ngo" data-stage="${esc(n.target.stage)}" title="a note in ${esc(STAGE_TITLE[n.target.stage])}: open the stage">${esc(STAGE_TITLE[n.target.stage].slice(0, 3).toLowerCase())}</i>` : ''}${n.to === 'agent' ? '<i class="nask">→ agent</i>' : ''}${esc(n.text)}${(n.replies || []).map(r => `<div class="nrep ${r.via === 'agent' ? 'ag' : 'dr'}">${esc(r.text)}</div>`).join('')}</div>`);
       },
-      act(c, a) { if (a.dataset.act === 'nt') store.toggleNote(a.dataset.id); },
-      refresh(c, what) { if (what !== 'notes') return false; this.build(c); return true; },
-      dblclick(c, t, e) {
+      act(c, a) { if (a.dataset.act === 'nt') store.toggleNote(a.dataset.id); if (a.dataset.act === 'ngo') window.WB?.stages?.open(a.dataset.stage); },
+      refresh(c, what) { if (what !== 'notes' && what !== 'scenes' && what !== 'board') return false; this.build(c); return true; },
+      // a click on an empty spot of the column: a new note at that time
+      click(c, t, e) { if (e.target.closest('.it') || e.shiftKey) return false; this.editAt(c, t, e.clientY); return true; },
+      dblclick(c, t, e) { if (!e.target.closest('.it')) this.editAt(c, t, e.clientY); },
+      editAt(c, t, clientY) {
         document.querySelector('.noteedit')?.remove();
-        const ta = el('textarea', 'noteedit'); ta.placeholder = `note at ${fmt(t, true)} (Enter saves, Esc cancels)`;
-        const r = c.el.getBoundingClientRect();
-        Object.assign(ta.style, { left: r.left + 'px', top: e.clientY + 'px', width: Math.max(160, c.vw) + 'px' });
+        t = Math.max(0, Math.min(dur, Math.round(t)));
+        const ta = el('textarea', 'noteedit'); ta.placeholder = `note at ${fmt(t, true)} (Enter saves · Esc cancels · @agent asks the agent)`; ta.spellcheck = false;
+        const r = c.el.getBoundingClientRect(), y = clientY ?? (tl.sheet.getBoundingClientRect().top + tl.warp.y(t));
+        Object.assign(ta.style, { left: r.left + 'px', top: Math.max(r.top, Math.min(innerHeight - 64, y)) + 'px', width: Math.max(170, c.vw) + 'px' });
         document.body.appendChild(ta); ta.focus();
-        const line = song.lines[Math.max(0, upperBound(song.lines.map(l => l.t0), t) - 1)];
+        const line = song.lines[Math.max(0, upperBound(song.lines.map(l => l.t0), t + 1) - 1)];
+        const save = () => { let v = ta.value.trim(); ta.remove(); if (!v) return; const ask = /^@agent\b/i.test(v); if (ask) v = v.replace(/^@agent\b[:,]?\s*/i, ''); if (v) store.addNote(t, v, line && t <= line.t1 + 2000 ? line.id : null, ask ? { to: 'agent' } : {}); };
         ta.addEventListener('keydown', (ev) => {
           ev.stopPropagation();
           if (ev.key === 'Escape') ta.remove();
-          if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); const v = ta.value.trim(); ta.remove(); if (v) store.addNote(t, v, line?.id); }
+          if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); save(); }
         });
-        ta.addEventListener('blur', () => setTimeout(() => ta.remove(), 100));
+        ta.addEventListener('blur', () => setTimeout(() => { if (ta.isConnected) save(); }, 100));
+        return ta;
       } },
   ];
 
