@@ -626,5 +626,6 @@ Rules for the loop:
 
 ## Progress log
 - 2026-10-05: done: A1–A12 (dogfood her v3), DOGFOOD_looks 1–15 (13 deferred), F1, F3, G4, B1–B5, B6–B8, D1, D3a, D9 (fal + open-with; ComfyUI stub), D5 partial (merged ledger, per-take cost).
+- 2026-10-05: done: D3b (video in the runner: h3max / kling3pro i2v with an end frame, klingmc motion control with a reference video uploaded to fal storage; per-second price by date; .mp4 outputs probed and registered as takes; the Queue's video form) and the light D3c (retake of a failed take in a done request, video 1 at a time, the cap before every take, a per-batch cap `max_usd`, stale locks).
 - In progress: B9–B10 (proposals), C1–C3 (final approvals).
 - Next: review pass (spec + security), D3b (video), D6 (take selection), D8 (import media UI), D4 (waves / pilot gates), time-aligned stage toggle, G (hosted mode, on Dani's go).

@@ -47,9 +47,10 @@ export function priceRows({ date } = {}) {
   return out;
 }
 
-// which model a generation request asks for (the runner and the Queue read it): the recipe's model, else the tool /
+// which model a generation request asks for (the runner and the Queue read it): its video.model, the recipe's model, else the tool /
 // endpoint it names, else nb2 (a shot-video kind: H3 Max)
 export function modelOf(req) {
+  const vm = req?.video?.model; if (vm && PRICES[vm] && PRICES[vm].unit === 's') return vm;   // a video request (js/video.js)
   const m = req?.recipe?.model; if (m && PRICES[m]) return m;
   const t = String(req?.tool || '').toLowerCase();
   for (const [k, P] of Object.entries(PRICES)) if (t && (t === P.endpoint || t === k)) return k;

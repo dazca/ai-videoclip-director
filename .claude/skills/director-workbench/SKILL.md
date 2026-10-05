@@ -203,9 +203,16 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
    can be run again: outputs that exist are skipped and a submitted job is polled, not paid twice. The generator per
    kind is the director's (Settings > Generator: fal by default; "Open in another app" exports a prompt pack and the
    request waits for its results; `generators_get`). The fal key is in the user's environment: never ask for it, print
-   it or write it anywhere. Video is not in the runner yet (D3b): run it outside and report it with `request_update`
+   it or write it anywhere. **Video** runs in the same runner: propose it with `request_create {kind: "shot-video",
+   target: "shot:<id>", prompt, video: {model: h3max | kling3pro | klingmc, start, end?, ref_video?, seconds}, takes?}`:
+   the prompt is MOTION ONLY (what moves and one camera move, not what the frame already shows; `recipe {model, action,
+   camera}` builds it), the start frame an APPROVED still, the end frame (optional) an edit of the start frame, 5-6 s by
+   default; motion control takes a reference clip (3-30 s, one person, no cuts) and describes only the background.
+   `refs`, `tool` and `est_cost` ($/s x seconds x takes, js/prices.js; the H3 promo ends 2026-10-15) follow from `video`.
+   Outputs are `.mp4` takes of the shot (`takes_get`). A done request whose `takes_failed` is not empty: `request_run
+   {ids, retake: true}` (dry run first) runs only those takes again. A run made outside the runner: `request_update`
    queued -> running -> done with `outputs` and `actual_cost_usd` (or `failed` / rejected + `why`). From a shell:
-   `node <workbench>/tools/run.mjs --project <p> <ids> [--dry-run]`.
+   `node <workbench>/tools/run.mjs --project <p> <ids> [--dry-run] [--retake]`.
 8. **Review**: set `review`, pin a note explaining what changed, `ui_focus` with `preview` to show it. The director
    approves or requests changes; answer their notes with `note_resolve` + reply.
 9. **Render**: the final render is a media item of kind `render` and the song's `audio.render`; snapshot first.

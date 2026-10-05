@@ -438,12 +438,13 @@ runner with one approval rule, one cap and one ledger:
 - **An agent**: `request_run {ids, dry_run: true}` (the plan: generator, model, endpoint, takes, estimate vs the
   approved `est_cost`, the cap, outputs already on disk; nothing called, written or spent), then `request_run {ids}`
   (background; `wait_for {request, until: ["done", "failed"]}`) or `{ids, wait: true}`.
-- **A shell**: `node tools/run.mjs --project <p> <ids…> | --all [--dry-run] [--parallel 2]`.
+- **A shell**: `node tools/run.mjs --project <p> <ids…> | --all [--dry-run] [--parallel 2] [--video-parallel 1] [--retake] [--max-usd 2]` (a cap for the batch: `request_run max_usd`).
 
 What a run does: only a request with the director's approval on record runs (a draft, rejected or done one is
 refused; the runner never approves); the cap is re-checked when it is claimed (`queued`, 402 over it) and the
 generator's estimate (`js/prices.js`) may not exceed the approved `est_cost`; `queued -> running -> done` (or `failed`
-with `why`; a failed request keeps its approval and can be run again). Up to 2 at once. Outputs go to
+with `why`; a failed request keeps its approval and can be run again); the cap is checked again before every take is
+submitted. Up to 2 image requests at once; video requests in their own lane, 1 at a time (`video_parallel`). Outputs go to
 `data/<p>/gen/<request>/<id>_<take>.png` (`private/gen/…` when a ref is private) with `job.json` (the provider's job
 ids, per-take status and cost; never the key); a take whose file exists is skipped and a submitted job is polled again,
 not paid twice. At done the actual cost (list price × completed takes) is recorded once in `costs.json` (item id = the
@@ -451,10 +452,34 @@ request, `via: "runner"`; `costs_get` and `cost_record` dedupe by it), the outpu
 the shot for a `shot:` target) and, for an asset request, added to its tree as nodes the director keeps or picks
 (`asset_iteration_add`; a tree that refuses gets a `node_import_propose` proposal); the request records `linked`.
 
+**Video** (D3b; `js/video.js`). In the Queue's **+ New request**, pick a video model (MiniMax H3 Max, Kling v3 Pro,
+Kling v3 Motion Control) and the form becomes a video request: a **motion-only prompt** (what moves and one camera move,
+not what the frame already shows; "Apply photoreal recipe" gives the motion / camera / ambient / medium blocks), a
+**duration** selector with the cost of each length (per second × takes, at today's price: the H3 promo $0.048/s ends on
+2026-10-15, then $0.08/s), the **start frame** and the optional **end frame** picked from the approved nodes and the
+registered images (make the end frame by editing the start frame: same light, lens, place, wardrobe), and for motion
+control a **reference video** from the registered clips (its length sets the seconds; 3-30 s, one person, no cuts). The
+request stores `video {model, start, end?, ref_video?, seconds, orientation?}`; `refs` = [start, end, reference video]
+(what the run uploads to fal storage), `tool` = the endpoint, `est_cost` = $/s × seconds × takes. An agent passes the same
+`video` to `request_create` (and `request_update video {...}`: an edit sends an approved request back to draft). A run
+sends falgen's payloads (H3: `image_url`, integer `duration`, `768P`, `end_image_url`; Kling: `start_image_url`,
+`duration` "5", `generate_audio: false`, a negative prompt, `end_image_url`; motion control: `image_url`, `video_url`,
+`character_orientation`), waits up to 25 min per take, saves `gen/<id>/<id>_<take>.mp4` and probes it (fps, duration in
+`job.json` and `media.json`); with a `shot:` target the outputs are that shot's takes in take selection (D6). A
+reference clip longer than the approved seconds is refused (fal bills the output length).
+
+**A failed take inside a done request** (D3c): the request is done with the takes that finished (`takes_failed` lists
+the others; nothing is paid for them). **Retry take N · $x** in the Queue (`request_run {ids, retake: true}`, `--retake`)
+runs only those takes again, never the done ones, within the approved `est_cost` and the cap; the request stays done, its
+outputs grow, and each retaken take's cost is recorded once (`costs.json` item `<request>#<take>`). **Stale locks**: a
+`gen/<id>/.lock` whose runner is gone (its process dead, or no heartbeat for 10 min) is removed when the next run is
+planned (`stale_locks_removed`).
+
 **Generators** (Settings › Generator, per kind: image / video / motion; `settings.json` `generators`; tool
 `generators_get`): `fal` (default: Nano Banana 2 edit / text-to-image and Seedream 5 edit through fal's queue API, refs
 uploaded to fal storage (a public URL: a private ref only with the request's "allow uploading private refs" tick in the
-Queue), 25 min timeout; video is D3b), `openwith` ("Open in another app": exports
+Queue), 25 min timeout; video: H3 Max / Kling v3 Pro image-to-video and Kling Motion Control, per second, above),
+`openwith` ("Open in another app": exports
 `gen/<request>/pack/` with `prompt.txt`, `refs/`, `README.md`; the request waits, handed off, until you put the images
 in `gen/<request>/results/` and press **Collect results**: they become its outputs at $0; **Copy prompt** puts the
 prompt on the clipboard), `comfyui` (a stub: "not configured").

@@ -44,9 +44,10 @@ win: `WB_PROJECT`, `WORKBENCH_DATA`, `WORKBENCH_MEDIA_BASE`, `FAL_KEY`.
 | `mcp/server.mjs`, `mcp/test.mjs`, `mcp/client.mjs` | MCP server (stdio: imports the tool files, adds the resources and the `director-session` prompt, connects), its end-to-end test, and the one-shot CLI client (`node mcp/client.mjs <tool> '<json>'`) |
 | `mcp/tools/` | the MCP tools by domain, one file per `lib/ops/<domain>.mjs`; `_shared.mjs` holds the transport (`op`, `http`, `server`, `projectOf`), `wrap`, the shared zod schemas and the one `mcp` server object the files register on |
 | `lib/svg-sanitize.mjs` | the SVG sanitiser for proposals: a strict tokenizer, an allow-list of elements and attributes, values re-escaped; refuses (with the reason) script, on*, foreignObject, external / javascript: refs, url() but url(#id), DOCTYPE, CDATA, > 64 KB, a bad viewBox |
-| `lib/run.mjs` | the request runner (D3a): plans, locks, claims (approval + cap), runs through a generator, writes `gen/<request>/`, records the cost once, registers and links the outputs; resolves the fal key; `runEvents` (serve.mjs forwards them as SSE `{run}`). The only code that calls a paid API |
-| `generators/` | generator plugins `{id, label, kinds, configured, supports, estimate, submit, poll, fetch}`: `fal.mjs` (nb2 edit / t2i, seedream edit; fal queue + storage), `openwith.mjs` ("Open in another app": a prompt pack), `comfyui.mjs` (a stub) |
+| `lib/run.mjs` | the request runner (D3a images, D3b video, D3c retakes / stale locks): plans, locks (heartbeat; stale ones removed), claims (approval + cap; the cap again before every take), runs through a generator, writes `gen/<request>/`, records the cost once (a retaken take once more), registers and links the outputs; video in its own lane (1 at a time); resolves the fal key; `runEvents` (serve.mjs forwards them as SSE `{run}`). The only code that calls a paid API |
+| `generators/` | generator plugins `{id, label, kinds, configured, supports, estimate, submit, poll, fetch}`: `fal.mjs` (nb2 edit / t2i, seedream edit; h3max / kling3pro image-to-video with an end frame, klingmc motion control with a reference video; fal queue + storage), `openwith.mjs` ("Open in another app": a prompt pack), `comfyui.mjs` (a stub) |
 | `js/prices.js` | the ONE price table (list prices with the day each was verified): every estimate in the page, the server and the tools |
+| `js/video.js` | a video request's spec (D3b): `video {model, start, end?, ref_video?, seconds, orientation?}`, the models' seconds, `videoRefs` (what is uploaded), `videoProblems`, `videoEstimate` ($/s x seconds x takes, by date); the Queue form, `request_create` / `request_update` and the runner share it |
 | `js/recipe.js`, `templates/photoreal_recipe.json`, `docs/PHOTOREAL.md` | the photoreal recipe: the default prompt template (blocks per model), its data, and the guide that explains it |
 | `index.html`, `app.js`, `app.css` | the page shell |
 | `core/importmedia.js` | File › Import media… (D8): the dialog (dropped files uploaded in chunks, a media-root path / folder read in place with its jobs and recovered costs, kind / label / private per row, link to a request, record a cost), dropping files anywhere on the page, and "Use as…" (rows and the `media` context menu: identity / look / base / variant node, a shot's take / start frame; `useAsItems(media)`, `WB.importMedia`) |
@@ -56,7 +57,7 @@ win: `WB_PROJECT`, `WORKBENCH_DATA`, `WORKBENCH_MEDIA_BASE`, `FAL_KEY`.
 | `docs/SPEC_v3_GUIDED.md` | the guided creation flow (seven stages); phase 1 = stage rail, wizard, lyrics stage; phase 2 = the script stage + sketch files; phase 3 = the breakdown stage; phase 4 = the characters stage; phase 5 = the scenery stage (locations, props) on the generic asset workspace; phase 6 = the storyboard stage (shots per scene, gaps); phase 7 = final approvals (the pending list, the ready-to-render checklist, the costs, Lock for render) |
 | `catalog/` | the free starter catalogue (CC0 / public-domain bases: bodies, poses, face angles, garments, locations, props; `catalog.json`, `LICENSES.md`), served read-only for stage 4 |
 | `importers/` | `new_project.mjs` (song + lyrics -> project), `azemar_*` (the owner's production, kept as a worked example) |
-| `tools/` | `verify.mjs` (UI suite; its stage-4 / 5 blocks are `verify-characters.mjs` (v7), `verify-scenery.mjs` (v8), `verify-storyboard.mjs` (v9) and `verify-dogfood.mjs` (v10: proposals, image import, request warnings, merged costs, the recipe form, the stale bar), `verify-notes.mjs` (v11: the migration of the old note stores, the Notes column per stage and on the timeline, the right-click "+ Add" menus + Ctrl+Z, the counters), `verify-runner.mjs` (v12: the Queue's Approve / Reject / Run, live progress, outputs as nodes, Settings > Generator, on a mock fal) `verify-rounds.mjs` (v13: a full review round in the page and over MCP, Close revision, Compare, restore, the page-only acts, the git mirror off by default, the Notes column's width) `verify-proposals.mjs` (v14: proposals added over MCP, the strips on a scene, a shot, a lyric line and a look, Pick -> the sketch underlay / the frame's base layer / the line text + Ctrl+Z, Mix, "3 more", the free local generator, "Prepare proposals", the wizard offer) and `verify-final.mjs` (v15: the Final list = final_get's rows, filters, the checklist and its gap links, the costs, Approve per kind, Request changes, approve-selected with its cost confirm, Review › Approvals, Lock for render (agent 409) and Unlock) and `verify-takes.mjs` (v16: take selection on ffmpeg placeholder takes: takes_get, take_propose, the cards and hover-scrub, the in / out handles, Pick, the proposal's one-click Pick, alternatives, A/B, the timeline clip column, Final's count, Review › Takes) and `verify-import.mjs` (v17, D8: File › Import media, dropped files, a falgen folder with its jobs and cost, "Use as…" identity / start frame / take, the Media browser's linked / unlinked, the agent's media_import), each runnable alone; `verify-stages.mjs` (F1: stage status from content, per stage empty / partial / done / regressed, the rail screenshots `f1_*.png`; run after it by `npm run verify`)), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `fake-falgen.mjs` (a fake falgen output tree for the D8 tests: never fal), `mock-fal.mjs` (a mock fal for every runner test: never the real one), `run.mjs` (the runner CLI), `make_demo.mjs`, `chrome.mjs` |
+| `tools/` | `verify.mjs` (UI suite; its stage-4 / 5 blocks are `verify-characters.mjs` (v7), `verify-scenery.mjs` (v8), `verify-storyboard.mjs` (v9) and `verify-dogfood.mjs` (v10: proposals, image import, request warnings, merged costs, the recipe form, the stale bar), `verify-notes.mjs` (v11: the migration of the old note stores, the Notes column per stage and on the timeline, the right-click "+ Add" menus + Ctrl+Z, the counters), `verify-runner.mjs` (v12: the Queue's Approve / Reject / Run, live progress, outputs as nodes, Settings > Generator, on a mock fal) `verify-rounds.mjs` (v13: a full review round in the page and over MCP, Close revision, Compare, restore, the page-only acts, the git mirror off by default, the Notes column's width) `verify-proposals.mjs` (v14: proposals added over MCP, the strips on a scene, a shot, a lyric line and a look, Pick -> the sketch underlay / the frame's base layer / the line text + Ctrl+Z, Mix, "3 more", the free local generator, "Prepare proposals", the wizard offer) and `verify-final.mjs` (v15: the Final list = final_get's rows, filters, the checklist and its gap links, the costs, Approve per kind, Request changes, approve-selected with its cost confirm, Review › Approvals, Lock for render (agent 409) and Unlock) and `verify-takes.mjs` (v16: take selection on ffmpeg placeholder takes: takes_get, take_propose, the cards and hover-scrub, the in / out handles, Pick, the proposal's one-click Pick, alternatives, A/B, the timeline clip column, Final's count, Review › Takes) and `verify-import.mjs` (v17, D8: File › Import media, dropped files, a falgen folder with its jobs and cost, "Use as…" identity / start frame / take, the Media browser's linked / unlinked, the agent's media_import) and `verify-video.mjs` (v18, D3b: the Queue's video form (motion prompt, duration + cost, start / end frame pickers, the H3 date switch), a video run with a failed take and "Retry take 2", the .mp4 outputs as takes, motion control, video one at a time, a stale lock), each runnable alone; `verify-stages.mjs` (F1: stage status from content, per stage empty / partial / done / regressed, the rail screenshots `f1_*.png`; run after it by `npm run verify`)), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `fake-falgen.mjs` (a fake falgen output tree for the D8 tests: never fal), `mock-fal.mjs` (a mock fal for every runner test: never the real one; its video endpoints check each kind's parameters and answer a placeholder MP4 made with ffmpeg; `failNext` fails one take), `run.mjs` (the runner CLI), `make_demo.mjs`, `chrome.mjs` |
 | `exporters/hyperframes-html/` | HTML package of a HyperFrames composition: `export.mjs`, `verify.mjs`, `serve.mjs` (see Export) |
 | `data/<project>/` | one folder per project; only `data/_template/` and `data/demo/` are in git |
 
@@ -135,13 +136,16 @@ relative to the media base; any other path is relative to the project folder. Fu
   review, changes, approved, locked), `requests.json` (the generation queue; a stage-4 / 5 generation carries `asset{type, id,
   tree, from, kind: identity|base|edit|look|variant, text?, sketch?, png?, mask?, pins[]}` (the old `char` link is still
   read, never written), `warnings[]?` (request_create's, shown on the request card), `recipe?{id, version, model, framing,
-  fields, blocks[{id, label, text}], negative_prompt?}` (made from the photoreal recipe), `takes?`, and the runner's
-  `generator`, `linked{type, id, tree, nodes[], proposals[]}`, `handoff{generator, pack, results}`, `last_run{at, status,
-  why}`, `superseded_by[]?`; statuses draft, approved, queued, running, done, failed, rejected (the director said no), withdrawn
+  fields, blocks[{id, label, text}], negative_prompt?}` (made from the photoreal recipe), `takes?`, a video request's
+  `video{model: h3max|kling3pro|klingmc, start, end?, ref_video?, seconds, orientation?}` (refs = [start, end?, ref_video?]),
+  and the runner's `generator`, `linked{type, id, tree, nodes[], proposals[]}`, `handoff{generator, pack, results}`,
+  `last_run{at, status, why}`, `takes_failed[]?` (a done request's takes that failed: retake them), `retaking?` (a retake
+  in flight), `superseded_by[]?`; statuses draft, approved, queued, running, done, failed, rejected (the director said no), withdrawn
   (its author took the draft back: the agent its own, the director theirs in the Queue; back to draft re-opens it)), `overrides.json`,
   `settings.json` (also `generators{image, video, motion}`: Settings > Generator; `falgen`: Settings > costs, the falgen folder).
 - `gen/<request>/<id>_<take>.<ext>` + `job.json` (+ `pack/`, `results/` for "Open in another app"): the runner's
-  outputs (`private/gen/...` when a ref is private); `job.json` has the provider job ids, per-take status / cost, no key.
+  outputs (`private/gen/...` when a ref is private; video `.mp4`); `job.json` has the provider job ids, per-take status /
+  cost (a video take: seconds, fps, duration_ms), `video`, `retakes[]`, no key. `.lock` = the run holding it (pid, heartbeat).
 - `costs.json`: `cap_usd`, `items[{id, t, usd, tool, date, request?, via?, job?, take?, note?, generator?}]` (`via`: spend
   recorded with `cost_record`, outside the queue; `via: "runner"`: a request the runner ran, item id = the request id; `takes`: the
   job made that many takes). `project.json` (or the page: Settings > costs, `settings.json` `falgen`; project.json wins) may name
@@ -269,8 +273,11 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <same export witho
    `est_cost` for all `takes`, refs, tool). Run only `approved` ones, with the runner: `request_run {ids, dry_run:
    true}` first (tell the director the plan and total), then `request_run {ids}` (+ `wait_for {request, until:
    ["done", "failed"]}`) or `{wait: true}`; the director can press Run in the Queue instead (same runner). It does the
-   lifecycle, the cap, the cost (once) and the media / node links for you. A run made outside the runner (video until
-   D3b): `request_update` queued -> running -> done with `outputs[]` and `actual_cost_usd` (recorded in `costs.json`,
+   lifecycle, the cap, the cost (once) and the media / node links for you. A video request (D3b) carries `video {model,
+   start, end?, ref_video?, seconds}` (`request_create video`: refs, tool and `est_cost` follow from js/prices.js; the
+   prompt is motion only: what moves, one camera move; the start frame an approved still; the end frame an edit of it).
+   A done request with a failed take: `request_run {ids, retake: true}` runs only that take (never the done ones). A run
+   made outside the runner: `request_update` queued -> running -> done with `outputs[]` and `actual_cost_usd` (recorded in `costs.json`,
    outputs registered as media), or failed / rejected + `why`. Queueing is refused above the cap (spent + committed +
    this > `cap_usd`). Editing an approved request sends it back to draft. Never ask for, print or store the fal key.
 3. **Private files stay local.** Paths matching the PRIVATE rule (`thumbs/priv_*`, any `private/` folder, plus the
@@ -547,7 +554,13 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <same export witho
   else refused) and goes only into the Authorization header of calls to fal's queue / storage origins (a status /
   response URL on another origin gets nothing); it is never logged, returned (`generators_get` says where it was found),
   written to `job.json` or any project file, and error texts are redacted. Downloads carry no key and must be images
-  (PNG / JPEG / WebP signature). `WB_FAL_BASE` (the tests' mock fal) counts only with `WB_TEST=1`. Running is local
+  (PNG / JPEG / WebP signature; a video output an MP4 `ftyp` box). `WB_FAL_BASE` (the tests' mock fal) counts only with
+  `WB_TEST=1` (as does `WB_TEST_DATE`, the price date of the tests). Video (D3b): the refs must be exactly the video's
+  start / end frames and reference video (images / a video file), each an existing project or media-root file; a private
+  reference VIDEO is a private ref like any other (the director's "allow uploading private refs" tick, or refused); a
+  reference clip longer than the approved seconds is refused. A retake (D3c) runs only on a done request with a director
+  approval on record, only its failed takes, within the approved `est_cost` and the cap; each take's cost is recorded once
+  (`<request>#<take>`, deduplicated under the costs.json lock, so two retakes at once pay once). Running is local
   only like every write (token, Host, Origin). The server's file watcher ignores `gen/` (the page follows
   `requests.json` / `media.json`), and a dropped-name watch event makes the page re-read everything.
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
@@ -608,8 +621,8 @@ initial project. Tools:
 | `take_propose` | propose a take for a shot with in / out (ms or m:ss.mmm inside the take) and why: an open proposal in takes.json the director picks with one click (never a pick) |
 | `final_get` | stage 7, read only: `ready`, `locked`, `failing`, the checklist (9 derived checks with their gaps), `pending` rows by group (lyrics, script, breakdown, characters, scenery, storyboard, requests: status, why, est / spent, notes open, approvable), `counts`, `costs` (spent / committed / drafts / to request / projected vs the cap); filters group / status / notes |
 | `approvals_get`, `approve`, `request_changes` | approval states |
-| `requests_list`, `request_create`, `request_update` | the generation queue and its lifecycle (`asset` links a stage-4 / 5 generation to an asset tree; `char` is deprecated: a warning, stored as `asset`); `recipe` builds the prompt from the photoreal blocks; `warnings[]` |
-| `request_run` | run APPROVED requests with the runner (the generator per kind from Settings > Generator): `dry_run` = the plan, nothing spent; refuses drafts; re-checks the cap; outputs in `gen/`, cost once, media + nodes; `wait` or `wait_for` |
+| `requests_list`, `request_create`, `request_update` | the generation queue and its lifecycle (`asset` links a stage-4 / 5 generation to an asset tree; `char` is deprecated: a warning, stored as `asset`); `recipe` builds the prompt from the photoreal blocks; `video {model, start, end?, ref_video?, seconds}` makes a video request (refs, tool, est_cost from it); `warnings[]` |
+| `request_run` | run APPROVED requests with the runner (the generator per kind from Settings > Generator; images and video): `dry_run` = the plan, nothing spent; refuses drafts; re-checks the cap (before every take too); outputs in `gen/`, cost once, media + nodes; `retake: true` = the failed takes of done requests only; `video_parallel` (default 1); `wait` or `wait_for` |
 | `generators_get` | the generators (fal, openwith, comfyui), the one per kind, ready or not, where the fal key was found (never the key) |
 | `costs_get` | one total (`total_spent_usd`) with per-source rows: costs.json, falgen ledger rows not in it, falgen spent.json not itemised (dedup by job); committed / cap; `falgen.linked` + a warning when a falgen folder nearby is not linked |
 | `cost_record` | record spend made outside the queue (`via`, `job`, `take`, `tool`, `note`); never an approval; the same job once |
@@ -636,7 +649,10 @@ it. List prices (fal), each verified on the date given:
 | Kling v3 Motion Control | `fal-ai/kling-video/v3/pro/motion-control` | $0.168/s | 2026-10-04 |
 
 What each generation is estimated with (`USE`): a sheet (identity / look / base / variant) and a shot still = NB2 2K
-$0.12; an edit or a masked edit = NB2 1K $0.08; a shot video = H3 Max 768p per second (5 s minimum, 10 s a clip). To
+$0.12; an edit or a masked edit = NB2 1K $0.08; a shot video = H3 Max 768p per second (5 s minimum, 10 s a clip). A video
+request (js/video.js) is priced $/s x `video.seconds` x takes at the run's date (H3: $0.048/s up to 2026-10-15, $0.08/s from
+the 16th: a request approved at the promo price and run after it is refused until re-approved); motion control by the
+seconds of output (as long as the reference clip). To
 change a price: edit `js/prices.js` (and `verified`), then this table. The runner (`generators/fal.mjs`) prices a take
 from this table too (NB2: 1K for an edit kind, else 2K; text-to-image, a request without refs, at the edit list price,
 not verified separately; Seedream: 2048 + $0.0045 per ref after the first) and refuses a run whose estimate is above
@@ -673,7 +689,9 @@ are checked again) -> running (the generator: submit, poll every 4 s up to 25 mi
 done (outputs `gen/<id>/<id>_<take>.png`, `job.json`, the cost recorded once, media registered, an asset request's
 outputs added to its tree as nodes: `linked`) or failed (`why`; run it again to retry: existing takes are skipped,
 submitted jobs polled again). Up to 2 at once. Generators (Settings > Generator per kind, `settings.json`
-`generators`): `fal` (default; images only until D3b), `openwith` (a prompt pack in `gen/<id>/pack/`, the request
+`generators`): `fal` (default; images, and video since D3b: H3 Max / Kling v3 Pro image-to-video from a start frame + an
+optional end frame, Kling v3 Motion Control from a reference video, outputs `.mp4`, 1 at a time; a failed take of a done
+request: `retake`), `openwith` (a prompt pack in `gen/<id>/pack/`, the request
 handed off until images land in `gen/<id>/results/` and it is run again: done at $0), `comfyui` (stub). A generator is
 `generators/<id>.mjs` exporting `{id, label, kinds, configured(ctx), supports(req), estimate(req), submit(req, ctx) ->
 handle, poll(handle, ctx) -> {status: queued|running|done|failed|waiting}, fetch(handle, ctx) -> [{url | file, ext}]}`,

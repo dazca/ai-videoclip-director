@@ -136,6 +136,51 @@ try {
     check('D3a the cap is enforced at run time (cap 0: refused 402, nothing called, still approved; the dry run says it does not fit)',
       capDry.body?.items?.[0]?.cap?.fits === false && q2r.status === 'approved' && q2r.last_run?.status === 'refused' && /cap/.test(q2r.last_run.why) && FAL.stats.submits === s0 + 1, { dry: capDry.body?.items?.[0]?.cap, last: q2r.last_run });
     setCap(50);
+    // ---- D3b video: an unapproved video request never runs; the per-second cost is recorded once per take (a failed take
+    // retried once, two retakes at the same time pay once); a private reference video needs the director's private-upload tick
+    const pageSaveO = async (f, fn) => { const cur = await (await fetch(`${A.base}/data/${P}/${f}`)).json(); fn(cur); return post(`/api/save/${f}?project=${P}`, { base_rev: cur.rev, data: cur }, { origin: A.base }); };
+    const vq = (await opR('request_create', { kind: 'shot-video', target: 'shot:s4-chorus', prompt: 'sec video: she turns her head. Camera: static locked-off camera.', takes: 2, video: { model: 'h3max', start: 'media/still/ada_face.jpg', seconds: 5 } })).body;
+    const vs0 = FAL.stats.videoSubmits;
+    const vRunDraft = await opR('request_run', { ids: [vq.id] }), vSelf = await opR('request_update', { id: vq.id, status: 'approved', director_approved: true });
+    const vHand = readP('requests.json'); vHand.items.find(x => x.id === vq.id).status = 'approved'; vHand.rev++; fs.writeFileSync(path.join(D, 'requests.json'), JSON.stringify(vHand));
+    const vRunHand = await opR('request_run', { ids: [vq.id] }); await wait(200);
+    check('D3b an unapproved video request is refused: request_run on the draft, self-approval 403, a status typed by hand (no recorded approval); nothing reached fal',
+      vq.video?.model === 'h3max' && vRunDraft.body?.started?.length === 0 && /draft/.test(vRunDraft.body.refused?.[0]?.why || '') && vSelf.status === 403 && vRunHand.body?.started?.length === 0 && /no director approval/.test(vRunHand.body.refused?.[0]?.why || '') && FAL.stats.videoSubmits === vs0,
+      { draft: vRunDraft.body?.refused, self: vSelf.status, hand: vRunHand.body?.refused });
+    const vBack = readP('requests.json'); vBack.items.find(x => x.id === vq.id).status = 'draft'; vBack.rev++; fs.writeFileSync(path.join(D, 'requests.json'), JSON.stringify(vBack));
+    await pageSave('requests.json', (d) => { d.items.find(x => x.id === vq.id).status = 'approved'; });
+    FAL.failNext = 1;
+    await opR('request_run', { ids: [vq.id] });
+    const vDone = await waitStatus(vq.id, ['done', 'failed'], 15000);
+    const vc1 = readP('costs.json').items.filter(x => x.request === vq.id);
+    const vAgain = await opR('request_run', { ids: [vq.id] });
+    const [rtA, rtB] = await Promise.all([opR('request_run', { ids: [vq.id], retake: true }), opR('request_run', { ids: [vq.id], retake: true })]);
+    const t0r = Date.now(); while (Date.now() - t0r < 15000 && (readP('requests.json').items.find(x => x.id === vq.id).retaking || readP('requests.json').items.find(x => x.id === vq.id).outputs.length < 2)) await wait(80);
+    await wait(300);
+    const vAfter = readP('requests.json').items.find(x => x.id === vq.id), vc2 = readP('costs.json').items.filter(x => x.request === vq.id);
+    const vRt3 = await opR('request_run', { ids: [vq.id], retake: true });
+    check('D3b the per-second cost is recorded once per take: 5 s x $0.048 = $0.24 for the take that finished (one item; the failed take costs nothing); a plain re-run of the done request is refused; two retakes at once run the failed take once ($0.24 more, one <id>#<take> item); a third retake is refused; total $0.48 = the approved estimate',
+      vDone?.status === 'done' && vc1.length === 1 && Math.abs(vc1[0].usd - 0.24) < 1e-9 && vDone.takes_failed?.length === 1 && vAgain.body?.started?.length === 0
+      && vAfter.outputs.length === 2 && vc2.length === 2 && Math.abs(vc2.reduce((x, y) => x + y.usd, 0) - 0.48) < 1e-9 && vc2.filter(x => /#\d$/.test(x.id)).length === 1 && Math.abs(vAfter.actual_cost_usd - 0.48) < 1e-9
+      && FAL.stats.videoSubmits === vs0 + 3 && vRt3.body?.started?.length === 0 && [rtA, rtB].filter(r => r.body?.started?.length === 1).length >= 1, { vc1, vc2, a: rtA.body?.started, b: rtB.body?.started, rt3: vRt3.body?.refused, submits: FAL.stats.videoSubmits - vs0 });
+    // a private reference video (any private/ folder: a real performance of the director): the S4 rule
+    fs.mkdirSync(path.join(D, 'private', 'clip'), { recursive: true }); fs.copyFileSync(path.join(D, 'media', 'clip', 'C1_0.mp4'), path.join(D, 'private', 'clip', 'me_dancing.mp4'));
+    const pv = (await opR('request_create', { kind: 'motion', target: 'shot:s3-grid', prompt: 'sec video: an empty studio, cool light', video: { model: 'klingmc', start: 'media/still/ada_body.jpg', ref_video: 'private/clip/me_dancing.mp4', seconds: 3 }, extra: { private_upload_ok: true } })).body;
+    await pageSave('requests.json', (d) => { d.items.find(x => x.id === pv.id).status = 'approved'; });
+    const pvDry = await opR('request_run', { ids: [pv.id], dry_run: true });
+    const agentTick = await pageSave('requests.json', (d) => { d.items.find(x => x.id === pv.id).private_upload_ok = true; });   // the token without the page's Origin
+    const pvDry2 = await opR('request_run', { ids: [pv.id], dry_run: true });
+    const up0 = FAL.uploadsMeta.length, pvs0 = FAL.stats.videoSubmits;
+    await pageSaveO('requests.json', (d) => { d.items.find(x => x.id === pv.id).private_upload_ok = true; });   // the director's tick in the page
+    const pvDry3 = await opR('request_run', { ids: [pv.id], dry_run: true });
+    await opR('request_run', { ids: [pv.id] });
+    const pvDone = await waitStatus(pv.id, ['done', 'failed'], 15000);
+    const pvMedia = readP('media.json').items.filter(m => m.request === pv.id);
+    check('D3b a private reference video goes to fal storage only with the director\'s tick: the agent\'s private_upload_ok is dropped, the run refused ("allow uploading private refs"); a save without the page\'s Origin does not tick it; with the tick from the page it runs (the clip uploaded as video/mp4), the outputs land in private/gen/ and are flagged private',
+      pv.private_upload_ok === undefined && pvDry.body?.items?.[0]?.ok === false && /allow uploading private refs/.test(pvDry.body.items[0].why) && pvDry2.body?.items?.[0]?.ok === false && pvDry3.body?.items?.[0]?.ok === true
+      && pvDone?.status === 'done' && /^private\/gen\//.test(pvDone.outputs[0]) && pvMedia.length === 1 && pvMedia[0].private === true && FAL.uploadsMeta.slice(up0).some(u => u.content_type === 'video/mp4' && /me_dancing/.test(u.file_name)) && FAL.stats.videoSubmits === pvs0 + 1,
+      { why: pvDry.body?.items?.[0]?.why, tick: agentTick.status, dry2: pvDry2.body?.items?.[0]?.ok, dry3: pvDry3.body?.items?.[0]?.why, out: pvDone?.outputs, media: pvMedia.map(m => [m.path, m.private]) });
+
     // the key: only to the queue / storage origins (a forged status_url gets nothing), never in a response, file or log
     const fal = (await import('../generators/fal.mjs')).default;
     let forged = null; try { await fal.poll({ status_url: 'http://evil.example/requests/x/status' }, { key: FAL_KEY }); } catch (e) { forged = e.message; }
@@ -152,7 +197,7 @@ try {
     const iIn = info(cfgIn), iOut = info(cfgOut);
     fs.rmSync(kIn, { force: true });
     const leaks = S.walk(D).filter(f => { try { return fs.readFileSync(path.join(D, f)).includes(FAL_KEY); } catch (e) { return false; } });
-    check('D3a the fal key: sent only to the fal queue / storage origin (a forged status_url is refused), never in a response (generators_get says where it came from only), a project file (job.json, requests, costs, media) or the server log; WB_FAL_BASE needs WB_TEST=1; a key file inside the project is refused, one outside works (and is not printed)',
+    check('D3a/D3b the fal key (also through the video runs): sent only to the fal queue / storage origin (a forged status_url is refused), never in a response (generators_get says where it came from only), a project file (job.json, requests, costs, media) or the server log; WB_FAL_BASE needs WB_TEST=1; a key file inside the project is refused, one outside works (and is not printed)',
       /refusing to send the fal key/.test(forged || '') && gi.body?.fal_key?.found === true && !bodies.some(b => b.includes(FAL_KEY)) && !leaks.length && !A.c.log.includes(FAL_KEY)
       && base1 === 'https://queue.fal.run https://rest.alpha.fal.ai' && /"found":false/.test(iIn.stdout) && /outside the workbench/.test(iIn.stdout) && /"found":true/.test(iOut.stdout) && /fal_key_file/.test(iOut.stdout) && !(iIn.stdout + iOut.stdout + iIn.stderr + iOut.stderr).includes(FAL_KEY)
       && FAL.stats.keyOnCdn === 0, { forged, leaks, base1, iIn: iIn.stdout.trim() || iIn.stderr.slice(0, 200), iOut: iOut.stdout.trim() || iOut.stderr.slice(0, 200) });

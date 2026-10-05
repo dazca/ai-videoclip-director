@@ -1144,6 +1144,57 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   fs.writeFileSync(path.join(D, 'settings.json'), JSON.stringify(st0));
   check('comfyui (a stub): refused "not configured"', rcm.items?.[0]?.ok === false && /not configured/.test(rcm.items[0].why), rcm.items?.[0]);
 
+  // ---- D3b video (h3max / kling3pro / klingmc) on the mock fal, D3c retake of a failed take inside a done request
+  {
+    const bad1 = await callT('request_create', { kind: 'shot-video', prompt: 'x', video: { model: 'h3max', seconds: 6 } });
+    const bad2 = await callT('request_create', { kind: 'motion', prompt: 'x', video: { model: 'klingmc', start: 'media/still/bo_face.jpg', seconds: 3 } });
+    const bad3 = await callT('request_create', { kind: 'shot-video', prompt: 'x', video: { model: 'h3max', start: 'media/still/bo_face.jpg', seconds: 20 } });
+    const bad4 = await callT('request_create', { kind: 'shot-video', prompt: 'x', video: { model: 'h3max', start: 'media/still/nope.jpg', seconds: 6 } });
+    const bad5 = await callT('request_create', { kind: 'shot-video', prompt: 'x', video: { model: 'kling3pro', start: 'media/clip/C1_0.mp4', seconds: 5 } });
+    check('request_create video: refused without a start frame, motion control without a reference video, seconds out of range (h3max 20 s), a missing file (404), a video as the start frame',
+      /start frame/.test(bad1.error || '') && /reference video/.test(bad2.error || '') && /seconds: 5-10/.test(bad3.error || '') && /not found/.test(bad4.error || '') && /must be an image/.test(bad5.error || ''), [bad1, bad2, bad3, bad4, bad5].map(x => (x.error || 'no error').slice(0, 90)));
+    const v = await callT('request_create', { kind: 'shot-video', target: 'shot:s4-chorus', prompt: 'mcp video: Bo turns his head slowly. Camera: slow push-in.', refs: ['media/still/bo_body.jpg'], takes: 2, video: { model: 'h3max', start: 'media/still/bo_face.jpg', end: 'media/still/bo_body.jpg', seconds: 6 } });
+    check('request_create video (h3max, start + end, 6 s, 2 takes): refs = [start, end] (warned), tool = the H3 endpoint, est_cost = $0.048/s x 6 s x 2 = $0.576 from js/prices.js (no est_cost given), a draft',
+      v.status === 'draft' && v.refs?.join(',') === 'media/still/bo_face.jpg,media/still/bo_body.jpg' && v.tool === 'minimax/h3-max/image-to-video' && Math.abs(v.est_cost - 0.576) < 1e-9 && v.video?.seconds === 6 && (v.warnings || []).some(w => /refs set from video/.test(w)), v.error || { refs: v.refs, est: v.est_cost, w: v.warnings });
+    const vu = await callT('request_update', { id: v.id, video: { seconds: 5, end: null } });
+    check('request_update video {seconds: 5, end: null}: the end frame removed, refs = [start], est_cost follows (2 x 5 s x $0.048 = $0.48)', vu.request?.video?.seconds === 5 && !vu.request.video.end && vu.request.refs.join(',') === 'media/still/bo_face.jpg' && Math.abs(vu.request.est_cost - 0.48) < 1e-9, vu.error || vu.request?.video);
+    await callT('request_update', { id: v.id, video: { seconds: 6, end: 'media/still/bo_body.jpg' } });
+    await approveP(v.id);
+    const vd = await callT('request_run', { ids: [v.id], dry_run: true }), it = vd.items?.[0];
+    const vcap = await callT('request_run', { ids: [v.id], dry_run: true, max_usd: 0.5 });
+    check('a per-batch cap (max_usd 0.5): the $0.576 video is refused "over the batch cap"', vcap.items?.[0]?.ok === false && /batch cap/.test(vcap.items[0].why) && vcap.runnable === 0, vcap.items?.[0]);
+    const RUN = await import('../lib/run.mjs');
+    process.env.WB_TEST_DATE = '2026-10-16'; const after = RUN.planRun(PROJECT, { ids: [v.id], clean: false }).items[0]; process.env.WB_TEST_DATE = '2026-10-15'; const last = RUN.planRun(PROJECT, { ids: [v.id], clean: false }).items[0]; delete process.env.WB_TEST_DATE;
+    check('dry_run of a video: gen_kind video, h3max, 6 s at $0.048/s (the H3 promo), $0.288 a take, $0.576; the H3 date switch: on 2026-10-15 it still fits, from 2026-10-16 ($0.08/s: $0.96) the run is refused above the approved $0.576',
+      it?.ok && it.gen_kind === 'video' && it.model === 'h3max' && it.video?.seconds === 6 && it.video.per_s === 0.048 && it.per_take_usd === 0.288 && it.est_usd === 0.576 && last.ok && after.ok === false && /\$0\.96/.test(after.why) && /approved/.test(after.why), { it, after: after.why });
+    const sv = FAL.stats.videoSubmits; FAL.failNext = 1;
+    const vr = await callT('request_run', { ids: [v.id], wait: true }), r1 = reqOf(v.id);
+    const plain = await callT('request_run', { ids: [v.id] });
+    const vr2 = await callT('request_run', { ids: [v.id], retake: true, wait: true }), r2 = reqOf(v.id);
+    const vcost = costsF().items.filter(x => x.request === v.id), job = JSON.parse(fs.readFileSync(path.join(D, 'gen', v.id, 'job.json'), 'utf8'));
+    check('a video run with one take failing at the provider: (take 0) done with 1 .mp4 and takes_failed [0] ($0.288 once); a plain run of the done request is refused and says retake; request_run retake (wait) runs ONLY take 0 (one more submit), the request stays done with 2 outputs and $0.576, the take\'s cost recorded once as <id>#0; job.json: per take usd, seconds, fps, duration',
+      r1.status === 'done' && r1.outputs.length === 1 && /_1\.mp4$/.test(r1.outputs[0]) && r1.takes_failed?.join(',') === '0' && Math.abs(r1.actual_cost_usd - 0.288) < 1e-9 && /retake: true/.test(plain.refused?.[0]?.why || '')
+      && vr2.finished === true && FAL.stats.videoSubmits === sv + 3 && r2.status === 'done' && r2.outputs.length === 2 && !r2.takes_failed && !r2.retaking && Math.abs(r2.actual_cost_usd - 0.576) < 1e-9
+      && vcost.length === 2 && vcost.some(x => x.id === v.id && Math.abs(x.usd - 0.288) < 1e-9) && vcost.some(x => x.id === `${v.id}#0` && x.take === 0 && Math.abs(x.usd - 0.288) < 1e-9)
+      && job.takes.every(t => t.status === 'done' && t.usd === 0.288 && t.seconds === 6 && t.fps > 0 && t.duration_ms === 6000), { r1: [r1.status, r1.outputs, r1.takes_failed], plain: plain.refused, r2: [r2.status, r2.outputs, r2.actual_cost_usd], vcost, run: vr.results, rt: vr2.results });
+    const tk = await callT('takes_get', { request: v.id });
+    check('the video outputs are takes (D6): takes_get {request} = 2 video takes #0, #1 of 6000 ms with an fps, from the runner, linked to shot s4-chorus',
+      tk.takes?.length === 2 && tk.takes.every(t => t.kind === 'video' && t.duration_ms === 6000 && t.fps > 0 && t.source === 'runner') && tk.takes.map(t => t.take).join(',') === '0,1'
+      && JSON.parse(fs.readFileSync(path.join(D, 'media.json'), 'utf8')).items.filter(m => m.request === v.id).every(m => (m.shots || []).includes('s4-chorus') && m.kind === 'clip'), tk.takes?.map(t => [t.take, t.kind, t.duration_ms, t.fps]) || tk.error);
+    // motion control: the reference video goes to fal storage; a clip longer than the approved seconds is refused
+    const mc = await callT('request_create', { kind: 'motion', target: 'shot:s3-grid', prompt: 'mcp video: empty studio at dawn', video: { model: 'klingmc', start: 'media/still/bo_body.jpg', ref_video: 'media/clip/C1_0.mp4', seconds: 3 } });
+    // a 5 s reference clip with 3 s approved: the output would be 5 s
+    fs.writeFileSync(path.join(D, 'media', 'clip', 'long5.mp4'), (await import('../tools/mock-fal.mjs')).placeholderMp4(5));
+    const mcShort = await callT('request_create', { kind: 'motion', prompt: 'mcp video: too short', video: { model: 'klingmc', start: 'media/still/bo_body.jpg', ref_video: 'media/clip/long5.mp4', seconds: 3 } });
+    await approveP(mc.id); await approveP(mcShort.id);
+    const mcd = await callT('request_run', { ids: [mcShort.id], dry_run: true });
+    const up0 = FAL.uploadsMeta.length;
+    const mr = await callT('request_run', { ids: [mc.id], wait: true }), mreq = reqOf(mc.id), mb = FAL.bodies.at(-1);
+    check('motion control: refs = [still, reference video], $0.168/s x 3 s = $0.504; the reference video uploaded to fal storage as video/mp4 and sent as video_url (character_orientation video); done with an .mp4; a reference clip longer than the approved seconds is refused (fal bills the output seconds)',
+      mc.refs?.join(',') === 'media/still/bo_body.jpg,media/clip/C1_0.mp4' && Math.abs(mc.est_cost - 0.504) < 1e-9 && mreq.status === 'done' && /\.mp4$/.test(mreq.outputs[0]) && mb.endpoint === 'fal-ai/kling-video/v3/pro/motion-control'
+      && FAL.uploadsMeta.slice(up0).some(u => u.content_type === 'video/mp4' && u.file_url === mb.body.video_url) && mb.body.character_orientation === 'video' && mcd.items?.[0]?.ok === false && /reference video is 5\.0 s but 3 s/.test(mcd.items[0].why), { mc: mc.error || mc.refs, run: mr.results, why: mcd.items?.[0]?.why });
+  }
+
   // the key never appears: not in any file of the project / media base, any tool response, or the server log
   const leaks = walk(TMP).filter(fl => { try { return fs.readFileSync(path.join(TMP, fl)).includes(FAL_KEY); } catch (er) { return false; } });
   check('the fal key never appears in a file (job.json, requests, costs, media, settings), a tool response or the server log', !leaks.length && !texts.some(t => t.includes(FAL_KEY)) && !srvLog.includes(FAL_KEY) && texts.length > 10, { leaks, responses: texts.length });
