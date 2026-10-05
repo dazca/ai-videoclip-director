@@ -72,8 +72,8 @@ mcp.registerTool('timeline_query', {
 
 // ------------------------------------------------------------------ media
 mcp.registerTool('media_list', {
-  title: 'List media', description: 'The media index (every generated or imported file): {id, path, kind, label, entities, shots, take, job, status used/picked/unused/private, private, duration_ms, w, h, thumb, cost_usd}. Filters: kind (render, clip, still, avatar, sheet, variation, motion, dancer, contact, audio, ref…), entity id, status, shot id, q (text in id/label/path/job). Paged (limit, offset).',
-  inputSchema: { project, kind: z.string().optional(), entity: z.string().optional(), status: z.string().optional(), shot: z.string().optional(), q: z.string().optional(),
+  title: 'List media', description: 'The media index (every generated or imported file): {id, path, kind, label, entities, shots, take, job, status used/picked/unused/private, private, duration_ms, w, h, thumb, cost_usd}. Filters: kind (render, clip, still, avatar, sheet, variation, motion, dancer, contact, audio, ref…), entity id, status, shot id, linked ("linked": used by an entity / node / shot / clip use / request / "use as"; "unlinked": not), private, q (text in id/label/path/job). Imported files carry `imported` {by, via, at, from}, a request link `request`, and the director’s "use as" `use_as` [{shot, as: take | start_frame} | {entity, tree, node, as}]. Paged (limit, offset).',
+  inputSchema: { project, kind: z.string().optional(), entity: z.string().optional(), status: z.string().optional(), shot: z.string().optional(), q: z.string().optional(), linked: z.enum(['linked', 'unlinked']).optional(), private: z.boolean().optional(),
     limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).optional() },
 }, wrap((a) => op('media_list', a)));
 mcp.registerTool('media_add', {

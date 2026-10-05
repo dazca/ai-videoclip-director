@@ -801,6 +801,74 @@ try {
       { tpl: tpl.status, tplOther });
   }
 
+  // ---------------------------------------------------------------- D8: importing existing images and video (media_scan / media_import /
+  // media_upload / media_use): paths outside the media roots and traversal refused, the upload size cap, type sniffing, the
+  // private flag never lowered, "use as" and uploads page only. A fake falgen tree under the root (never fal).
+  {
+    const Q = 'sec-d8', QD = path.join(DATA, Q);
+    fs.cpSync(path.join(WB, 'data', 'demo'), QD, { recursive: true, filter: (f) => !f.includes(`${path.sep}.snapshots`) });
+    const { makeFakeFalgen } = await import('./fake-falgen.mjs');
+    makeFakeFalgen(path.join(MB, 'roots', 'ff'));
+    const qop = (name, args, headers) => post(`/api/op/${name}?project=${Q}`, args, headers);
+    const page = { origin: A.base };
+    const OUTR = 'roots/ff/project/gen/out';
+    // a junction (Windows: no admin needed) / a symlink under the root that points outside it
+    let jx = false; try { fs.symlinkSync(path.join(MB, 'outside'), path.join(MB, 'roots', 'jx'), 'junction'); jx = true; } catch (e) { /* not supported here */ }
+    const t1 = await qop('media_scan', { path: 'roots/../outside' }), t2 = await qop('media_scan', { path: 'outside' }), t3 = await qop('media_scan', { path: path.join(MB, 'outside') });
+    const t4 = await qop('media_import', { paths: [path.join(TMP, 'elsewhere', 'plain.png')] }), t5 = await qop('media_import', { paths: ['roots\\..\\outside\\secret.txt'] });
+    const t6 = await qop('media_scan', { path: 'C:/Windows/System32' }), t7 = jx ? await qop('media_scan', { path: 'roots/jx' }) : { status: 403 };
+    const t8 = await qop('media_import', { items: [{ path: 'roots/./a.txt' }] }), t9 = await qop('media_scan', { path: 'roots/ff/project/gen/out/A1/job.json/..' });
+    check('D8 path traversal: media_scan / media_import refuse ".." and "." paths and backslashes (400), paths outside the media roots, absolute paths elsewhere and a junction under the root pointing outside it (403); nothing is registered',
+      t1.status === 400 && t2.status === 403 && t3.status === 403 && t4.status === 403 && t5.status === 400 && t6.status === 403 && t7.status === 403 && t8.status === 400 && t9.status === 400
+      && !JSON.stringify(JSON.parse(fs.readFileSync(path.join(QD, 'media.json'), 'utf8'))).includes('outside'),
+      { t1: t1.status, t2: t2.status, t3: t3.status, t4: t4.status, t5: t5.status, t6: t6.status, t7: t7.status, jx, t8: t8.status, t9: t9.status });
+    // the upload size cap: declared over 200 MB, more bytes than declared, a body over the op's limit
+    const big = await qop('media_upload', { upload: 'cap0000001', name: 'big.mp4', size: 200 * 1024 * 1024 + 1, offset: 0, data: tinyPngB64(2, 2) }, page);
+    const pngB = Buffer.from(tinyPngB64(16, 16), 'base64');
+    const over = await qop('media_upload', { upload: 'cap0000002', name: 'o.png', size: 10, offset: 0, data: pngB.toString('base64'), done: true }, page);
+    const body = await qop('media_upload', { upload: 'cap0000003', name: 'b.png', size: 9e6, offset: 0, data: 'A'.repeat(9.5e6) }, page);
+    const ok200 = await qop('media_upload', { upload: 'cap0000004', name: 'fine.png', size: pngB.length, offset: 0, data: pngB.toString('base64'), done: true }, page);
+    check('D8 upload size cap: a file declared over 200 MB (413), more bytes than declared (413, the partial file removed), a body over the upload limit (413); a small real PNG is accepted',
+      big.status === 413 && /200 MB/.test(big.body?.error || '') && over.status === 413 && !fs.existsSync(path.join(QD, '.uploads', 'cap0000002.part')) && body.status === 413 && ok200.status === 200 && ok200.body?.media?.path === 'media/still/fine.png',
+      { big: big.status, over: over.status, body: body.status, ok: ok200.status, path: ok200.body?.media?.path });
+    // type sniffing: an HTML file named .png, a text file, an audio-only MP4 brand: refused by the upload and the import
+    const html = Buffer.from('<html><script>alert(1)</script></html>').toString('base64');
+    const s1 = await qop('media_upload', { upload: 'snf0000001', name: 'x.png', size: 38, offset: 0, data: html, done: true }, page);
+    const m4a = Buffer.alloc(32); m4a.writeUInt32BE(24, 0); m4a.write('ftypM4A ', 4, 'latin1');
+    const s2 = await qop('media_upload', { upload: 'snf0000002', name: 'song.mp4', size: 32, offset: 0, data: m4a.toString('base64'), done: true }, page);
+    const s3 = await qop('media_import', { paths: [`${OUTR}/A1/fake.png`] }), s4 = await qop('media_import', { paths: ['roots/a.txt'] });
+    const s5 = await qop('media_scan', { path: `${OUTR}/A1` });
+    check('D8 type sniffing: a script named .png and an audio-only MP4 are refused on upload (415, nothing written), a text file named .png and a .txt on import (415); the scan skips them',
+      s1.status === 415 && s2.status === 415 && s3.status === 415 && s4.status === 415 && s5.body?.skipped?.some(x => /fake\.png$/.test(x.path)) && s5.body.files.every(f => f.type === 'image')
+      && !fs.readdirSync(path.join(QD, 'media'), { recursive: true }).some(f => /^still[\\/]x\.|song\./.test(String(f))),
+      { s1: s1.status, s2: s2.status, s3: s3.status, s4: s4.status, skipped: s5.body?.skipped?.map(x => x.why) });
+    // the private flag: never lowered (a PRIVATE path, a file flagged private), a private upload lands under private/
+    const p1 = await qop('media_import', { paths: ['roots/private/face.png'], private: false });
+    const p2 = await qop('media_import', { paths: [`${OUTR}/A1/A1_0_0.png`], private: true });
+    const p3 = await qop('media_import', { paths: [`${OUTR}/A1/A1_0_0.png`], private: false });
+    const p4 = await qop('media_import', { paths: ['roots/private/face.png'] });
+    const pu = await qop('media_upload', { upload: 'prv0000001', name: 'me.png', size: pngB.length, offset: 0, data: pngB.toString('base64'), done: true, private: true }, page);
+    const MQ = JSON.parse(fs.readFileSync(path.join(QD, 'media.json'), 'utf8')).items;
+    const fl = MQ.find(m => m.path === `${OUTR}/A1/A1_0_0.png`), fc = MQ.find(m => m.path === 'roots/private/face.png');
+    const localFile = await get('127.0.0.1', A.port, `/data/${Q}/${pu.body?.media?.path}`, {});
+    check('D8 private: private:false on a PRIVATE path or a file flagged private is refused (403); private:true sticks (private thumbnail); a private upload goes to private/<kind>/ and is flagged',
+      p1.status === 403 && p2.status === 200 && fl?.private === true && /priv_/.test(fl.thumb || '') && p3.status === 403 && p4.status === 200 && fc?.private === true
+      && pu.status === 200 && /^private\/still\//.test(pu.body?.media?.path || '') && pu.body.media.private === true && localFile.status === 200,
+      { p1: p1.status, p2: p2.status, fl: fl && { private: fl.private, thumb: fl.thumb }, p3: p3.status, p4: p4.status, pu: pu.body?.media?.path });
+    // "use as" and uploads are the director's: the agent surface (no Origin, or claiming via "page") and offline mode get 403
+    const u1 = await qop('media_use', { media: fl.id, as: 'identity', id: 'ada' });
+    const u2 = await qop('media_use', { media: fl.id, as: 'start_frame', shot: 's1-intro', via: 'page' });
+    const u3 = await qop('media_upload', { upload: 'agt0000001', name: 'a.png', size: pngB.length, offset: 0, data: pngB.toString('base64'), done: true, via: 'page' });
+    let u4 = null; try { S.ops.media_use(Q, { media: fl.id, as: 'take', shot: 's1-intro' }); } catch (e) { u4 = e.code; }
+    let u5 = null; try { S.ops.media_upload(Q, { upload: 'agt0000002', name: 'a.png', size: 4, offset: 0, data: 'AAAA' }); } catch (e) { u5 = e.code; }
+    const ent = JSON.parse(fs.readFileSync(path.join(QD, 'entities', 'characters', 'ada.json'), 'utf8'));
+    const u6 = await qop('media_use', { media: fl.id, as: 'take', shot: 's1-intro' }, page);
+    check('D8 an agent cannot "use as" (a node, a take, a start frame) nor upload: 403 over HTTP without the page\'s Origin (even claiming via "page") and offline; no node made; the page can',
+      u1.status === 403 && u2.status === 403 && u3.status === 403 && u4 === 403 && u5 === 403 && !(ent.iter?.nodes || []).some(n => n.image === fl.path) && u6.status === 200 && /director/.test(JSON.stringify(u6.body?.links?.takes || [])),
+      { u1: u1.status, u2: u2.status, u3: u3.status, u4, u5, u6: u6.status });
+    if (jx) try { fs.rmSync(path.join(MB, 'roots', 'jx'), { force: true, recursive: false }); } catch (e) { try { fs.unlinkSync(path.join(MB, 'roots', 'jx')); } catch (er) { /* left in the scratch folder */ } }
+  }
+
   // ---------------------------------------------------------------- browser: XSS payloads stay inert, the page and the dock work under the CSP
   let puppeteer, exe;
   try { puppeteer = createRequire(path.join(WB, 'package.json'))('puppeteer-core'); exe = (await import('./chrome.mjs')).findChrome(); } catch (e) { /* no browser */ }
