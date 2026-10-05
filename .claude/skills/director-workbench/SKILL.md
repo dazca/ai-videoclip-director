@@ -138,12 +138,14 @@ your times (`t0` / `t1` ms on scenes, beats, shots) are what places them, so kee
    with a message; nothing is overwritten; `lyrics_versions` lists and diffs, `restore` copies an old one back).
    A new song with timed lyrics: `node importers/new_project.mjs <id> --song <file> --lyrics <file>` (LRC timings are
    used; plain lyrics are spread evenly and marked `timing: "estimated"`: fix them before cutting). Sections, bars and
-   lyric lines are the grid every later decision snaps to.
+   lyric lines are the grid every later decision snaps to. Add the song's **named sync points** with `event_add` (a Stop,
+   a spoken line, a voice change, a cue: `her_hi_there`, `duet_5_both`); they are proposed until the director accepts
+   them (`events_get` lists them, accepted or not, and what is anchored to each).
 2. **Script** (stage 2, `scenes.json`): start from the **intake** (`intake_get`): ask the open questions in the
    conversation (mark them `intake_answer` `asked_in_chat: true`) and record the director's own words with
    `intake_answer` (`by: "director"` when you relay them). Then draft **scenes** with `scenes_update` (each call is a
    NEW version with a message): every scene bound to song time (`t0` < `t1`, `snap: "lines"` / `"bars"` /
-   `"sections"`), a title, a visual description, timed **beats** inside it, and sketch ids. `script_get` shows the
+   `"sections"` / `"events"`; a boundary that must land on a named event: `anchors: {t0?, t1?: "<event id>"}`), a title, a visual description, timed **beats** inside it, and sketch ids. `script_get` shows the
    scenes with their lyric lines, the **gaps** (unscripted ranges with the lines in them), coverage, notes and
    `asks_for_agent`; an ask of kind `fill_gaps` means cover every listed gap, then `scene_note_resolve` it with a
    reply. Work by notes when the director should decide (`scene_note_add`, `reply_to` in threads); set a scene
@@ -191,7 +193,8 @@ your times (`t0` / `t1` ms on scenes, beats, shots) are what places them, so kee
 5. **Storyboard** (stage 6, the page's Storyboard stage; `storyboard.json`, read as v1 from `shots.json` until the
    first write): `storyboard_get` gives the scenes in song time with their beats, what each needs (the breakdown's
    assets and the variant the scene uses) and their shots. Cut each scene into shots from its beats (one shot per beat
-   or group of beats) with `shots_update` (a new version each time; `snap: "beats"`; the shots of a scene tile it):
+   or group of beats) with `shots_update` (a new version each time; `snap: "beats"`, or `"events"` / `anchors` for a cut
+   that lands on a named event such as a Stop; the shots of a scene tile it):
    kind (wide / medium / close / insert / performance / xp-desktop), the action, camera / motion, `cast` / `locations`
    / `props` as entity ids, `variants` only where a shot differs from the scene's pick, `gen` still or video. Draw a
    frame where it helps (`sketch_save` with `links.shots`, then `sketch` on the shot). Status `review` asks the
@@ -256,6 +259,17 @@ your times (`t0` / `t1` ms on scenes, beats, shots) are what places them, so kee
    approves or requests changes; answer their notes with `note_resolve` + reply.
 9. **Render**: the final render is a media item of kind `render` and the song's `audio.render`; snapshot first.
 
+## Named sync points and the re-time after the take
+
+The first film cut on named events, and after the song take was chosen "measured where each Stop actually landed and
+re-timed the table to it". In the workbench: `events_get` (the events, `anchored` boundaries, the `pending` re-time when
+the director measured an event elsewhere), `event_add` (proposed events), anchors on scenes / shots (`scenes_update` /
+`shots_update` `anchors` or `snap: "events"`), and `retime_propose {moves: [{event, to}], why}` once you measured where
+the events landed in the new take (stems, the beat grid): it returns every boundary that would move (old -> new) and
+moves nothing. Tell the director, `ui_focus` the timeline; they apply it in the page (Timeline › Re-time after the
+take…: one undoable change, a new scenes and storyboard version). Accepting events and applying / undoing a re-time are
+theirs (403 to you).
+
 ## Never
 
 - Never call a paid API (image, video, voice, music) without an APPROVED request whose `est_cost` fits the cap.
@@ -286,6 +300,8 @@ your times (`t0` / `t1` ms on scenes, beats, shots) are what places them, so kee
 - Never choose keep / branch / revert, approve an identity, a base, a look or a variant, pick the variant a scene
   uses, or write an asset's `iter` / `base` / `uses` by hand: those are the director's, in the page. Register only
   outputs of approved, done requests.
+- Never accept your own events, apply a re-time or write `events.json` by hand: `event_add` / `retime_propose` propose,
+  the director decides in the page.
 - Never approve or lock a shot (`shots_update` refuses it), never rewrite `storyboard.json` by hand, and never create a
   request a shot does not need: `gaps_get` says what is missing and what it costs.
 

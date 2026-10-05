@@ -469,6 +469,9 @@ http.createServer(async (req, res) => {
         if (name === 'media_upload' || name === 'media_use' || name === 'media_import') body.via = fromPage ? 'page' : 'agent';
         // D4: approving / reviewing a batch and importing the job books are the director's (page only); a plan's provenance
         if (name === 'batch_act' || name === 'jobbooks_import' || name === 'waves_plan') body.via = fromPage ? 'page' : 'agent';
+        // E1: changing / accepting the named events and applying / undoing a re-time are the director's (page only); an agent's
+        // event and re-time are proposals
+        if (name === 'events_act' || name === 'retime_apply' || name === 'retime_undo' || name === 'event_add' || name === 'retime_propose') body.via = fromPage ? 'page' : 'agent';
         if (!fromPage) S.lockGate(project, name, body);   // a locked project refuses every agent write, proposals included
         delete body.import_ok;   // only a local script calling lib/store.mjs directly may import approved looks
         try { return json(res, 200, await S.ops[name](project, body)); }
@@ -518,7 +521,7 @@ http.createServer(async (req, res) => {
       // notes.json: the old note stores are migrated into it (v2) on its first read
       if (m[2] === 'notes.json' && fs.existsSync(path.join(pd, 'song.json'))) { try { S.notesDoc(m[1]); } catch (e) { /* a broken file is served as it is */ } }
       // a writable state file (or revisions.json / proposals.json / takes.json / checks.json, the server's) that does not exist yet reads as null (the page uses its default)
-      if ((S.WRITABLE.has(m[2]) || m[2] === 'revisions.json' || m[2] === 'proposals.json' || m[2] === 'takes.json' || m[2] === 'surfaces.json' || m[2] === 'checks.json') && !fs.existsSync(f)) return json(res, 200, null);
+      if ((S.WRITABLE.has(m[2]) || m[2] === 'revisions.json' || m[2] === 'proposals.json' || m[2] === 'takes.json' || m[2] === 'surfaces.json' || m[2] === 'checks.json' || m[2] === 'events.json') && !fs.existsSync(f)) return json(res, 200, null);
       // a remote (LAN) client reads the project's JSON without private paths or items flagged private (media.json,
       // entities with private refs and iteration nodes, requests built on private photos)
       if (!isLocal(req) && /\.json$/i.test(f) && fs.existsSync(f)) {

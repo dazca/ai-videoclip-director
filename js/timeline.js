@@ -5,6 +5,7 @@
 import { buildWarp, upperBound } from './warp.js';
 import { store, prefs } from './store.js';
 import { makeColumns } from './columns.js';
+import { eventsColumn } from './eventscol.js';   // E1: the named events column (replaces the importer's read-only one)
 import { Player } from './player.js';
 
 const STRIP_W = 10;            // text columns narrower than this render as a tick strip
@@ -49,7 +50,7 @@ export class Timeline {
     this.root.appendChild(this.hdrRestore);
     this.applyHeaderMode();
 
-    this.defs = makeColumns(this, store);
+    this.defs = makeColumns(this, store).map(d => (d.id === 'events' ? eventsColumn(this, store) : d));
     this.cols = this.defs.map((d) => {
       const L = this.layout[d.id] || {};
       const c = { def: d, id: d.id, w: L.w ?? d.w, hidden: L.hidden ?? !!d.hidden, collapsed: L.collapsed ?? false,
@@ -77,7 +78,7 @@ export class Timeline {
 
   onData(what) {
     if (what === 'all') { const t = this.timeAtRead(); this.destroy(); this.build(); this.scrollToTime(t); return; }
-    if (what === 'approvals' || what === 'notes' || what === 'scenes' || what === 'breakdown' || what === 'board') {
+    if (what === 'approvals' || what === 'notes' || what === 'scenes' || what === 'breakdown' || what === 'board' || what === 'events') {
       for (const c of this.cols) if (c.def.refresh && c.def.refresh(c, what)) c.dirty = true;
       this.relayout({});
     }

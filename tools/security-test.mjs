@@ -1305,6 +1305,71 @@ try {
   }
   // ==================== D7 identity checks + D2 constants: END ====================
 
+  // ==================== E1 named events and the re-time: BEGIN (a separate section) ====================
+  // events.json is the server's (not a page save); accepting / changing the events and applying / undoing a re-time are page
+  // acts (S9: the page token + this server's Origin + Sec-Fetch-Site: same-origin, never the agent token); an agent only proposes
+  // (event_add, retime_propose); event names and notes render as text (the events column, the event dialog, the re-time dialog)
+  {
+    const raw = (p, body, headers) => fetch(A.base + p, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) }).then(async r => ({ status: r.status, client: r.headers.get('x-wb-client'), body: await r.json().catch(() => null) }));
+    const AGENT_TOKEN = fs.readFileSync(path.join(DATA, '.wb-agent-token'), 'utf8').trim();
+    const H = {
+      curl: { 'x-wb-token': A.token },                                                        // the page token, no Origin
+      agentTok: { 'x-wb-agent-token': AGENT_TOKEN },                                          // the MCP server
+      noSfs: { 'x-wb-token': A.token, origin: A.base },                                       // the Origin without Sec-Fetch-Site
+      sfsOnly: { 'x-wb-token': A.token, 'sec-fetch-site': 'same-origin' },                    // Sec-Fetch-Site without the Origin
+      cross: { 'x-wb-token': A.token, origin: A.base, 'sec-fetch-site': 'cross-site' },
+      agentForged: { 'x-wb-agent-token': AGENT_TOKEN, 'x-wb-token': A.token, origin: A.base, 'sec-fetch-site': 'same-origin' },   // the agent token wins
+    };
+    const page = { 'x-wb-token': A.token, origin: A.base, 'sec-fetch-site': 'same-origin' };
+    const X = (n) => `<img src=x onerror="window.__evx=${n}">`;
+    // an agent's proposed event (hostile name / note), an anchor, the director's measured time, an agent's re-time proposal
+    const ea = await op('event_add', { id: 'sec_ev', name: X(1), t: 9000, kind: 'stop', note: X(2) });
+    await op('scenes_update', { upsert: [{ id: 'sc02', anchors: { t1: 'stop_outro' } }], message: 'e1 sec: anchor' });
+    const meas = await raw(`/api/op/events_act?project=${P}`, { act: 'measure', id: 'stop_outro', measured: 18300 }, page);
+    const rp = await op('retime_propose', { moves: [{ event: 'stop_outro', to: 18300 }], why: X(3) });
+    const before = ['events.json', 'scenes.json', 'storyboard.json'].map(f => readP(f).rev);
+    const acts = {
+      accept: ['events_act', { act: 'accept', id: 'sec_ev' }], add: ['events_act', { act: 'add', name: 'x', t: 1000, kind: 'stop' }], measure: ['events_act', { act: 'measure', id: 'stop_outro', measured: 19000 }],
+      remove: ['events_act', { act: 'remove', id: 'drop_chorus' }], import: ['events_act', { act: 'import', events: [{ id: 'zz', t: 1, kind: 'stop' }] }], dismiss_rt: ['events_act', { act: 'retime_dismiss', retime: rp.body?.retime }],
+      apply_rt: ['retime_apply', { retime: rp.body?.retime }], apply_moves: ['retime_apply', { moves: [{ event: 'stop_outro', to: 18300 }] }], apply_measured: ['retime_apply', { from_measured: true }], undo: ['retime_undo', { retime: rp.body?.retime }],
+    };
+    const res = {};
+    for (const [k, [name, body]] of Object.entries(acts)) { res[k] = []; for (const h of Object.values(H)) res[k].push((await raw(`/api/op/${name}?project=${P}`, { ...body, via: 'page' }, h)).status); }
+    const off = [];
+    for (const [name, body] of Object.values(acts)) { try { S.ops[name](P, body); off.push(200); } catch (e) { off.push(e.code); } }
+    const after = ['events.json', 'scenes.json', 'storyboard.json'].map(f => readP(f).rev);
+    const noTool = ['events_act', 'retime_apply', 'retime_undo'].every(t => !fs.readFileSync(path.join(WB, 'mcp', 'tools', 'events.mjs'), 'utf8').includes(`registerTool('${t}'`));
+    check('E1: an agent cannot accept, add, measure, remove or import events nor apply, undo or dismiss a re-time: 403 from curl with the page token (no Origin), the agent token, the Origin without Sec-Fetch-Site, Sec-Fetch-Site without the Origin, cross-site, and the agent token with a forged Origin + Sec-Fetch-Site (a claimed via "page" changes nothing); offline 403; no MCP tool; events.json, scenes.json and storyboard.json untouched',
+      ea.status === 200 && ea.body?.event?.status === 'proposed' && rp.status === 200 && meas.status === 200 && Object.values(res).every(a => a.every(s => s === 403)) && off.every(s => s === 403) && noTool && JSON.stringify(before) === JSON.stringify(after),
+      { ea: ea.status, rp: rp.status, meas: meas.status, res, off });
+    const saveEv = await post(`/api/save/events.json?project=${P}`, { base_rev: readP('events.json').rev, data: { ...readP('events.json'), events: readP('events.json').events.map(e => ({ ...e, status: 'accepted' })) } }, { origin: A.base });
+    const pageAcc = await raw(`/api/op/events_act?project=${P}`, { act: 'accept', id: 'sec_ev' }, page);
+    const pageAp = await raw(`/api/op/retime_apply?project=${P}`, { retime: rp.body?.retime }, page);
+    const sc = readP('scenes.json'), s2 = sc.versions.find(v => v.id === sc.current).scenes.find(s => s.id === 'sc02');
+    check('E1: events.json is not a page save (403, even from the page); the page (its Origin + Sec-Fetch-Site) accepts the agent\'s event and applies its re-time (sc02 end -> 18.3 s, stamped director)',
+      saveEv.status === 403 && pageAcc.status === 200 && pageAcc.body?.event?.status === 'accepted' && pageAp.status === 200 && s2?.t1 === 18300 && readP('events.json').retimes.find(r => r.id === rp.body?.retime)?.applied_by === 'director',
+      { saveEv: saveEv.status, pageAcc: pageAcc.status, pageAp: pageAp.status, s2: s2 && [s2.t1, s2.anchors] });
+    const badIds = [(await op('event_add', { id: '../x', name: 'x', t: 1000 })).status, (await op('event_add', { id: 'a"><img', name: 'x', t: 1000 })).status, (await op('retime_propose', { moves: [{ event: '../x', to: 1 }] })).status,
+      (await op('scenes_update', { upsert: [{ id: 'sc02', anchors: { t1: '<img>' } }] })).status, (await op('event_add', { name: 'x', t: -5 })).status];
+    check('E1: ids are checked (an event id with "..", quotes or markup, an anchor that is not an event id, a negative time: 400)', badIds.every(s => s === 400), badIds);
+    if (browser) {
+      const epg = await browser.newPage();
+      await epg.setViewport({ width: 1400, height: 900 });
+      await op('event_add', { id: 'sec_ev2', name: X(4), t: 9500, kind: 'cue', note: X(5) });
+      await raw(`/api/op/events_act?project=${P}`, { act: 'measure', id: 'drop_chorus', measured: 11800 }, page);
+      await epg.goto(`${A.base}/?project=${P}`, { waitUntil: 'domcontentloaded' });
+      await epg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 });
+      await epg.evaluate(() => window.WB.app.show('timeline')); await wait(500);
+      await epg.evaluate(() => window.WB.events.edit('sec_ev2')); await wait(300);
+      await epg.evaluate(() => document.querySelector('.evback')?.remove());
+      await epg.evaluate(() => window.WB.events.openRetime()); await wait(300);
+      const r = await epg.evaluate(() => ({ inert: window.__evx === undefined && !document.querySelector('.col-events img, .evdlg img'), col: document.querySelector('.col-events [data-ev="sec_ev2"]')?.textContent || '' }));
+      check('F02 E1: hostile event names and notes (an agent\'s event, a re-time\'s why) render as text in the events column, the event dialog and the re-time dialog, and never run', r.inert && /onerror/.test(r.col), r);
+      await epg.close();
+    }
+  }
+  // ==================== E1 named events and the re-time: END ====================
+
   // ==================== review #2: S9 (page vs agent), N2-N9, I1 ====================
   {
     const raw = (p, body, headers) => fetch(A.base + p, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) }).then(async r => ({ status: r.status, client: r.headers.get('x-wb-client'), body: await r.json().catch(() => null) }));

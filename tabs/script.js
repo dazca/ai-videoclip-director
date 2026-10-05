@@ -15,6 +15,7 @@ import { menus } from '../core/menus.js';
 import { ui } from '../core/palette.js';
 import * as F from '../js/flow.js';
 import * as SC from '../js/scenes.js';
+import * as EV from '../js/events.js';
 import { NotesColumn } from '../core/notescol.js';
 import { history } from '../core/history.js';
 import { stripHtml, register as registerProposals, offerPrepare } from '../core/proposals.js';
@@ -65,7 +66,7 @@ class Workspace {
     // Time view (core/timemode.js): each scene / gap row on the timeline's axis, its lyric lines and beats at their own times
     this.ta = new TimeAxis({ stage: 'script', scroller: this.$('.sclist'), nc: this.nc, rows: () => this.timeRows(), onApply: () => this.nc.schedule('place'), noSeek: '.sccard' });
     document.addEventListener('wb:timemode', (e) => { if (e.detail.stage === 'script' && !this.typing()) this.render(); });
-    store.on((w) => { if (['scenes', 'all', 'song', 'media', 'proposals'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
+    store.on((w) => { if (['scenes', 'all', 'song', 'media', 'proposals', 'events'].includes(w)) { if (this.typing()) this.pending = true; else this.render(); } });
     this.render();
   }
   get doc() { return store.scenes; }
@@ -161,8 +162,8 @@ class Workspace {
   addSceneHere(t) {
     const dur = this.song.duration_ms; t = Math.max(0, Math.min(dur - 200, Math.round(t ?? this.ctx.timeline?.player.time() ?? 0)));
     const s = this.draft.find(x => x.t0 <= t && t < x.t1);
-    if (!s) { const g = SC.gaps(this.draft, dur, 1).find(([a, b]) => a <= t && t < b); const t0 = SC.snapTime(t, this.song, this.snap); return this.addScene(g ? Math.max(g[0], Math.min(t0, g[1] - 200)) : t0, g ? g[1] : null); }
-    let cut = SC.snapTime(t, this.song, this.snap); if (cut - s.t0 < 200 || s.t1 - cut < 200) cut = t;
+    if (!s) { const g = SC.gaps(this.draft, dur, 1).find(([a, b]) => a <= t && t < b); const t0 = SC.snapTime(t, this.song, this.snap, store.events); return this.addScene(g ? Math.max(g[0], Math.min(t0, g[1] - 200)) : t0, g ? g[1] : null); }
+    let cut = SC.snapTime(t, this.song, this.snap, store.events); if (cut - s.t0 < 200 || s.t1 - cut < 200) cut = t;
     if (cut - s.t0 < 200 || s.t1 - cut < 200) return toast(`${s.id} is too short to split there`);
     const id = SC.nextSceneId(this.doc, this.draft);
     this.undoable(`split ${s.id} at ${fmt(cut, true)}: ${id}`, () => this.edit((d) => {
@@ -181,10 +182,24 @@ class Workspace {
   }
   setTimes(id, t0, t1) {
     const s = this.scene(id), dur = this.song.duration_ms; if (!s) return;
-    t0 = SC.snapTime(t0 ?? s.t0, this.song, this.snap); t1 = SC.snapTime(t1 ?? s.t1, this.song, this.snap);
+    // only the edge being changed snaps (snap "events" also anchors it to the event; an anchored edge moved off its event loses the anchor)
+    t0 = t0 == null ? s.t0 : SC.snapTime(t0, this.song, this.snap, store.events); t1 = t1 == null ? s.t1 : SC.snapTime(t1, this.song, this.snap, store.events);
     t0 = Math.max(0, Math.min(dur, t0)); t1 = Math.max(0, Math.min(dur, t1));
     if (t1 <= t0) { toast('a scene needs from < to'); return this.render(); }
-    this.edit(() => { s.t0 = t0; s.t1 = t1; for (const b of s.beats) b.t = Math.max(t0, Math.min(t1, b.t)); });
+    this.edit(() => { s.t0 = t0; s.t1 = t1; for (const b of s.beats) b.t = Math.max(t0, Math.min(t1, b.t)); EV.reanchor(s, store.events, { snap: this.snap }); });
+  }
+  // anchor an edge to a named event (E1): the edge takes the event's time; '' removes the anchor (the time stays)
+  setAnchor(id, edge, evId) {
+    const s = this.scene(id); if (!s) return;
+    const e = evId ? store.events.find(x => x.id === evId) : null;
+    if (evId && !e) return toast(`no event ${evId}`);
+    const t0 = edge === 't0' && e ? e.t : s.t0, t1 = edge === 't1' && e ? e.t : s.t1;
+    if (t1 <= t0) { toast(`${e.name} is ${edge === 't0' ? 'after the end' : 'before the start'} of ${id}`); return this.render(); }
+    this.undoable(e ? `anchor ${id} ${edge === 't0' ? 'start' : 'end'} to ${e.id}` : `unanchor ${id} ${edge === 't0' ? 'start' : 'end'}`, () => this.edit(() => {
+      s.t0 = t0; s.t1 = t1; for (const b of s.beats) b.t = Math.max(t0, Math.min(t1, b.t));
+      const a = { ...(s.anchors || {}) }; if (e) a[edge] = e.id; else delete a[edge];
+      if (Object.keys(a).length) s.anchors = a; else delete s.anchors;
+    }));
   }
   setStatus(id, status) {
     return store.mutate('scenes.json', (d) => { d.states[id] = { status, by: 'director', via: 'page', at: nowIso() }; }, { label: `scene ${id} ${status}` })
@@ -297,7 +312,7 @@ class Workspace {
     const ver = v ? `<b>${esc(v.id)}</b> <span class="dim">${esc(v.message || '')}${v.created ? ' · ' + when(v.created) : ''} · ${v.via === 'agent' ? 'agent' : esc(v.by || '')}</span>` : '<span class="dim">no version yet</span>';
     this.$('.scbar').innerHTML = `${ver}<span class="dim">· ${this.draft.length} scenes · <span class="${cov >= 0.999 ? 'okc' : 'gapc'}">${Math.round(cov * 100)}% scripted</span>${g.length ? ` · ${g.length} gap${g.length > 1 ? 's' : ''}` : ''}</span><span class="sp"></span>`
       + (this.dirty ? `<span class="unsaved">unsaved edits</span><input class="lymsg" placeholder="what changed (optional)" spellcheck="false" value="${esc(msg)}"><button data-a="save" class="pri" title="Ctrl+Enter: a new version">Save version</button><button data-a="drdiff" title="compare the current version with your edits">diff</button><button data-a="discard">Discard</button>` : '')
-      + `<label class="dim" title="new times snap to the nearest lyric line, downbeat or section bound">snap <select class="scsnap">${SC.SNAPS.map(x => `<option${x === this.snap ? ' selected' : ''}>${x}</option>`).join('')}</select></label><button data-a="addscene" title="a new scene in the first gap">+ scene</button><button data-a="compare" title="side-by-side diff of two versions">Compare…</button>`;
+      + `<label class="dim" title="new times snap to the nearest lyric line, downbeat, section bound or named event (events: the boundary is also anchored to it)">snap <select class="scsnap">${SC.SNAPS.map(x => `<option${x === this.snap ? ' selected' : ''}>${x}</option>`).join('')}</select></label><button data-a="addscene" title="a new scene in the first gap">+ scene</button><button data-a="compare" title="side-by-side diff of two versions">Compare…</button>`;
   }
   renderList() {
     const list = this.$('.sclist'), song = this.song, dur = song.duration_ms;
@@ -323,14 +338,14 @@ class Workspace {
     const head = `<span class="scid">${esc(s.id)}</span>`;
     let card;
     if (!open) {
-      card = `<div class="sccard s-${st}${chg ? ' chg' : ''}" data-a="open" title="click: edit this scene"><div class="sch">${head}<b class="sct">${esc(s.title) || '<i class="dim">untitled</i>'}</b><span class="sctime">${SC.span(s.t0, s.t1)} · ${secs(s.t1 - s.t0)}</span><span class="scst s-${st}" title="${SC.SCENE_STATUS_LABEL[st]}"><i></i>${SC.SCENE_STATUS_LABEL[st]}</span></div>`
+      card = `<div class="sccard s-${st}${chg ? ' chg' : ''}" data-a="open" title="click: edit this scene"><div class="sch">${head}<b class="sct">${esc(s.title) || '<i class="dim">untitled</i>'}</b><span class="sctime">${SC.span(s.t0, s.t1)} · ${secs(s.t1 - s.t0)}${s.anchors ? ` <span class="scanc-m" title="${esc(Object.entries(s.anchors).map(([k, v]) => `${k === 't0' ? 'start' : 'end'} anchored to ${v}`).join(', '))}">⚓${esc(Object.values(s.anchors).join(' ⚓'))}</span>` : ''}</span><span class="scst s-${st}" title="${SC.SCENE_STATUS_LABEL[st]}"><i></i>${SC.SCENE_STATUS_LABEL[st]}</span></div>`
         + (s.text ? `<div class="sctx">${esc(s.text)}</div>` : '')
         + (s.beats.length ? `<div class="scbeats">${s.beats.map(b => `<div data-beat="${esc(b.id)}"><span class="lyt" data-t="${b.t}">${fmt(b.t)}</span>${esc(b.text)}</div>`).join('')}</div>` : '')
         + (sk ? `<div class="scsks">${sk}</div>` : '') + stripHtml({ stage: 'script', kind: 'scene', id: s.id }, { compact: true }) + `</div>`;
     } else {
       const sb = (x, l) => `<button data-st="${x}" class="${st === x ? 'on s-' + x : ''}" title="${x === 'ok' ? 'the director signs this scene off' : ''}">${l}</button>`;
       card = `<div class="sccard open s-${st}${chg ? ' chg' : ''}"><div class="sch">${head}<input class="scin-title" value="${esc(s.title)}" placeholder="title" spellcheck="false"><span class="scst s-${st}"><i></i></span>${sb('draft', 'draft')}${sb('needs_you', 'needs you')}${sb('ok', 'ok')}<b class="sctool" data-a="note" title="note on this scene, in the Notes column (Alt+N)">✉</b><b class="sctool" data-a="del" title="remove the scene from the draft">×</b><b class="sctool" data-a="close" title="close (Esc)">▴</b></div>
-        <div class="scf"><label>from <input class="scin-t0" value="${fmt(s.t0, true)}" spellcheck="false"></label><label>to <input class="scin-t1" value="${fmt(s.t1, true)}" spellcheck="false"></label><span class="dim">${secs(s.t1 - s.t0)} · ${s.line_ids.length} line${s.line_ids.length === 1 ? '' : 's'} · snap ${esc(this.snap)}</span><a data-a="t0play" title="set from to the playhead">from = playhead</a><a data-a="t1play" title="set to to the playhead">to = playhead</a></div>
+        <div class="scf"><label>from <input class="scin-t0" value="${fmt(s.t0, true)}" spellcheck="false"></label>${EV.anchorSelect(s, 't0', store.events, esc, 'scanc')}<label>to <input class="scin-t1" value="${fmt(s.t1, true)}" spellcheck="false"></label>${EV.anchorSelect(s, 't1', store.events, esc, 'scanc')}<span class="dim">${secs(s.t1 - s.t0)} · ${s.line_ids.length} line${s.line_ids.length === 1 ? '' : 's'} · snap ${esc(this.snap)}</span><a data-a="t0play" title="set from to the playhead">from = playhead</a><a data-a="t1play" title="set to to the playhead">to = playhead</a></div>
         <textarea class="scin-text" rows="3" placeholder="what happens: the visual description (who, where, action, camera, mood)" spellcheck="false">${esc(s.text)}</textarea>
         <div class="scbh">beats <a data-a="addbeat">+ beat</a></div>
         ${s.beats.map(b => `<div class="scbr" data-beat="${esc(b.id)}"><input class="scin-bt" value="${fmt(b.t, true)}" spellcheck="false" title="time inside the scene"><input class="scin-btx" value="${esc(b.text)}" placeholder="action at this moment" spellcheck="false"><b data-a="delbeat" title="remove">×</b></div>`).join('')}
@@ -435,6 +450,7 @@ class Workspace {
       if (t.matches('.scsnap')) { this.snap = t.value; prefs.set('scriptSnap', t.value); return this.renderList(); }
       if (t.matches('.scq textarea')) { const k = t.closest('[data-q]').dataset.q; if ((this.doc.intake[k]?.text || '') !== t.value) this.setAnswer(k, t.value.trim()); return; }
       const sid = t.closest('.scrow')?.dataset.scene, s = sid && this.scene(sid); if (!s) return;
+      if (t.matches('.scanc')) return this.setAnchor(sid, t.dataset.edge, t.value);
       if (t.matches('.scin-t0, .scin-t1')) { const v = parseT(t.value); if (v == null) { toast('time: m:ss.mmm or seconds'); return this.render(); } return t.matches('.scin-t0') ? this.setTimes(sid, v, null) : this.setTimes(sid, null, v); }
       if (t.matches('.scin-bt')) {
         const b = s.beats.find(x => x.id === t.closest('[data-beat]').dataset.beat), v = parseT(t.value);

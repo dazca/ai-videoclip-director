@@ -3,7 +3,8 @@
 //
 // scenes.json  {rev, current: "v3", versions: [{id, n, created, by, via, message, from?, scenes: [Scene]}],
 //               states: {<scene id>: {status, by, via, at}}, notes: [Note], intake: {<question id>: Answer}}
-//   Scene   {id "sc03", t0, t1, title, text, line_ids[], beats: [{id "b1", t, text}], sketches: [sketch ids]}
+//   Scene   {id "sc03", t0, t1, title, text, line_ids[], beats: [{id "b1", t, text}], sketches: [sketch ids],
+//            anchors?: {t0?: event id, t1?: event id}}   anchors: the boundary follows a named event (js/events.js, E1)
 //           t0 < t1 are integer ms of the song; beats lie inside [t0, t1]; line_ids = the song.json lines that start
 //           inside the scene; sketches name files in sketches/<id>.json|.png|.mask.png (see lib/store.mjs sketch_*)
 //   states  per-scene status outside the versions: draft | needs_you | ok; only the page sets ok (the director)
@@ -13,6 +14,7 @@
 //   A version is immutable: a save appends one and moves `current`; a restore appends a copy. A project without the
 //   file reads as v1 derived from the old script.json (its `stages` become scenes, its `lines` their beats), so a
 //   project scripted before the guided flow opens with its script; script.json itself is never rewritten.
+import { snapToEvent, anchorsOf, checkAnchors, settleAnchors } from './events.js';
 export const INTAKE = [
   { id: 'mood', q: 'Genre and mood', hint: 'e.g. dream-pop, melancholic but warm; what should it feel like' },
   { id: 'kind', q: 'Story, performance or concept?', hint: 'or a mix: which one carries the video' },
@@ -28,7 +30,7 @@ export const SCENE_STATUSES = ['draft', 'needs_you', 'ok'];
 export const SCENE_STATUS_LABEL = { draft: 'draft', needs_you: 'needs you', ok: 'ok' };
 export const SKETCH_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 export const SCENE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
-export const SNAPS = ['off', 'lines', 'bars', 'sections'];
+export const SNAPS = ['off', 'lines', 'bars', 'sections', 'events'];
 
 const clock = (ms) => { const s = Math.max(0, ms) / 1000, m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(1).padStart(4, '0')}`; };
 export const span = (a, b) => `${clock(a)}–${clock(b)}`;
@@ -39,9 +41,10 @@ const maxN = (list, re) => list.reduce((m, x) => Math.max(m, Number(re.exec(Stri
 // the song lines that start inside [t0, t1)
 export const linesIn = (song, t0, t1) => (song?.lines || []).filter(l => l.t0 >= t0 && l.t0 < t1);
 // nearest boundary of the given kind (lines: line starts and ends + section bounds; bars: downbeats; sections: section
-// bounds), always including 0 and the end of the song
-export function snapTime(t, song, mode) {
+// bounds; events: the named events (js/events.js), given as `events`), always including 0 and the end of the song
+export function snapTime(t, song, mode, events) {
   if (!mode || mode === 'off' || !song) return Math.round(t);
+  if (mode === 'events') return snapToEvent(t, song, events || []).t;
   const dur = song.duration_ms || 0, secs = (song.sections || []).flatMap(s => [s.t0, s.t1]);
   const c = mode === 'lines' ? [...(song.lines || []).flatMap(l => [l.t0, l.t1]), ...secs] : mode === 'bars' ? (song.grid?.downbeats || []) : secs;
   let best = Math.round(t), d = Infinity;
@@ -99,12 +102,16 @@ export const nextNoteId = (doc) => `sn${String(maxN(doc?.notes || [], /^sn(\d+)$
 
 // a scene from the page or an agent -> the stored shape (ints, strings, sorted beats, line ids from the song); throws
 // a message on what cannot be fixed
-export function cleanScene(s, song, { snap } = {}) {
+// with `events` (the named events) an anchored edge takes its event's time and snap "events" anchors the edges it snaps
+// (warnings into `warnings`); without them the anchors are kept as given
+export function cleanScene(s, song, { snap, events, warnings } = {}) {
   if (!s || typeof s !== 'object') throw new Error('a scene must be an object');
   if (!SCENE_ID.test(String(s.id || ''))) throw new Error(`scene id "${s.id}": letters, digits, _ and - (up to 40)`);
   const dur = song?.duration_ms || Infinity;
-  let t0 = num(s.t0), t1 = num(s.t1);
-  if (snap && snap !== 'off') { t0 = snapTime(t0, song, snap); t1 = snapTime(t1, song, snap); }
+  let t0 = num(s.t0), t1 = num(s.t1), anchors = anchorsOf(s);
+  checkAnchors(s.anchors, `scene ${s.id}`);
+  if (events) { const x = { t0, t1, ...(anchors ? { anchors } : {}) }; const w = settleAnchors(x, events, { snap, song, what: `scene ${s.id}` }); warnings?.push(...w); ({ t0, t1 } = x); anchors = x.anchors || null; if (snap === 'events') snap = null; }
+  if (snap && snap !== 'off') { if (!anchors?.t0) t0 = snapTime(t0, song, snap); if (!anchors?.t1) t1 = snapTime(t1, song, snap); }
   if (!(t0 >= 0 && t1 > t0 && t1 <= dur)) throw new Error(`scene ${s.id}: needs 0 <= t0 < t1 <= ${dur} ms (got ${s.t0}, ${s.t1})`);
   const beats = (Array.isArray(s.beats) ? s.beats : []).map((b, i) => {
     const t = num(b?.t);
@@ -116,7 +123,7 @@ export function cleanScene(s, song, { snap } = {}) {
   const sketches = [...new Set((Array.isArray(s.sketches) ? s.sketches : []).map(String))];
   for (const k of sketches) if (!SKETCH_ID.test(k)) throw new Error(`scene ${s.id}: sketch id "${k}" (lower-case letters, digits, _ and -)`);
   const lines = song?.lines ? linesIn(song, t0, t1).map(l => l.id) : (Array.isArray(s.line_ids) ? s.line_ids.map(String) : []);
-  return { id: String(s.id), t0, t1, title: String(s.title ?? '').slice(0, 300), text: String(s.text ?? '').slice(0, 20000), line_ids: lines, beats, sketches };
+  return { id: String(s.id), t0, t1, title: String(s.title ?? '').slice(0, 300), text: String(s.text ?? '').slice(0, 20000), line_ids: lines, beats, sketches, ...(anchors ? { anchors } : {}) };
 }
 // a scenes.json from the page or an agent: the shape the tools rely on (throws a message on a bad file)
 export function checkScenes(d) {
@@ -134,6 +141,7 @@ export function checkScenes(d) {
       if (typeof s.title !== 'string' || typeof s.text !== 'string' || !Array.isArray(s.beats) || !Array.isArray(s.sketches)) throw new Error(`scenes.json: ${v.id}/${s.id}: title, text, beats[], sketches[] expected`);
       for (const b of s.beats) if (!b || typeof b.id !== 'string' || !Number.isFinite(b.t) || typeof b.text !== 'string') throw new Error(`scenes.json: ${v.id}/${s.id}: every beat needs id, t, text`);
       for (const k of s.sketches) if (typeof k !== 'string' || !SKETCH_ID.test(k)) throw new Error(`scenes.json: ${v.id}/${s.id}: bad sketch id`);
+      checkAnchors(s.anchors, `scenes.json: ${v.id}/${s.id}`);
     }
   }
   if (d.versions.length && !ids.has(d.current)) throw new Error('scenes.json: current must name a version');

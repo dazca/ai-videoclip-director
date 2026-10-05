@@ -38,6 +38,7 @@ import './tools/batches.mjs';      // D4: batches_get, waves_propose (approving 
 import './tools/media.mjs';        // D8: media_scan, media_import (uploads and "use as" are the page's)
 import './tools/checks.mjs';       // D7: identity checks (check_add, checks_get; never an approval or a pick)
 import './tools/composition.mjs';  // E9: composition_export (the picks as edl.json for the composition; writes only that file)
+import './tools/events.mjs';       // E1: named sync points (events_get, event_add, retime_propose; accepting and applying are the page's)
 
 // ------------------------------------------------------------------ resources: docs + raw project files
 const doc = (f) => { try { return fs.readFileSync(path.join(S.WB_DIR, f), 'utf8'); } catch (e) { return `(${f} not found)`; } };
