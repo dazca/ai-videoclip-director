@@ -142,12 +142,22 @@ S.runEvents.on('run', (m) => send(m, m.project));
 
 // ------------------------------------------------------------------ live UI channel: an agent asks the open page to show something
 const acks = new Map();   // ui id -> {n, done}
+const pendingUi = new Map();   // project -> {cmd, at}: a ui_focus sent while no page was open, shown by the next page that opens
+const PENDING_UI_MS = 2 * 3600 * 1000;
+function flushPendingUi(c) {
+  const x = c.project && pendingUi.get(c.project); if (!x) return;
+  pendingUi.delete(c.project);
+  if (Date.now() - x.at > PENDING_UI_MS) return;
+  c.res.write(`data: ${JSON.stringify({ project: c.project, ui: { ...x.cmd, queued_at: new Date(x.at).toISOString().slice(0, 19) } })}\n\n`);
+}
 let uiSeq = 0;
 function pushUi(project, cmd) {
   const id = `ui${Date.now().toString(36)}${(uiSeq++).toString(36)}`;
   const pages = [...clients].filter(c => !c.project || c.project === project).length;
   const wait = Math.min(Math.max(Number(cmd.wait_ms ?? 1500), 0), 10000); delete cmd.wait_ms;
   send({ project, ui: { ...cmd, id } }, project);
+  // no page open on the project: keep the latest focus for the next page that opens it (within 2 hours)
+  if (!pages && !cmd.open_project) { pendingUi.set(project, { cmd: { ...cmd, id }, at: Date.now() }); return Promise.resolve({ id, pages, delivered: 0, queued: true }); }
   if (!pages || !wait) return Promise.resolve({ id, pages, delivered: 0 });
   return new Promise((ok) => {
     const a = { n: 0, done: () => { clearTimeout(a.timer); acks.delete(id); ok({ id, pages, delivered: a.n }); } };
@@ -191,6 +201,8 @@ function stampPage(name, data, cur) {
     data.items = data.items.map(r => {
       if (!r || typeof r !== 'object') return r;
       const c = was.get(r.id), log = [...(c?.log || [])];
+      // withdrawn = its author took the draft back: the director withdraws their own drafts; an agent's draft they reject
+      if (r.status === 'withdrawn' && c?.status !== 'withdrawn' && (!c || c.status !== 'draft' || S.requestAuthor(c) !== 'director')) throw new S.WbError(400, `request ${r.id}: only the director's own draft can be withdrawn in the page (an agent's draft: Reject)`);
       if (!c || c.status !== r.status) log.push({ at, by: 'director', via: 'page', status: r.status });
       return { ...r, log };
     });
@@ -311,7 +323,7 @@ http.createServer(async (req, res) => {
     if (/[\\\0:]|~\d/.test(p) || p.split('/').some(s => s === '..' || s === '.')) return json(res, 400, { error: 'bad path' });
     if (p === '/api/events') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
-      res.write(': hi\n\n'); const c = { res, project: url.searchParams.get('project') || null }; clients.add(c); req.on('close', () => clients.delete(c)); return;
+      res.write(': hi\n\n'); const c = { res, project: url.searchParams.get('project') || null }; clients.add(c); req.on('close', () => clients.delete(c)); flushPendingUi(c); return;
     }
     if (p === '/api/config') return json(res, 200, { default_project: DEFAULT, media_roots: CFG.mediaRoots, private_re: CFG.privateSrc });
     if (p === '/api/status') return json(res, 200, { ok: true, app: 'director-workbench', code: codeStatus(), default_project: DEFAULT, pages: clients.size, pages_by_project: [...clients].reduce((o, c) => (o[c.project || '*'] = (o[c.project || '*'] || 0) + 1, o), {}), data_dir: DATA_ROOT });

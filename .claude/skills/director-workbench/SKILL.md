@@ -131,6 +131,9 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
    `base_propose`. An image that already exists (a legacy look, an output made outside the queue): `media_add` /
    `media_update`, `cost_record {usd, via, job}` for its spend (never an approval), then `node_import_propose`.
    To wait for the director, use `wait_for {request, until: ["approved", "rejected"], timeout_s}` instead of polling.
+   Several drafts: `wait_for {requests: [ids], until: ["approved", "rejected"]}` returns on the first. A draft of yours that is
+   obsolete: `request_update {status: "withdrawn", why, superseded_by}` (rejected is the director's word). With no page open,
+   `ui_focus` is queued for the next page that opens the project.
    If `status` says the server is stale, ask for a restart.
    The director approves in Review > Queue (show it with `ui_focus` view "queue"). Only if the owner enabled
    `agent_approvals` may you pass `director_approved: true`, and only when they said so in the conversation.

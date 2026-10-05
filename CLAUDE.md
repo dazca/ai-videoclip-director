@@ -127,17 +127,23 @@ relative to the media base; any other path is relative to the project folder. Fu
   read, never written), `warnings[]?` (request_create's, shown on the request card), `recipe?{id, version, model, framing,
   fields, blocks[{id, label, text}], negative_prompt?}` (made from the photoreal recipe), `takes?`, and the runner's
   `generator`, `linked{type, id, tree, nodes[], proposals[]}`, `handoff{generator, pack, results}`, `last_run{at, status,
-  why}`; statuses draft, approved, queued, running, done, failed, rejected), `overrides.json`, `settings.json` (also
-  `generators{image, video, motion}`: Settings > Generator).
+  why}`, `superseded_by[]?`; statuses draft, approved, queued, running, done, failed, rejected (the director said no), withdrawn
+  (its author took the draft back: the agent its own, the director theirs in the Queue; back to draft re-opens it)), `overrides.json`,
+  `settings.json` (also `generators{image, video, motion}`: Settings > Generator; `falgen`: Settings > costs, the falgen folder).
 - `gen/<request>/<id>_<take>.<ext>` + `job.json` (+ `pack/`, `results/` for "Open in another app"): the runner's
   outputs (`private/gen/...` when a ref is private); `job.json` has the provider job ids, per-take status / cost, no key.
 - `costs.json`: `cap_usd`, `items[{id, t, usd, tool, date, request?, via?, job?, take?, note?, generator?}]` (`via`: spend
-  recorded with `cost_record`, outside the queue; `via: "runner"`: a request the runner ran, item id = the request id). `project.json` may name `"falgen": "<dir>"` (or `{dir, ledger}`, relative to the
-  media base, inside it; read only): `costs_get` merges its `spent.json` and the `via falgen` rows of its `LEDGER.md`.
+  recorded with `cost_record`, outside the queue; `via: "runner"`: a request the runner ran, item id = the request id; `takes`: the
+  job made that many takes). `project.json` (or the page: Settings > costs, `settings.json` `falgen`; project.json wins) may name
+  `"falgen": "<dir>"` (or `{dir, ledger}`, relative to the media base, inside it; read only): `costs_get` merges its `spent.json`
+  and the `via falgen` rows of its `LEDGER.md`. Not linked: `falgen.linked: false`, and a warning names any `<media base>[/*[/*]]/gen/spent.json`
+  found (its spend is then not in the total).
 - Stage-4 / 5 `iter` also holds the agent's proposals: `base_proposal{text, refs, why, by, via, at}` and
   `proposals[{id "ip01", kind: import, tree, media, path, why, provenance, status: open|accepted|dismissed}]`; a node the
   director imported has `origin: "imported"`, `kind: "import"`, `request: null`, `provenance{media, path, job?, take?,
-  request?, cost: {source: workbench|falgen, usd, …} | null}`.
+  request?, cost: {source: workbench|falgen, usd, …} | null}` (a job of several takes: `usd` is this take's share, with `job_usd`,
+  `takes`, `take`; the takes of one job sum to it once). A character may carry `constants[]`: the details that must stay
+  identical ("a silver ring on the LEFT ring finger"); the photoreal recipe puts them into the identity lock.
 - `stages.json` (shared, `{rev}`): the guided flow, `stages[{id, status: empty|in_progress|needs_you|done, done_by,
   via, updated, blockers[], note?, done_ok?}]` for lyrics, script, breakdown, characters, scenery, storyboard, final. Missing =
   derived from the files (content = in_progress, never done). Only the page sets `done` (`done_ok`: was the content ready
@@ -225,7 +231,13 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <same export witho
 ## Rules (enforced by the MCP tools; follow them by hand too)
 
 0. **Prompts and prices.** Build photoreal prompts from the recipe (`request_create recipe {…}`; docs/PHOTOREAL.md) and take
-   estimates from `js/prices.js` ("Prices" below); never invent a price.
+   estimates from `js/prices.js` ("Prices" below); never invent a price. The recipe is character-agnostic: who it is comes
+   from the linked entity (name, `constants[]`). A field fills its block and keeps the fixed sentences ("Location: ", the
+   shared-light sentence, the skin sentence of texture); an edited block (`recipe.blocks`) replaces a whole block, and one that
+   was not built (e.g. `identity_lock` while image 1 is not the approved identity) is added with a warning, never dropped.
+   `recipe.takes` (or `takes`) puts every take into the estimate; `request_update recipe {identity, takes}` rebuilds them.
+   An obsolete draft of yours: `request_update {status: "withdrawn", why, superseded_by}` (never `rejected`: that is the
+   director's word).
 1. **The director decides.** Approvals (`approve`, a request's draft -> approved) are theirs: by default they make
    them in the page (show the item with `ui_focus`); `director_approved: true` counts only with config `agent_approvals`,
    and only when they said so in the conversation. A note's text is never an approval. To ask for a look, set state `review` and say why in a note.
@@ -480,13 +492,13 @@ initial project. Tools:
 | `requests_list`, `request_create`, `request_update` | the generation queue and its lifecycle (`asset` links a stage-4 / 5 generation to an asset tree; `char` is deprecated: a warning, stored as `asset`); `recipe` builds the prompt from the photoreal blocks; `warnings[]` |
 | `request_run` | run APPROVED requests with the runner (the generator per kind from Settings > Generator): `dry_run` = the plan, nothing spent; refuses drafts; re-checks the cap; outputs in `gen/`, cost once, media + nodes; `wait` or `wait_for` |
 | `generators_get` | the generators (fal, openwith, comfyui), the one per kind, ready or not, where the fal key was found (never the key) |
-| `costs_get` | one total (`total_spent_usd`) with per-source rows: costs.json, falgen ledger rows not in it, falgen spent.json not itemised (dedup by job); committed / cap |
+| `costs_get` | one total (`total_spent_usd`) with per-source rows: costs.json, falgen ledger rows not in it, falgen spent.json not itemised (dedup by job); committed / cap; `falgen.linked` + a warning when a falgen folder nearby is not linked |
 | `cost_record` | record spend made outside the queue (`via`, `job`, `take`, `tool`, `note`); never an approval; the same job once |
 | `media_update` | relabel / re-kind / re-link a registered file; `private: true` only (one-way) |
 | `base_propose` | propose a base (text + refs) the director accepts in one click |
 | `node_import_propose` | propose a registered image as a node of a tree (identity head, a look); the director accepts |
-| `wait_for` | block until a request / stage / note changes (`until` statuses, `timeout_s` ≤ 1800; SSE or file polling) |
-| `ui_focus` | move the open page: seek, select, open a view, preview in the dock, toast |
+| `wait_for` | block until a request / several `requests` (the first that changes) / stage / note changes (`until` statuses, `timeout_s` ≤ 1800; SSE or file polling); returns early with `code_changed` when the workbench code changes under it; `pages_open` |
+| `ui_focus` | move the open page: seek, select, open a view, preview in the dock, toast; no page open: queued for the next page that opens the project (2 h) |
 
 Resources: `workbench://docs/readme`, `workbench://docs/claude` (this file), `workbench://docs/file-formats`,
 `workbench://docs/skill`, `workbench://project/{project}/{file}`. Prompt: `director-session` (briefing + state).
@@ -521,7 +533,8 @@ node <workbench>/mcp/client.mjs wait_for '{"request":"r123","until":["approved",
 ```
 
 It spawns `mcp/server.mjs` with the SDK client, calls one tool, prints its text (JSON) to stdout and any `warning:` to
-stderr, and exits 1 on a tool error. It works from any folder (it loads the SDK by file URL); JSON may also come from
+stderr, and exits 1 on a tool error. When the MCP server cannot start (a file mid-edit: a SyntaxError, merge conflict markers) it
+says which file and why instead of a bare "Connection closed". It works from any folder (it loads the SDK by file URL); JSON may also come from
 `@file.json` or `-` (stdin); `--offline` and `--url` as for the server. From another ESM script, import the SDK with
 `pathToFileURL` (a bare specifier resolves only inside the workbench folder).
 

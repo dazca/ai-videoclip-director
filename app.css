@@ -771,7 +771,7 @@ button.on { color: var(--acc); }
 /* requests */
 .chreq { display: flex; align-items: center; gap: 6px; height: 20px; padding: 0 6px; font-size: 11px; border-bottom: 1px solid var(--line2); white-space: nowrap; }
 .chreq button { height: 16px; line-height: 14px; font-size: 11px; cursor: pointer; }
-.chreq.s-rejected { opacity: .55; }
+.chreq.s-rejected, .chreq.s-withdrawn { opacity: .55; }
 .chsteps { display: inline-flex; align-items: center; gap: 1px; flex: none; } .chsteps i { font-style: normal; color: #4a4f57; font-size: 10px; }
 .chstep { font-size: 10px; padding: 0 3px; color: #5a5f67; border: 1px solid var(--line2); line-height: 12px; }
 .chstep.done { color: #9fd8b0; border-color: #2e6b45; } .chstep.cur { color: #fff; background: #2e6b45; } .chstep.cur.rej { background: var(--bad); border-color: var(--bad); }
@@ -910,7 +910,7 @@ button.on { color: var(--acc); }
 .sbch.ok { background: #18301f; color: #b8f0c8; } .sbch.ok i { background: #2e6b45; color: #d8f6e0; } .sbch.ok em { color: #8fc49f; }
 .sbch.miss { background: #3a1f1f; color: #f0b4b0; } .sbch.miss i { background: #8a3030; }
 .sbft { padding: 0 3px 2px; font-size: 10px; }
-.sbrq { color: var(--dim); } .sbrq.none { color: #e0a03a; } .sbrq.clip, .sbrq.s-done { color: #7fd69c; } .sbrq.s-draft { color: #e8c88a; } .sbrq.s-approved, .sbrq.s-queued, .sbrq.s-running { color: #9db7d6; } .sbrq.s-rejected { color: #f0a090; }
+.sbrq { color: var(--dim); } .sbrq.none { color: #e0a03a; } .sbrq.clip, .sbrq.s-done { color: #7fd69c; } .sbrq.s-draft { color: #e8c88a; } .sbrq.s-approved, .sbrq.s-queued, .sbrq.s-running { color: #9db7d6; } .sbrq.s-rejected { color: #f0a090; } .sbrq.s-withdrawn { color: var(--dim); }
 .sbgaprow { display: flex; gap: 8px; align-items: center; padding: 1px 8px; font-size: 11px; color: var(--acc); cursor: pointer; border-bottom: 1px solid var(--line); background: repeating-linear-gradient(135deg, transparent 0 6px, rgba(245,165,36,.05) 6px 12px); }
 .sbskhost { margin: 0; border-top: 1px solid var(--line); }
 /* the side panel: the shot, the gaps */

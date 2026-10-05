@@ -167,6 +167,56 @@ export async function verifyDogfood({ browser, OUT }) {
       && rr?.status === 'draft' && rr.est_cost === 0.12 && /nano-banana-2/.test(rr.tool) && rr.recipe?.blocks?.length === 10 && rr.recipe.fields?.place && rr.prompt === form.prompt,
       { form: { ...form, prompt: form.prompt.slice(0, 160) }, req: rr && { est: rr.est_cost, tool: rr.tool, blocks: rr.recipe?.blocks?.length } });
 
+    // 7b. the looks dogfood (DOGFOOD_looks.md) in the page: the recipe form for a male character (his name and constants,
+    // the identity lock, takes in the estimate), withdrawn drafts in the Queue, the cost split per take on import proposals
+    await agent('entity_upsert', { kind: 'character', id: 'bram', name: 'Bram', fields: { role: 'the bus driver', constants: ['a silver ring on the LEFT ring finger', 'a scar through the right eyebrow'] } });
+    await pg.evaluate(() => window.WB.store.reload?.(['entities/index.json']));
+    await until(() => window.WB.store.entities.some(e => e.id === 'bram'));
+    await click('.queue .qnew');
+    await until(() => !!document.querySelector('.qform:not([hidden]) [data-f=target]'));
+    await pg.evaluate(() => { const s = (sel, v) => { const e = document.querySelector(sel); e.value = v; e.dispatchEvent(new Event('input', { bubbles: true })); }; s('.qform [data-f=kind]', 'identity-sheet'); s('.qform [data-f=target]', 'character:bram'); s('.qform [data-f=refs]', 'media/still/bo_face.jpg'); s('.qform [data-f=takes]', '2'); });
+    await pg.evaluate(() => { const c = document.querySelector('.qform [data-f=identity]'); c.checked = true; c.dispatchEvent(new Event('change', { bubbles: true })); });
+    await click('.qform [data-q=recipe]');
+    await until(() => !!document.querySelector('.qform .qblocks'));
+    for (const [k, v] of [['subject', 'Bram, a man in his fifties with short grey hair and a trimmed beard'], ['wardrobe', 'a navy wool driver jacket over a grey shirt'], ['action', 'he leans on the open bus door, tired, looking down the road'], ['place', 'the bus depot at night, oil stains, a timetable board, a vending machine'], ['light', 'sodium lamps overhead, orange, hard, from above'], ['texture', 'grey stubble and wool pilling']]) {
+      await click(`.qform [data-fld=${k}]`); await pg.keyboard.type(v);
+    }
+    await until(() => /grey stubble/.test(document.querySelector('.qform [data-f=prompt]')?.value || ''));
+    const male = await pg.evaluate(() => ({ lock: document.querySelector('.qform [data-blk=identity_lock]')?.value || '', refs: document.querySelector('.qform [data-blk=refs]')?.value || '', tex: document.querySelector('.qform [data-blk=texture]')?.value || '', prompt: document.querySelector('.qform [data-f=prompt]').value, est: document.querySelector('.qform .qfrow:last-child b')?.textContent, warn: document.querySelector('.qform .qwarn')?.textContent || '' }));
+    await shot('v10_recipe_male_identity', '.qform');
+    check('looks: the recipe form for a male character: Bram\'s name, the identity lock with his constants (ring, scar), no "her / woman", the texture keeps the skin sentence + the field, takes 2 = est $0.24',
+      /Image 1 is Bram, the approved identity/.test(male.refs) && /Keep the face exactly as in Image 1/.test(male.lock) && /silver ring on the LEFT ring finger; a scar through the right eyebrow/.test(male.lock) && !/\b(her|she|woman)\b/i.test(male.prompt)
+      && /pores, fine lines/.test(male.tex) && /grey stubble and wool pilling/.test(male.tex) && male.est === '$0.24', male);
+    await click('.qform [data-q=add]');
+    const RB = await fileUntil('requests.json', (j) => j.items.some(r => r.target === 'character:bram'));
+    const rb = RB?.items?.find(r => r.target === 'character:bram');
+    // withdrawn: the agent withdraws its own obsolete draft (why + superseded_by); the director withdraws their own in the Queue
+    const old = await agent('request_create', { kind: 'look-sheet', prompt: 'Ada night out, first try', est_cost: 0.12 });
+    const wdr = await agent('request_update', { id: old.body.id, status: 'withdrawn', why: 'obsolete: the recipe request replaces it', superseded_by: [rr?.id || 'r'] });
+    await until((id) => !!document.querySelector(`.queue tr[data-id="${id}"] [data-x=withdraw]`), rb?.id);
+    await click(`.queue tr[data-id="${rb?.id}"] [data-x=withdraw]`);
+    const RW = await fileUntil('requests.json', (j) => j.items.find(r => r.id === rb?.id)?.status === 'withdrawn');
+    await until((ids) => ids.every(id => document.querySelector(`.queue tr[data-id="${id}"] .chip`)?.textContent === 'withdrawn'), [old.body.id, rb?.id]);
+    await pg.evaluate(() => document.querySelector('.queue .qlist')?.scrollIntoView({ block: 'start' }));
+    const wq = await pg.evaluate((ids) => ids.map(id => ({ chip: document.querySelector(`.queue tr[data-id="${id}"] .chip`)?.textContent, why: document.querySelector(`.queue tr[data-id="${id}"] .qwhy`)?.textContent || '', reject: !!document.querySelector(`.queue tr[data-id="${id}"] [data-x=reject]`) })), [old.body.id, rb?.id]);
+    const agentDraftBtns = await pg.evaluate(() => [...document.querySelectorAll('.queue tr.q-draft')].map(r => [r.dataset.id, !!r.querySelector('[data-x=reject]'), !!r.querySelector('[data-x=withdraw]')]));
+    await shot('v10_withdrawn');
+    check('looks: withdrawn: the agent\'s draft withdrawn by the agent (why, superseded_by) and the director\'s own draft by its Withdraw button (stamped page) show as "withdrawn" (not rejected), with who and why; an agent\'s draft offers Reject, not Withdraw',
+      wdr.body?.request?.status === 'withdrawn' && RW?.items.find(r => r.id === rb?.id)?.log.at(-1).via === 'page' && wq.every(x => x.chip === 'withdrawn' && !x.reject) && /withdrawn by the agent · superseded by/.test(wq[0].why) && /withdrawn by you/.test(wq[1].why)
+      && agentDraftBtns.filter(([id]) => RW?.items.find(r => r.id === id)?.log?.[0]?.via === 'agent').length > 0 && agentDraftBtns.filter(([id]) => RW?.items.find(r => r.id === id)?.log?.[0]?.via === 'agent').every(([, rej, wd]) => rej && !wd),
+      { wdr: wdr.body?.request?.status || wdr.body, wq, agentDraftBtns });
+    // two takes of one falgen job ($0.24): each take's proposal shows its share
+    for (const k of [0, 1]) { fs.copyFileSync(path.join(ND, 'media', 'still', 'bo_body.jpg'), path.join(ND, 'media', 'still', `hv9_${k}.jpg`)); await agent('media_add', { path: `media/still/hv9_${k}.jpg`, kind: 'sheet', job: 'HV9', take: k, entities: ['ada'] }); }
+    await agent('cost_record', { usd: 0.24, via: 'falgen', job: 'HV9', tool: 'fal-ai/nano-banana-2/edit' });
+    const tk = []; for (const k of [0, 1]) tk.push((await agent('node_import_propose', { id: 'ada', tree: 'look:night-out', media: `media/still/hv9_${k}.jpg`, why: `HV9 take ${k}: an alternative take of the same job` })).body?.proposal);
+    await pg.evaluate(async () => { await window.WB.stages.open('characters'); await window.WB.characters.open('ada'); const w = window.WB.characters.ws; w.setVariant('night-out'); w.render(); });
+    await until((ids) => ids.every(id => !!document.querySelector(`.chprop.imp[data-prop="${id}"]`)), tk.map(x => x?.id));
+    const takeUi = await pg.evaluate((ids) => ids.map(id => document.querySelector(`.chprop.imp[data-prop="${id}"] .chprb > div.dim`)?.textContent || ''), tk.map(x => x?.id));
+    await shot('v10_cost_per_take', `.chprop.imp[data-prop="${tk[0]?.id}"]`);
+    check('looks: two takes of one job ($0.24): each import proposal carries and shows its share ("$0.12 · take k of 2, job HV9 $0.24"), so per-node sums count the job once',
+      tk.every(x => x?.provenance?.cost?.usd === 0.12 && x.provenance.cost.takes === 2) && takeUi.every((t, k) => new RegExp(`\\$0\\.12 · take ${k} of 2, job HV9 \\$0\\.24`).test(t)), { takeUi, cost: tk.map(x => x?.provenance?.cost) });
+    await pg.evaluate(async () => { await window.WB.app.show('queue'); });
+
     // 8. the stale-code bar: a code file of this server's copy changes on disk
     const before = await pg.evaluate(() => !!document.getElementById('stalebar'));
     fs.appendFileSync(path.join(CODE, 'lib', 'store.mjs'), '\n// changed after the server started (verify v10)\n');

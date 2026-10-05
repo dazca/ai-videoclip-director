@@ -40,6 +40,9 @@ export async function verifyScenery({ browser, BASE, DATA, OUT, post, writeHeade
   const frames = (n = 2) => pg.evaluate((k) => new Promise(r => { const f = () => (k-- > 0 ? requestAnimationFrame(f) : r()); f(); }), n);
   const ready = async () => { await pg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 }); await frames(); };
   const combo = async (mods, key) => { for (const m of mods) await pg.keyboard.down(m); await pg.keyboard.press(key); for (const m of mods.slice().reverse()) await pg.keyboard.up(m); };
+  // the edit view (sketch + text) open and STABLE: a live reload (the agent's write, the runner) can re-render the workspace
+  // right after it opens; wait until it has stayed open 600 ms (a condition, not a sleep), re-opening it if it was lost
+  const editOpen = async () => { for (let k = 0; k < 4; k++) { await click('.chnp [data-a=edit]'); const t0 = Date.now(); let since = 0; while (Date.now() - t0 < 8000) { const ok = await pg.evaluate(() => !!window.WB.scenery.ws.sk?.api && !!document.querySelector('.chedtext')); if (!ok) { if (since) break; } else if (!since) since = Date.now(); else if (Date.now() - since >= 600) return; await wait(100); } } throw new Error('the edit view did not stay open'); };
   const until = async (fn, arg, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pg.evaluate(fn, arg)) return true; await wait(100); } return false; };
   const readJ = (f) => { try { return JSON.parse(fs.readFileSync(path.join(ND, f), 'utf8')); } catch (e) { return null; } };
   const fileUntil = async (f, fn, ms = 6000) => { const t0 = Date.now(); let j = null; while (Date.now() - t0 < ms) { j = readJ(f); try { if (j && fn(j)) return j; } catch (e) { /* not yet */ } await wait(100); } return j; };
@@ -79,7 +82,8 @@ export async function verifyScenery({ browser, BASE, DATA, OUT, post, writeHeade
   placeholder(path.join(ND, G('lantern_lit.jpg')), 'prop/lantern_01.jpg', 'eq=brightness=0.12:saturation=1.5,colorbalance=rs=0.35:gs=0.15:bs=-0.2');
   const run = async (rid, out) => { for (const st of ['queued', 'running']) await agent('request_update', { id: rid, status: st }); return agent('request_update', { id: rid, status: 'done', outputs: [out], actual_cost_usd: 0 }); };
   const reqs = () => readJ('requests.json')?.items || [];
-  const approveReq = async (rid) => { await click(`.chreq[data-r="${rid}"] [data-a=reqok]`); return fileUntil('requests.json', (j) => j.items.find(r => r.id === rid)?.status === 'approved'); };
+  // the card's Approve once it is rendered; again if the save did not land (a live reload re-rendered the card under the click)
+  const approveReq = async (rid) => { for (let k = 0; k < 3; k++) { await until((id) => !!document.querySelector(`.chreq[data-r="${id}"] [data-a=reqok]`), rid); await click(`.chreq[data-r="${rid}"] [data-a=reqok]`); const j = await fileUntil('requests.json', (x) => x.items.find(r => r.id === rid)?.status === 'approved', 4000); if (j?.items.find(r => r.id === rid)?.status === 'approved') return j; } return null; };
 
   await pg.goto(`${BASE}/?project=${NP}`, { waitUntil: 'domcontentloaded' });
   await pg.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
@@ -114,8 +118,7 @@ export async function verifyScenery({ browser, BASE, DATA, OUT, post, writeHeade
   await approveReq(R1.id); await run(R1.id, G('pier_plate.jpg'));
   const n1 = (await agent('asset_iteration_add', { type: 'location', id: 'the-pier', request: R1.id, note: 'verify: placeholder plate' })).body;
   await until(() => !!document.querySelector('.chws .chnode[data-node=n01]'));
-  await click('.chws .chnode[data-node=n01]'); await click('.chnp [data-a=edit]');
-  await until(() => !!window.WB.scenery.ws.sk?.api); await wait(300);
+  await click('.chws .chnode[data-node=n01]'); await editOpen();
   await pg.evaluate(`(() => { const a = ${ws}.sk.api, s = a.get(); a.addPin(s.w * 0.7, s.h * 0.6, 'a moored fishing boat here'); })()`);
   await pg.evaluate(() => document.querySelector('.chedtext').focus()); await pg.keyboard.type('add a small fishing boat by the pier (pin 1)');
   await click('.chedside [data-a=reqedit]');
@@ -126,7 +129,7 @@ export async function verifyScenery({ browser, BASE, DATA, OUT, post, writeHeade
   await click('.chws .chnode[data-node=n02]'); await until(() => !!document.querySelector('.chcmpbar [data-a=keep]'));
   await click('.chcmpbar [data-a=keep]');
   await fileUntil('entities/locations/the-pier.json', (j) => j.iter?.trees?.base?.head === 'n02');
-  await wait(300); await click('.chbar [data-a=approve]');
+  await until(() => window.WB.store.entities.find(e => e.id === 'the-pier')?.iter?.trees?.base?.head === 'n02' && !!document.querySelector('.chbar [data-a=approve]')); await click('.chbar [data-a=approve]');
   const E3 = await fileUntil('entities/locations/the-pier.json', (j) => !!j.iter?.trees?.base?.approved);
   check('the base tree: the agent cannot register a draft (403); approved here, run (placeholder), n01 heads the base tree; an edit (text + pin) -> location-edit request -> n02 waits, compared and kept; "Approve base" (page) locks it and sets the establishing image',
     early.status === 403 && n1?.node?.id === 'n01' && n1.node.tree === 'base' && R2?.kind === 'location-edit' && R2.asset.pins?.[0]?.text === 'a moored fishing boat here' && /Keep the architecture/.test(R2.prompt)
@@ -135,7 +138,9 @@ export async function verifyScenery({ browser, BASE, DATA, OUT, post, writeHeade
 
   // 4. a variant made in the page from the axes: reverse / night / rain -> its sheet from the approved base -> its tree,
   // an edit on it kept as a branch
-  await click('.chtabs [data-tab=variants]'); await wait(150);
+  // the page has the approval (its copy of the entity, and the bar re-rendered) before the variants tab
+  await until(() => window.WB.store.entities.find(e => e.id === 'the-pier')?.iter?.trees?.base?.approved === 'n02' && !document.querySelector('.chbar [data-a=approve]'));
+  await click('.chtabs [data-tab=variants]'); await until(() => !!document.querySelector('.chlook.add'));
   await click('.chlook.add'); await until(() => !!document.querySelector('.asvf'));
   for (const [ax, v] of [['angle', 'reverse'], ['tod', 'night'], ['weather', 'rain']]) await click(`.asax a[data-ax=${ax}][data-v=${v}]`);
   await pg.evaluate(() => document.querySelector('.asvnotes').focus()); await pg.keyboard.type('harbour lamps reflected on the wet planks');
@@ -174,7 +179,7 @@ export async function verifyScenery({ browser, BASE, DATA, OUT, post, writeHeade
   const R5 = (await fileUntil('requests.json', (j) => j.items.some(r => r.asset?.id === 'lantern')))?.items.find(r => r.asset?.id === 'lantern');
   await approveReq(R5.id); await run(R5.id, G('lantern_sheet.jpg'));
   const n5 = (await agent('asset_iteration_add', { type: 'prop', id: 'lantern', request: R5.id })).body;
-  await until(() => !!document.querySelector('.chws .chnode[data-node=n01]'));
+  await until(() => !!document.querySelector('.chws .chnode[data-node=n01]') && !!document.querySelector('.chbar [data-a=approve]'));
   await click('.chbar [data-a=approve]'); await fileUntil('entities/props/lantern.json', (j) => !!j.iter?.trees?.base?.approved);
   await click('.chtabs [data-tab=variants]'); await click('.chlook.add'); await until(() => !!document.querySelector('.asvf'));
   const propAxes = await pg.evaluate(() => [...document.querySelectorAll('.asvf .asaxl')].map(x => x.textContent));

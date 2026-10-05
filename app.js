@@ -194,6 +194,7 @@ document.addEventListener('wb:ui', async (e) => {
     }
     if (u.play === true) ctx.timeline?.player.play(); else if (u.play === false) ctx.timeline?.player.pause();
     if (u.message) toast(u.message);
+    if (u.queued_at) toast(`the agent asked to show this at ${String(u.queued_at).slice(11, 16)}, while no page was open`);
   } catch (er) { console.warn('ui command failed', u, er); }
   ack();
 });

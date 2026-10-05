@@ -52,6 +52,11 @@ export async function verifyCharacters({ browser, BASE, DATA, OUT, post, writeHe
   const frames = (n = 2) => pg.evaluate((k) => new Promise(r => { const f = () => (k-- > 0 ? requestAnimationFrame(f) : r()); f(); }), n);
   const ready = async () => { await pg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 }); await frames(); };
   const combo = async (mods, key) => { for (const m of mods) await pg.keyboard.down(m); await pg.keyboard.press(key); for (const m of mods.slice().reverse()) await pg.keyboard.up(m); };
+  // the edit view (sketch + text) open and STABLE: a live reload (the agent's write, the runner) can re-render the workspace
+  // right after it opens; wait until it has stayed open 600 ms (a condition, not a sleep), re-opening it if it was lost
+  const editOpen = async () => { for (let k = 0; k < 4; k++) { await click('.chnp [data-a=edit]'); const t0 = Date.now(); let since = 0; while (Date.now() - t0 < 8000) { const ok = await pg.evaluate(() => !!window.WB.characters.ws.sk?.api && !!document.querySelector('.chedtext')); if (!ok) { if (since) break; } else if (!since) since = Date.now(); else if (Date.now() - since >= 600) return; await wait(100); } } throw new Error('the edit view did not stay open'); };
+  // a request card's Approve once it is rendered; again if the save did not land (a live reload re-rendered the card under the click)
+  const approveCard = async (rid) => { for (let k = 0; k < 3; k++) { await until((id) => !!document.querySelector('.chreq[data-r="' + id + '"] [data-a=reqok]'), rid); await click('.chreq[data-r="' + rid + '"] [data-a=reqok]'); const j = await fileUntil('requests.json', (x) => x.items.find(r => r.id === rid)?.status === 'approved', 4000); if (j?.items.find(r => r.id === rid)?.status === 'approved') return j; } return null; };
   const until = async (fn, arg, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pg.evaluate(fn, arg)) return true; await wait(100); } return false; };
   const readJ = (f) => { try { return JSON.parse(fs.readFileSync(path.join(ND, f), 'utf8')); } catch (e) { return null; } };
   const fileUntil = async (f, fn, ms = 6000) => { const t0 = Date.now(); let j = null; while (Date.now() - t0 < ms) { j = readJ(f); try { if (j && fn(j)) return j; } catch (e) { /* not yet */ } await wait(100); } return j; };
@@ -135,8 +140,7 @@ export async function verifyCharacters({ browser, BASE, DATA, OUT, post, writeHe
   // 4. the agent cannot run a draft; the director approves here; the agent runs it (placeholder output) and registers the node
   const early = await agent('character_iteration_add', { id: 'mara', request: R1.id });
   const agentApprove = await agent('request_update', { id: R1.id, status: 'approved', director_approved: true });
-  await click(`.chreq[data-r="${R1.id}"] [data-a=reqok]`);
-  await fileUntil('requests.json', (j) => j.items.find(r => r.id === R1.id)?.status === 'approved');
+  await approveCard(R1.id);
   const run = async (rid, out) => { for (const st of ['queued', 'running']) await agent('request_update', { id: rid, status: st }); const d = await agent('request_update', { id: rid, status: 'done', outputs: [out], actual_cost_usd: 0 }); return d; };
   const d1 = await run(R1.id, G('mara_sheet.jpg'));
   const n1 = await agent('character_iteration_add', { id: 'mara', request: R1.id, note: 'verify: placeholder for the identity sheet' });
@@ -148,9 +152,7 @@ export async function verifyCharacters({ browser, BASE, DATA, OUT, post, writeHe
 
   // 5. an edit: text + a sketch drawn over n01 + a mask + a pin -> a draft request carrying the sketch PNG, the mask and the pins
   await click('.chws .chnode[data-node=n01]');
-  await click('.chnp [data-a=edit]');
-  await until(() => !!window.WB.characters.ws.sk?.api);
-  await wait(400);
+  await editOpen();
   // draw with the mouse: a stroke around the neck, then (M) a mask over it, then (P) a pin
   const box = await pg.evaluate(() => { const c = document.querySelector('.chsk .sk-cv').getBoundingClientRect(); return { x: c.left, y: c.top, w: c.width, h: c.height }; });
   const api = 'window.WB.characters.ws.sk.api';
@@ -172,7 +174,7 @@ export async function verifyCharacters({ browser, BASE, DATA, OUT, post, writeHe
     { skState, req: R2 && { asset: R2.asset, est: R2.est_cost, tool: R2.tool, refs: R2.refs } });
 
   // 6. approve -> the agent runs it -> n02 waits; the A/B compare (slider, toggle, side by side); Keep makes it the head
-  await click(`.chreq[data-r="${R2.id}"] [data-a=reqok]`); await fileUntil('requests.json', (j) => j.items.find(r => r.id === R2.id)?.status === 'approved');
+  await approveCard(R2.id);
   await run(R2.id, G('mara_necklace.jpg'));
   const n2 = await agent('character_iteration_add', { id: 'mara', request: R2.id });
   const cg = (await agent('character_get', { id: 'mara' })).body;
@@ -201,7 +203,7 @@ export async function verifyCharacters({ browser, BASE, DATA, OUT, post, writeHe
     await pg.evaluate(() => document.querySelector('.chedtext').focus()); await pg.keyboard.type(text);
     const before = reqs().length; await click('.chedside [data-a=reqedit]');
     const R = (await fileUntil('requests.json', (j) => j.items.length > before)).items.at(-1);
-    await click(`.chreq[data-r="${R.id}"] [data-a=reqok]`); await fileUntil('requests.json', (j) => j.items.find(r => r.id === R.id)?.status === 'approved');
+    await approveCard(R.id);
     await run(R.id, out); const ia = await agent('character_iteration_add', { id: 'mara', request: R.id }); const n = ia.body?.node; if (!n) console.error('DEBUG iteration_add', ia.status, JSON.stringify(ia.body), JSON.stringify(R).slice(0, 300));
     await until((id) => !!document.querySelector(`.chws .chnode.new[data-node=${id}]`), n.id);
     await click(`.chws .chnode[data-node=${n.id}]`); await until(() => !!document.querySelector('.chcmpbar [data-a=keep]'));
@@ -242,7 +244,7 @@ export async function verifyCharacters({ browser, BASE, DATA, OUT, post, writeHe
   await click(`.chlook[data-look="${p3.body.look_id}"]`);
   await click('.chsh [data-a=reqlook]');
   const R5 = (await fileUntil('requests.json', (j) => j.items.some(r => r.asset?.kind === 'look')))?.items.find(r => r.asset?.kind === 'look');
-  await click(`.chreq[data-r="${R5.id}"] [data-a=reqok]`); await fileUntil('requests.json', (j) => j.items.find(r => r.id === R5.id)?.status === 'approved');
+  await approveCard(R5.id);
   await run(R5.id, G('mara_raincoat.jpg')); const n5 = (await agent('character_iteration_add', { id: 'mara', request: R5.id })).body;
   await until(() => !!document.querySelector('.chws .chtree .chnode'));
   await click('.chlook.add'); await wait(150); await pg.keyboard.type('Pier jacket'); await pg.keyboard.press('Enter'); await wait(150); await pg.keyboard.type('denim jacket, grey scarf'); await pg.keyboard.press('Enter');
@@ -268,7 +270,7 @@ export async function verifyCharacters({ browser, BASE, DATA, OUT, post, writeHe
   const phRef = await pg.evaluate(() => window.WB.characters.ws.draft().refs.find(r => r.source === 'photo'));
   await click('.chbf [data-a=reqid]');
   const R6 = (await fileUntil('requests.json', (j) => j.items.some(r => r.asset?.id === 'theo')))?.items.find(r => r.asset?.id === 'theo');
-  await click(`.chreq[data-r="${R6.id}"] [data-a=reqok]`); await fileUntil('requests.json', (j) => j.items.find(r => r.id === R6.id)?.status === 'approved');
+  await approveCard(R6.id);
   await run(R6.id, G('theo_sheet.jpg')); const n6 = (await agent('character_iteration_add', { id: 'theo', request: R6.id })).body;
   await wait(800);
   const bundle = await pg.evaluate(() => JSON.stringify(window.WB.exporter.bundleData()));

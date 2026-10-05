@@ -93,21 +93,37 @@ mcp.registerTool('media_update', {
 
 mcp.registerTool('wait_for', {
   title: 'Wait until a request, stage or note changes',
-  description: 'Block until the item changes, instead of polling: request = a request id (its status), stage = a stage id (its status), note = a note id of any stage (its status open / absorbed / dismissed; a reply counts as a change). until = the statuses to wait for (e.g. ["approved", "rejected"]); default: any change from the status it has now. Returns at once when it already is in until. Wakes on the server\'s change feed (SSE) when the server runs, else polls the files. timeout_s up to 1800 (default 600): then it returns {timed_out: true} with the current state. Sends progress notifications while waiting (clients that reset their timeout on progress keep waiting).',
-  inputSchema: { project, request: z.string().optional(), stage: stageId.optional(), note: z.string().optional(), until: z.array(z.string()).optional(), timeout_s: z.number().min(1).max(1800).optional() },
+  description: 'Block until the item changes, instead of polling: request = a request id (its status), requests = several request ids (returns on the FIRST that changes: changed_ids, statuses), stage = a stage id (its status), note = a note id of any stage (its status open / absorbed / dismissed; a reply counts as a change). until = the statuses to wait for (e.g. ["approved", "rejected"]); default: any change from the status it has now. Returns at once when it already is in until. Wakes on the server\'s change feed (SSE) when the server runs, else polls the files. timeout_s up to 1800 (default 600): then it returns {timed_out: true} with the current state. Sends progress notifications while waiting (clients that reset their timeout on progress keep waiting). If the workbench code changes during the wait (on disk, or the server restarts with other code) it returns at once with code_changed: true (restart / reconnect, then wait again); pages_open says whether the director has the project open.',
+  inputSchema: { project, request: z.string().optional(), requests: z.array(z.string()).min(1).max(50).optional().describe('Several request ids: returns when the FIRST of them changes (or reaches until); changed lists which.'),
+    stage: stageId.optional(), note: z.string().optional(), until: z.array(z.string()).optional(), timeout_s: z.number().min(1).max(1800).optional() },
 }, wrap(async (a, extra) => {
-  const p = await projectOf(a), which = ['request', 'stage', 'note'].filter(k => a[k] != null);
-  if (which.length !== 1) throw new S.WbError(400, 'give exactly one of request, stage, note');
+  const p = await projectOf(a), which = ['request', 'requests', 'stage', 'note'].filter(k => a[k] != null);
+  if (which.length !== 1) throw new S.WbError(400, 'give exactly one of request, requests, stage, note');
   const kind = which[0], id = a[kind], timeout = Math.min(1800, Math.max(1, a.timeout_s ?? 600)) * 1000;
+  const until = a.until?.length ? a.until : null;
   const look = async () => {
+    if (kind === 'requests') {
+      const all = await op('requests_list', { project: p }), items = id.map(x => all.find(r => r.id === x) || null);
+      const missing = id.filter((x, i) => !items[i]); if (missing.length) throw new S.WbError(404, `no request ${missing.map(x => `"${x}"`).join(', ')}`);
+      const statuses = Object.fromEntries(items.map(r => [r.id, r.status]));
+      return { status: statuses, key: JSON.stringify(statuses), statuses, items };
+    }
     if (kind === 'request') { const r = (await op('requests_list', { project: p })).find(x => x.id === id); if (!r) throw new S.WbError(404, `no request "${id}"`); return { status: r.status, key: r.status, item: r }; }
     if (kind === 'stage') { const st = (await op('stages_get', { project: p })).stages.find(x => x.id === id); if (!st) throw new S.WbError(404, `no stage "${id}"`); return { status: st.status, key: st.status, item: st }; }
     const n = (await op('notes_get', { project: p, note: id })).notes[0];
     return { status: n.status, key: `${n.status}/${(n.replies || []).length}`, item: n };
   };
-  const t0 = Date.now(), first = await look(), until = a.until?.length ? a.until : null;
-  const done = (s) => (until ? until.includes(s.status) : s.key !== first.key);
-  if (until && done(first)) return { [kind]: id, status: first.status, changed: false, already: true, waited_s: 0, item: first.item };
+  const t0 = Date.now(), first = await look();
+  // requests: the ids that changed (from the start, or into until)
+  const hits = (s) => (kind !== 'requests' ? null : id.filter(x => (until ? until.includes(s.statuses[x]) : s.statuses[x] !== first.statuses[x])));
+  const done = (s) => (kind === 'requests' ? hits(s).length > 0 : until ? until.includes(s.status) : s.key !== first.key);
+  const view = (s) => (kind === 'requests' ? { statuses: s.statuses, changed_ids: hits(s), items: s.items.filter(r => hits(s).includes(r.id)) } : { item: s.item });
+  const label = kind === 'requests' ? 'requests' : kind;
+  if (until && done(first)) return { [label]: id, status: first.status, changed: false, already: true, waited_s: 0, ...view(first) };
+  // the code under the wait: a long wait cannot tell "nothing changed" from "the workbench code changed under me" unless it
+  // watches it. When the code on disk (or the running server's) changes during the wait, it returns at once: code_changed
+  const code0 = S.codeState().hash, srv0 = (await server())?.code?.hash || null;
+  const codeMoved = async () => { const d = S.codeState().hash; if (d !== code0) return { disk: d }; recheckServer(); const s = (await server())?.code?.hash || null; return s && srv0 && s !== srv0 ? { server: s } : null; };
   // wake on the change feed when the server runs; poll the files (or the server) as a backstop
   let wake = () => {}; const ctl = new AbortController(); let sse = false;
   if (await server()) {
@@ -118,11 +134,17 @@ mcp.registerTool('wait_for', {
   try {
     for (;;) {
       const left = timeout - (Date.now() - t0);
-      if (left <= 0) { const s = await look(); return { [kind]: id, status: s.status, changed: s.key !== first.key, timed_out: true, waited_s: Math.round((Date.now() - t0) / 1000), item: s.item }; }
+      const pages = async () => (await server())?.pages_by_project?.[p] ?? 0;
+      if (left <= 0) { const s = await look(); return { [label]: id, status: s.status, changed: s.key !== first.key, timed_out: true, waited_s: Math.round((Date.now() - t0) / 1000), pages_open: await pages(), ...view(s) }; }
       await new Promise(ok => { const t = setTimeout(ok, Math.min(left, sse ? 10000 : 2000)); wake = () => { clearTimeout(t); ok(); }; });
       const s = await look();
-      if (done(s)) return { [kind]: id, from: first.status, status: s.status, changed: true, waited_s: Math.round((Date.now() - t0) / 1000), item: s.item };
-      if (token !== undefined && Date.now() - lastProgress > 15000) { lastProgress = Date.now(); extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: Math.round((Date.now() - t0) / 1000), total: Math.round(timeout / 1000), message: `waiting for ${kind} ${id} (${s.status})` } }).catch(() => {}); }
+      if (done(s)) return { [label]: id, from: first.status, status: s.status, changed: true, waited_s: Math.round((Date.now() - t0) / 1000), ...view(s) };
+      const moved = await codeMoved();
+      if (moved) {
+        warn(moved.disk ? 'the workbench code on disk changed during this wait (a pull, a merge, an edit): the running server is now stale; restart it (node serve.mjs) and reconnect the MCP server, then wait again' : 'the workbench server restarted with other code during this wait: reconnect the MCP server if its tools changed, then wait again');
+        return { [label]: id, status: s.status, changed: s.key !== first.key, code_changed: true, ...moved, waited_s: Math.round((Date.now() - t0) / 1000), pages_open: await pages(), ...view(s) };
+      }
+      if (token !== undefined && Date.now() - lastProgress > 15000) { lastProgress = Date.now(); extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: Math.round((Date.now() - t0) / 1000), total: Math.round(timeout / 1000), message: `waiting for ${kind} ${kind === 'requests' ? id.join(', ') : id} (${kind === 'requests' ? s.key : s.status})` } }).catch(() => {}); }
     }
   } finally { ctl.abort(); }
 }));
@@ -130,12 +152,12 @@ mcp.registerTool('wait_for', {
 // ------------------------------------------------------------------ the open page
 mcp.registerTool('ui_focus', {
   title: 'Show something in the open page',
-  description: 'Point the director\'s open workbench page at something while you talk about it: t (seek + scroll the timeline), range [t0, t1] (select a time range), view (a page or sub-view: timeline, assets, characters, locations, props, media, clips, review, approvals, queue, notes, costs, settings), select (item keys to highlight), preview (shows in the preview dock: an item key like "use:G05@20158", "shot:c1-desk", "character:ada", "media:<media id>", "compare:<clip id>", or a file path), message (a toast), play (true/false). Needs the server; returns how many pages showed it.',
+  description: 'Point the director\'s open workbench page at something while you talk about it: t (seek + scroll the timeline), range [t0, t1] (select a time range), view (a page or sub-view: timeline, assets, characters, locations, props, media, clips, review, approvals, queue, notes, costs, settings), select (item keys to highlight), preview (shows in the preview dock: an item key like "use:G05@20158", "shot:c1-desk", "character:ada", "media:<media id>", "compare:<clip id>", or a file path), message (a toast), play (true/false). Needs the server; returns how many pages showed it. With no page open it is queued (queued: true) and shown when the director next opens the project (the latest one, within 2 h).',
   inputSchema: { project, t: time.optional(), range: z.array(time).length(2).optional(), view: z.string().optional(), select: z.array(z.string()).optional(), preview: z.string().optional(), message: z.string().optional(), play: z.boolean().optional() },
 }, wrap(async (a) => {
   if (!(await server())) throw new S.WbError(503, `the workbench server is not running at ${BASE_URL} (start it: node serve.mjs); nothing to show`);
   const p = await projectOf(a); const { project: _p, ...cmd } = a;
   if (cmd.t != null) cmd.t = S.ms(cmd.t, 't'); if (cmd.range) cmd.range = cmd.range.map(x => S.ms(x));
   const r = await http('POST', '/api/ui', p, cmd);
-  return { ...r, project: p, note: r.pages ? (r.delivered ? 'shown' : 'pages are open but did not confirm in time') : `no page is open on project ${p}: ask the director to open ${BASE_URL}/?project=${p}` };
+  return { ...r, project: p, note: r.pages ? (r.delivered ? 'shown' : 'pages are open but did not confirm in time') : `no page is open on project ${p}: queued, the next page that opens it shows this (within 2 h; a newer ui_focus replaces it). Tell the director to open ${BASE_URL}/?project=${p}` };
 }));

@@ -36,7 +36,17 @@ if (!args || typeof args !== 'object' || Array.isArray(args)) { console.error('t
 if (project && args.project == null) args.project = project;
 
 const env = { ...process.env, ...(project ? { WORKBENCH_PROJECT: project } : {}), ...(url ? { WORKBENCH_URL: url } : {}), ...(offline ? { WORKBENCH_OFFLINE: '1' } : {}) };
-const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(HERE, 'server.mjs')], env, stderr: 'inherit' });
+const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(HERE, 'server.mjs')], env, stderr: 'pipe' });
+// the server's stderr goes on to ours; its tail explains a server that died (e.g. a file mid-edit: a SyntaxError, merge
+// conflict markers), which the SDK only reports as "Connection closed"
+let errTail = '';
+transport.stderr?.on('data', (d) => { process.stderr.write(d); errTail = (errTail + d).slice(-4000); });
+const died = () => {
+  const lines = errTail.split(/\r?\n/), at = lines.find(l => /^(file:\/\/)?\S+\.m?js:\d+$/.test(l.trim())), why = lines.find(l => /^(\w*Error\b|Error \[)/.test(l.trim()));
+  const file = at ? decodeURIComponent(at.trim().replace(/^file:\/\/\/?/, '')) : null, conflict = /^(<{7}|={7}|>{7})/m.test(errTail);
+  return `the MCP server (mcp/server.mjs) exited before answering${why ? ': ' + why.trim() : ''}${file ? ` in ${file}` : ''}.${conflict ? ' That file holds merge conflict markers (<<<<<<< / >>>>>>>): a merge is in progress.' : ''}`
+    + ` The workbench code may be mid-edit (a pull, a merge, another agent): wait a moment and retry${file ? `, or check it with node --check "${file.replace(/:\d+$/, '')}"` : ''}.`;
+};
 const client = new Client({ name: 'workbench-cli', version: '1' });
 let code = 0;
 try {
@@ -54,6 +64,9 @@ try {
     }
     if (r.isError) code = 1;
   }
-} catch (e) { console.error(`error: ${e.message || e}`); code = 1; }
+} catch (e) {
+  await new Promise(ok => setTimeout(ok, 100));   // the server's last stderr lines
+  console.error(/Connection closed|-32000/.test(String(e.message)) ? `error: ${died()} (${e.message || e})` : `error: ${e.message || e}`); code = 1;
+}
 finally { await client.close().catch(() => {}); }
 process.exit(code);
