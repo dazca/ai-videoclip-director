@@ -1,14 +1,13 @@
 // Stage workspace (page "stage", opened from the stage rail): a 20 px bar with the stage, its status and the director's
 // status buttons (only here and on the rail can a stage be marked done), then the stage's own workspace. Stage 1
 // (lyrics) is tabs/lyrics.js, stage 2 (script) tabs/script.js, stage 3 (breakdown) tabs/breakdown.js, stage 4 (characters)
-// tabs/charstage.js, stage 5 (scenery) tabs/scenery.js (both on the generic tabs/assetws.js); the later stages show what they will hold and where
-// their data lives today.
+// tabs/charstage.js, stage 5 (scenery) tabs/scenery.js (both on the generic tabs/assetws.js), stage 6 (storyboard)
+// tabs/storyboard.js; the last stage shows what it will hold and where its data lives today.
 import { store, esc } from '../js/store.js';
 import { STAGES, STATUS_LABEL, stageById } from '../js/flow.js';
 
-const MODULES = { lyrics: () => import('./lyrics.js'), script: () => import('./script.js'), breakdown: () => import('./breakdown.js'), characters: () => import('./charstage.js'), scenery: () => import('./scenery.js') };
+const MODULES = { lyrics: () => import('./lyrics.js'), script: () => import('./script.js'), breakdown: () => import('./breakdown.js'), characters: () => import('./charstage.js'), scenery: () => import('./scenery.js'), storyboard: () => import('./storyboard.js') };
 const LATER = {
-  storyboard: ['Timeline > shots and clips columns (shots.json).', 'timeline'],
   final: ['Review > Approvals, Queue and Costs.', 'approvals'],
 };
 export default {
@@ -52,7 +51,7 @@ export default {
     });
     body.addEventListener('click', (e) => { const a = e.target.closest('.sglater [data-view]'); if (a) window.WB.app.show(a.dataset.view); });
     document.addEventListener('wb:stage', () => { if (window.WB.app.active() === 'stage') showStage(); });
-    store.on((w) => { if (['stages', 'lyrics', 'scenes', 'breakdown', 'all'].includes(w) && window.WB.app.active() === 'stage') renderBar(); });
+    store.on((w) => { if (['stages', 'lyrics', 'scenes', 'breakdown', 'board', 'all'].includes(w) && window.WB.app.active() === 'stage') renderBar(); });
     this._show = showStage;
   },
   show() { return this._show?.(); },

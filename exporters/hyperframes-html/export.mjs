@@ -5,6 +5,7 @@
 //
 //   node export.mjs <compositionDir> <outDir> [--entry index.html] [--sample-fps 10] [--hyperframes <dir>]
 //                   [--hf-version 0.8.114] [--project <workbench project dir>] [--interactive]
+//                   [--lazy-media | --no-lazy-media] [--lazy-lead 15] [--lazy-first 10] [--lazy-budget-mb 150]
 //
 // outDir/
 //   index.html                     wrapper: the official player, full window, its own controls, nothing else
@@ -12,6 +13,10 @@
 //   composition/                   every file the composition uses, byte-identical, same relative layout
 //   manifest.json                  assets {path, kind, bytes, sha256, mime, media facts, usage}, totals, composition
 //   interactive.*                  only with --interactive: the click-anything layer (README: Interactive layer)
+//
+// --lazy-media (the default with --interactive, the web package; --no-lazy-media turns it off): the package's copy of
+// the entry HTML gets lazy/lazy-media.js inline, so each image / video loads shortly before it is on screen instead of
+// all at load (README: Lazy media). Every other file stays byte-identical; the composition sources are never touched.
 //
 // What is collected: static references (HTML src/href/poster/srcset/data-composition-src, inline and linked CSS url()
 // and @import, string literals in loaded scripts that name an existing file) plus every request the composition makes
@@ -25,8 +30,9 @@ import { join, resolve, dirname, relative, extname, posix, sep, basename } from 
 import { serve, launch, confine, kindOf, mimeOf, sha256, mediaInfo, sleep, argv, flag } from './lib.mjs';
 import { CFG, isPrivate, isMediaRootPath, readJSON } from '../../lib/store.mjs';
 import { addInteractive } from './interactive/build.mjs';
+import { addLazyMedia } from './lazy/build.mjs';
 
-const VALUED = ['--entry', '--sample-fps', '--hyperframes', '--hf-version', '--project'];
+const VALUED = ['--entry', '--sample-fps', '--hyperframes', '--hf-version', '--project', '--lazy-lead', '--lazy-first', '--lazy-budget-mb', '--lazy-min-kb'];
 const [compArg, outArg] = process.argv.slice(2).filter((a, i, all) => !a.startsWith('--') && !(i > 0 && VALUED.includes(all[i - 1])));
 if (!compArg || !outArg) {
   console.error('usage: node export.mjs <compositionDir> <outDir> [--entry index.html] [--sample-fps 10] [--hyperframes <dir>] [--hf-version X] [--interactive [--project <dir>]]');
@@ -453,6 +459,9 @@ const manifest = {
 writeFileSync(join(OUT, 'manifest.json'), JSON.stringify(manifest, null, 1));
 // optional interactive layer: extra files next to index.html; the plain package above is unchanged by it
 const interactiveFiles = flag('--interactive') ? addInteractive(OUT, { entry: ENTRY, title, project: argv('--project') }) : [];
+// optional lazy media: one inline script in the package's entry HTML (recorded in manifest.rewrites / lazy_media)
+const LAZY = !flag('--no-lazy-media') && (flag('--lazy-media') || flag('--interactive'));
+const lazy = LAZY ? addLazyMedia(OUT, { lead: argv('--lazy-lead'), first: argv('--lazy-first'), budgetMb: argv('--lazy-budget-mb'), minKb: argv('--lazy-min-kb') }) : null;
 
 const mb = (b) => (b / 1048576).toFixed(1) + ' MB';
 log(`\n${OUT}`);
@@ -465,4 +474,5 @@ if (external.size) log(`  external URLs (not packaged): ${[...external].slice(0,
 if (fonts.system_fonts.length) log(`  system fonts used by on-screen text (not packaged; supplied by the viewer's OS): ${fonts.system_fonts.join(', ')}`);
 if (errors.length) log(`  page errors during the pass: ${[...new Set(errors)].slice(0, 5).join(' | ')}`);
 if (interactiveFiles.length) log(`  interactive layer: ${interactiveFiles.join(', ')} (open /interactive.html)`);
+if (lazy) log(`  lazy media: ${lazy.scheduled} files (${mb(lazy.bytes)}) load from ${lazy.cfg.lead} s before they show; the first ${lazy.cfg.first} s first; ${lazy.unobserved} never seen on screen (load only if they show)`);
 log(`  serve it: node ${toPosix(relative(process.cwd(), join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), 'serve.mjs')))} ${toPosix(relative(process.cwd(), OUT)) || '.'}`);

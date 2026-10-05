@@ -32,12 +32,12 @@ outside the project folder, extra PRIVATE path rule. Env vars win: `WB_PROJECT`,
 | `mcp/server.mjs`, `mcp/test.mjs` | MCP server (stdio) and its end-to-end test |
 | `index.html`, `app.js`, `app.css` | the page shell |
 | `core/` | command registry + keymap, menus, palette, undo history, selection, projects/exports, preview dock, default commands, `rail.js` (stage rail + stage commands), `wizard.js` (new-project wizard), `sketch/` (the sketch tool: `mountSketch` / `openSketch`, API in its header) |
-| `js/` | store (data + live reload), timeline (the warp), columns, player, verify hooks, `flow.js` (the guided flow: stages + lyrics model), `scenes.js` (stage 2: scenes, intake, gaps, snapping), `breakdown.js` (stage 3: items, links, merge / split, the "Suggest from script" pre-pass), `assets.js` (stages 4 and 5: the asset workspace logic for characters, locations and props: iteration trees, branches, variants and their axes, statuses, estimates, prompts, the variant per scene) and `characters.js` (the stage-4 names on top of it), all shared with `lib/store.mjs` |
-| `tabs/` | one module per view; `tabs/registry.js` lists pages and sub-views; `stage.js` (stage workspaces), `lyrics.js` (stage 1), `script.js` (stage 2), `breakdown.js` (stage 3), `assetws.js` (the generic asset workspace + its commands), `charstage.js` (stage 4 on it; `characters.js` is the Assets sub-view), `scenery.js` (stage 5 on it: locations and props) |
-| `docs/SPEC_v3_GUIDED.md` | the guided creation flow (seven stages); phase 1 = stage rail, wizard, lyrics stage; phase 2 = the script stage + sketch files; phase 3 = the breakdown stage; phase 4 = the characters stage; phase 5 = the scenery stage (locations, props) on the generic asset workspace |
+| `js/` | store (data + live reload), timeline (the warp), columns, player, verify hooks, `flow.js` (the guided flow: stages + lyrics model), `scenes.js` (stage 2: scenes, intake, gaps, snapping), `breakdown.js` (stage 3: items, links, merge / split, the "Suggest from script" pre-pass), `assets.js` (stages 4 and 5: the asset workspace logic for characters, locations and props: iteration trees, branches, variants and their axes, statuses, estimates, prompts, the variant per scene) and `characters.js` (the stage-4 names on top of it), `storyboard.js` (stage 6: shots, tiling on the beat grid, "shots from beats", the assets a shot needs and their variants, estimates, gaps), all shared with `lib/store.mjs` |
+| `tabs/` | one module per view; `tabs/registry.js` lists pages and sub-views; `stage.js` (stage workspaces), `lyrics.js` (stage 1), `script.js` (stage 2), `breakdown.js` (stage 3), `assetws.js` (the generic asset workspace + its commands), `charstage.js` (stage 4 on it; `characters.js` is the Assets sub-view), `scenery.js` (stage 5 on it: locations and props), `storyboard.js` (stage 6: the board, the shot panel, the gaps, the estimate vs the cap) |
+| `docs/SPEC_v3_GUIDED.md` | the guided creation flow (seven stages); phase 1 = stage rail, wizard, lyrics stage; phase 2 = the script stage + sketch files; phase 3 = the breakdown stage; phase 4 = the characters stage; phase 5 = the scenery stage (locations, props) on the generic asset workspace; phase 6 = the storyboard stage (shots per scene, gaps) |
 | `catalog/` | the free starter catalogue (CC0 / public-domain bases: bodies, poses, face angles, garments, locations, props; `catalog.json`, `LICENSES.md`), served read-only for stage 4 |
 | `importers/` | `new_project.mjs` (song + lyrics -> project), `azemar_*` (the owner's production, kept as a worked example) |
-| `tools/` | `verify.mjs` (UI suite; its stage-4 / 5 blocks are `verify-characters.mjs` (v7) and `verify-scenery.mjs` (v8), each runnable alone), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `make_demo.mjs`, `chrome.mjs` |
+| `tools/` | `verify.mjs` (UI suite; its stage-4 / 5 blocks are `verify-characters.mjs` (v7), `verify-scenery.mjs` (v8) and `verify-storyboard.mjs` (v9), each runnable alone), `security-test.mjs`, `sketch-test.mjs` (+ `sketch-dev.html`), `tiny-png.mjs` (test PNGs), `make_demo.mjs`, `chrome.mjs` |
 | `exporters/hyperframes-html/` | HTML package of a HyperFrames composition: `export.mjs`, `verify.mjs`, `serve.mjs` (see Export) |
 | `data/<project>/` | one folder per project; only `data/_template/` and `data/demo/` are in git |
 
@@ -52,7 +52,8 @@ relative to the media base; any other path is relative to the project folder. Fu
 - `events.json`, `energy.json`, `peaks/*.json`: importer output.
 - `script.json`: `lines[{id "s07", t0, lyric, mode W|S|B|W→S, action, line_id}]`.
 - `shots.json`: `shots[{id, t0, t1, section, kind, title, cast[], locations[], clips[use ids], thumb}]` and clip
-  `uses[{id "G05@20158", clip, take, in_ms, t0, t1, file, start_image, location, thumb}]`.
+  `uses[{id "G05@20158", clip, take, in_ms, t0, t1, file, start_image, location, thumb}]`. Importer output, never
+  rewritten: the storyboard (stage 6) is `storyboard.json`, which reads as v1 from these shots until its first write.
 - `entities/{characters,locations,props}/<id>.json` + `entities/index.json`: characters carry `looks[]` (status draft /
   review / approved; approved only from the page). Stage 4 adds to a character `base{text, refs[{path, source:
   catalog|openverse|photo|sketch|media, private?, licence?, creator?, url?, ...}], at, by, via}` (the director's) and
@@ -95,6 +96,19 @@ relative to the media base; any other path is relative to the project folder. Fu
   the page), `notes[{id "bn01", item|null, scene?, text, by, via, to?: "agent", kind?: request|extract, status, version,
   replies[]}]`. Links name scene and beat ids of `scenes.json` (scene ids are never reused). Missing = no breakdown yet.
   Logic: `js/breakdown.js`.
+- `storyboard.json` (shared, `{rev}`): stage 6, the storyboard. `current`, `versions[{id "v3", created, by, via, message,
+  from?, script?, shots[{id "sh03", scene, t0, t1, kind, title, text, camera, sketch, beats[], cast[], locations[],
+  props[], variants{<entity id>: <variant / look id> | null}, gen: still|video|null, clips[], thumb?, section?}]}]`
+  (immutable; a save appends), `notes[{id "sbn01", shot|null, scene?, text, by, via, to?: "agent", kind?:
+  request|storyboard|fill_gaps, gaps?, status, version, replies[]}]`. The shots of a scene TILE it (first starts with
+  the scene, each ends where the next starts, last ends with it) on the beat grid; kinds wide / medium / close / insert
+  / performance / xp-desktop (or another short word); the asset chips are entity ids, the variant each needs is the
+  scene's (the entity's `uses`, else the agent's proposal, else the root) unless the shot's `variants` overrides it;
+  `gen` = what it needs generated (default: insert / xp-desktop a still, else a video = a start frame + image-to-video).
+  A shot's approval is `approvals.json` `shot:<id>` (approved / locked only from the page). A generation for a shot is a
+  request with `target: "shot:<id>"` (kinds `shot-still`, `shot-video`). Missing = v1 derived from `shots.json` (ids,
+  thumbs, clip uses kept; each shot in the scene at its middle); the timeline shots / cast / status columns read the
+  storyboard. Logic: `js/storyboard.js`.
 - `sketches/<id>.json|.png|.mask.png`: sketches (vector strokes + pins + metadata, the flattened image, the edit mask),
   written by `sketch_save` and registered in `media.json` (kind `sketch`, links `scenes` / `entities` / `shots`);
   under `private/sketches/` when drawn over a private underlay. Not snapshotted (the script versions point at them).
@@ -113,12 +127,21 @@ timeline ranges and media ranges played.
 ```
 node exporters/hyperframes-html/export.mjs <compositionDir> <outDir> [--entry index.html] [--sample-fps 10]
 node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 12]
+node exporters/hyperframes-html/export.mjs <compositionDir> <outDir> --interactive   # web package: lazy media on
+node exporters/hyperframes-html/verify.mjs <outDir> --against <same export without lazy> --every 2 --seams
 ```
 
-- Never edit composition files in the package. The exporter only rewrites root-absolute paths, and the player's CDN
-  runtime URL to the vendored runtime. Each rewrite is listed in `manifest.rewrites`.
-- No trimming, re-encoding, custom boot screens or prefetch logic in the package. Compression is a separate, later
-  step that reads `manifest.json` and must pass `verify.mjs` against the same render again.
+- Never edit composition files in the package. The exporter only rewrites root-absolute paths, the player's CDN
+  runtime URL (to the vendored runtime) and, with lazy media, the package's entry HTML. Each rewrite is listed in
+  `manifest.rewrites`.
+- Lazy media (`--lazy-media`, default with `--interactive`; `--no-lazy-media` to skip; `lazy/build.mjs <out> --off`
+  undoes it): `lazy/lazy-media.js` and its schedule (`usage.visible`) go inline in the package's entry HTML. It parks
+  the `src` of large images and videos until about 15 s before they show (the first 10 s load first) and parks far
+  files again over a 150 MB budget. The interactive layer waits for the opening before `IX.ready` and holds the clock
+  while the playhead's files load. It must leave every frame identical: check with `verify.mjs --against <the export
+  without it> --every 2 --seams`. See the exporter README, "Lazy media".
+- No trimming, re-encoding or custom boot screens in the package. Compression is a separate, later step that reads
+  `manifest.json` and must pass `verify.mjs` against the same render again.
 - `manifest.fonts.system_fonts` lists text that relies on fonts installed on the viewer's machine. Report it when
   delivering.
 
@@ -169,6 +192,18 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 
    `review`; a location: axes angle wide / medium / reverse / a word, tod dawn / day / dusk / night, weather; a prop:
    angle, state broken / lit / ...; `scenes` = where you propose it). The base, keep / branch / revert, approving the
    base or a variant and the variant each scene uses are the director's, in the page (`asset_act`, no tool).
+   Storyboard (stage 6): `storyboard_get` gives the scenes in song time with their beats, what each needs (`needs`:
+   the breakdown's assets and the variant the scene uses) and their shots (frame sketch PNG + pins, the assets with
+   their variant, image file and approved or `why` not, status, requests, estimate), the beat grid, the gaps and the
+   asks. Write shots with `shots_update` (a new version each time; one shot per scene beat or group of beats, tiled to
+   the scene and cut on the grid with `snap: "beats"`; kind, the action, camera / motion, cast / locations / props as
+   entity ids, `variants` only where the shot differs from the scene, a frame via `sketch_save` with `links.shots`).
+   An ask of kind `storyboard` = propose / complete the shots; `fill_gaps` = draft the generation requests: `gaps_get`
+   gives, per shot without a request or clip, the drafts (`shot-still` first, then `shot-video` from its output; target
+   `shot:<id>`, refs = the approved variant / look images + the frame sketch, tool, honest `est_cost`), the assets not
+   approved yet (propose their sheets first) and the total against the cap; create them with `request_create`, then
+   answer the ask (`shot_note_resolve`). A shot's `approved` / `locked` is the director's (403); set `review` and say why
+   (`shot_note_add`).
 5. **Snapshot before big edits** (`snapshot_save`); a restore snapshots the current state first, so it is undoable.
 6. Register every new file (`media_add`, or automatically on `request_update` done) so it shows up in the page.
 
@@ -248,6 +283,10 @@ node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 
   (short-word axis values, checked scene ids); `entity_upsert` ignores `iter` / `base` / `uses` and refuses to approve
   a variant (403); a request carries one link (`asset` wins over `char`). An agent's snapshot restore brings back no
   variant approval that is not the current one and keeps the director's current scene picks.
+- Stage 6 (storyboard): every `shots_update` is a new version; shot, scene, entity, variant, sketch, clip and beat ids are
+  checked (400); a shot's approval lives in `approvals.json` and `shots_update` refuses `approved` / `locked` (403, also
+  with `director_approved` and offline); a page save of `storyboard.json` cannot rewrite a saved version or a note's
+  author (stamped director / page) and a malformed file is refused (400). Nothing in the stage spends.
 - Entity thumbnails and copies made from private media stay private (`thumbs/priv_*`, `private/<kind>/`).
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.
@@ -284,10 +323,14 @@ initial project. Tools:
 | `asset_iteration_add` | register the output of an approved, done request as a node of the asset tree it names (`asset` / `char` link; never approves or chooses) |
 | `asset_note_add` | a note on an asset, a tree, a node or a scene's use of it; reply_to (+ resolve) |
 | `variant_create` | propose a variant: a location's angle / time of day / weather, a prop's angle / state (a character: a look); status `review`; `scenes` = where you propose it |
+| `storyboard_get` | stage 6: the scenes in song time (beats, what each needs + its variant) with their shots (time, bars, kind, text, camera, frame sketch PNG + pins, assets with variant, image file, approved or why not, status, requests, estimate), shots outside the script, the beat grid, gap counts, notes, asks, versions + diff |
+| `shots_update` | a new storyboard version (full list / upsert + remove / restore; snap to beats or bars; scenes re-tiled); statuses draft / review / changes (approved / locked refused) |
+| `shot_note_add`, `shot_note_resolve` | notes on a shot or a scene, thread replies, resolve (answers the storyboard / fill-the-gaps asks) |
+| `gaps_get` | what is still missing (unscripted time, scenes without shots, shots without a frame, assets not approved, shots without a request or clip), the draft requests per shot (prompt, refs, tool, est) and the total vs the cap |
 | `snapshot_save`, `snapshot_list`, `snapshot_restore` | durable checkpoints |
 | `song_get` | sections, lyric lines with word timings, events, grid |
 | `timeline_query` | everything between t0 and t1 across all columns |
-| `shots_list`, `shot_get`, `shot_update` | storyboard; status, take, in-point, title, a note |
+| `shots_list`, `shot_get`, `shot_update` | the shots.json shots and clip uses: status, take, in-point, title, a note (stage 6 shots: `storyboard_get`) |
 | `entities_list`, `entity_get`, `entity_upsert` | characters (with looks), locations, props |
 | `media_list`, `media_add` | the media index; add = thumbnails + links |
 | `notes_list`, `note_add`, `note_resolve` | notes pinned to time; resolve with a reply |

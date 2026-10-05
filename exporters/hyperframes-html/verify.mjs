@@ -1,15 +1,21 @@
 #!/usr/bin/env node
-// Verify an HTML package made by export.mjs against the MP4 render of the same composition.
+// Verify an HTML package made by export.mjs against the MP4 render of the same composition, or against another
+// package of it (for example the same export without --lazy-media: then frames must match pixel for pixel).
 //
-//   node verify.mjs <outDir> --against <render.mp4> [--n 12 | --times 4,18.5,...] [--play 6] [--report <dir>]
-//                   [--max-mad 5] [--min-psnr 20]
+//   node verify.mjs <outDir> --against <render.mp4 | otherPackageDir> [--n 12 | --times 4,18.5,... | --every 2]
+//                   [--seams] [--play 6] [--report <dir>] [--max-mad 5] [--min-psnr 20]
+//
+// --every s: a frame every s seconds; --seams: also just after the start and just before the end of every visible
+// range in manifest.json (shot changes, where a lazily loaded file first shows). Against a package the thresholds
+// default to exact (--max-mad 0, --min-psnr 99) and the report lists every frame that differs.
 //
 // 1. integrity: every asset in manifest.json is present with the recorded sha256
 // 2. serves outDir, opens index.html headless (viewport = composition size, so the player shows it at 1:1), waits for
 //    the player's ready + assetsReady, checks the runtime came from the package (no request leaves the server)
-// 3. frames: seeks through the player API (player.seek) to N frame times of the render, waits until the on-screen
-//    media have decoded, screenshots, and compares with the render's frame: mean absolute difference (% of 255) and
-//    PSNR (dB) over RGB. The player's control bar is hidden for the captures (controls attribute removed).
+// 3. frames: seeks through the player API (player.seek) to N frame times of the render, waits for a lazy-media
+//    package's files at that time (window.__hfLazy.until) and until the on-screen media have decoded, screenshots, and
+//    compares with the render's frame (or the other package's, captured the same way): mean absolute difference
+//    (% of 255) and PSNR (dB) over RGB. The player's control bar is hidden for the captures (controls removed).
 // 4. playback: player.play() for --play s, the clock must advance
 // 5. requests: no 4xx/5xx except files the composition probes that are missing in the source too
 //    (manifest.missing_in_source), no network failures, no page errors
@@ -19,14 +25,15 @@
 import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { serve, launch, confine, sha256, rgb, ffprobe, sleep, argv } from './lib.mjs';
+import { serve, launch, confine, sha256, rgb, ffprobe, sleep, argv, flag } from './lib.mjs';
 
 const OUT = resolve(process.argv[2] || '');
 const RENDER = argv('--against');
 if (!process.argv[2] || !existsSync(join(OUT, 'manifest.json')) || !RENDER || !existsSync(RENDER)) {
-  console.error('usage: node verify.mjs <outDir> --against <render.mp4> [--n 12 | --times a,b,c] [--play 6] [--report <dir>]');
+  console.error('usage: node verify.mjs <outDir> --against <render.mp4 | otherPackageDir> [--n 12 | --times a,b,c | --every 2] [--seams] [--play 6] [--report <dir>]');
   process.exit(2);
 }
+const REF_PKG = existsSync(join(RENDER, 'manifest.json')) ? resolve(RENDER) : null; // another package: frames must be identical
 const REPORT = resolve(argv('--report', OUT.replace(/[\\/]+$/, '') + '-verify'));
 mkdirSync(REPORT, { recursive: true });
 const M = JSON.parse(readFileSync(join(OUT, 'manifest.json'), 'utf8'));
@@ -41,77 +48,106 @@ R.integrity = { assets: M.assets.length, problems: bad };
 say(`integrity: ${M.assets.length} assets, ${bad.length ? bad.length + ' problems: ' + bad.slice(0, 5).join(', ') : 'all present with the recorded sha256'}`);
 
 // ---------- render facts and frame times
-const MAX_MAD = Number(argv('--max-mad', 5)), MIN_PSNR = Number(argv('--min-psnr', 20));
+const MAX_MAD = Number(argv('--max-mad', REF_PKG ? 0 : 5)), MIN_PSNR = Number(argv('--min-psnr', REF_PKG ? 99 : 20));
 if (Number.isNaN(MAX_MAD) || Number.isNaN(MIN_PSNR)) { console.error('--max-mad and --min-psnr take numbers'); process.exit(2); }
-const probe = ffprobe(RENDER);
-const vs = probe && (probe.streams || []).find((s) => s.codec_type === 'video');
-if (!vs) { console.error(`cannot read a video stream from ${RENDER} (ffprobe failed or the file has no video)`); process.exit(2); }
-const [fa, fb] = String(vs.r_frame_rate || '').split('/').map(Number), FPS = fa / (fb || 1);
-if (!(FPS > 0)) { console.error(`cannot read the frame rate of ${RENDER} (r_frame_rate ${vs.r_frame_rate})`); process.exit(2); }
-const startPts = Number(vs.start_time) || 0;
+let FPS = 30, startPts = 0;
+if (!REF_PKG) {
+  const probe = ffprobe(RENDER);
+  const vs = probe && (probe.streams || []).find((s) => s.codec_type === 'video');
+  if (!vs) { console.error(`cannot read a video stream from ${RENDER} (ffprobe failed or the file has no video)`); process.exit(2); }
+  const [fa, fb] = String(vs.r_frame_rate || '').split('/').map(Number); FPS = fa / (fb || 1);
+  if (!(FPS > 0)) { console.error(`cannot read the frame rate of ${RENDER} (r_frame_rate ${vs.r_frame_rate})`); process.exit(2); }
+  startPts = Number(vs.start_time) || 0;
+}
 let times;
 if (argv('--times')) times = argv('--times').split(',').map(Number);
+else if (argv('--every')) { const e = Number(argv('--every')); times = e > 0 ? Array.from({ length: Math.floor((D - 1e-3) / e) + 1 }, (_, k) => k * e) : []; }
 else { const n = Number(argv('--n', 12)); times = Array.from({ length: n }, (_, k) => D * (k + 0.5) / n); }
-if (!times.length || times.some((t) => !Number.isFinite(t))) { console.error('need at least one frame time: --n >= 1 or --times a,b,c (numbers)'); process.exit(2); }
-const frames = times.map((t) => Math.min(Math.round(t * FPS), Math.floor((D - 1e-3) * FPS)));
+if (flag('--seams')) for (const a of M.assets) for (const [p, q] of (a.usage && a.usage.visible) || []) times.push(p + 0.05, q - 0.05);
+times = [...new Set(times.filter((t) => t >= 0 && t < D).map((t) => +t.toFixed(3)))].sort((p, q) => p - q);
+if (!times.length || times.some((t) => !Number.isFinite(t))) { console.error('need at least one frame time: --n >= 1, --every s or --times a,b,c (numbers)'); process.exit(2); }
+// frame times: against a package, the composition's fps (else 30, the runtime's canonical rate). The player drives
+// the timeline directly or through the HyperFrames runtime (which snaps to frames) depending on how fast the timeline
+// registers, so both sides are sent exact frame times.
+if (REF_PKG) FPS = Number(M.composition.fps) || 30;
+const frames = times.map((t) => Math.min(Math.round(t * FPS), Math.floor((D - 1e-3) * FPS)) / FPS);
 
 // ---------- 2. load
-const srv = await serve([{ prefix: '/', dir: OUT }]);
+// one server (the browser may reach only it): the package at /, a reference package at /__ref/
+const srv = await serve([...(REF_PKG ? [{ prefix: '/__ref/', dir: REF_PKG }] : []), { prefix: '/', dir: OUT }]);
 const browser = await launch(srv.url);
-const page = await browser.newPage();
-await page.setViewport({ width: W, height: H, deviceScaleFactor: 1 });
-const errors = [], netFails = [], externalReqs = [];
-page.on('pageerror', (e) => errors.push(String(e && e.message || e)));
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-await confine(page, srv.url, (u) => externalReqs.push(u)); // aborted unfetched, still reported as external
-page.on('requestfailed', (q) => { const f = q.failure() && q.failure().errorText; if (f !== 'net::ERR_ABORTED' && f !== 'net::ERR_BLOCKED_BY_CLIENT') netFails.push(`${q.url()} ${f}`); });
-const t0 = Date.now();
-await page.goto(srv.url + 'index.html', { waitUntil: 'load', timeout: 300000 });
-await page.waitForFunction(() => { const p = document.querySelector('hyperframes-player'); return p && p.ready && p.duration > 0; }, { timeout: 300000, polling: 100 });
-const tReady = Date.now() - t0;
-await page.waitForFunction(() => document.querySelector('hyperframes-player').assetsReady, { timeout: 300000, polling: 100 }).catch(() => {});
-const tAssets = Date.now() - t0;
-const cf = page.frames().find((f) => f.url().includes('/composition/'));
-if (!cf) { console.error('composition iframe not found in the player'); await browser.close(); await srv.close(); process.exit(1); }
-await page.waitForFunction(() => { try { const w = document.querySelector('hyperframes-player').iframeElement.contentWindow; return !!(w.__hf || w.__player); } catch { return false; } }, { timeout: 20000, polling: 100 }).catch(() => {});
-const rt = await cf.evaluate(() => ({ runtime: !!(window.__hf || window.__player), scripts: [...document.scripts].map((s) => s.src).filter((s) => /hyperframe\.runtime/.test(s)) }));
-R.load = { readyMs: tReady, assetsReadyMs: tAssets, runtimeLoaded: rt.runtime, runtimeScript: rt.scripts.map((s) => s.replace(srv.url, '/')) };
-say(`load: player ready ${(tReady / 1000).toFixed(1)} s, assets ready ${(tAssets / 1000).toFixed(1)} s; HyperFrames runtime injected: ${rt.runtime ? 'yes, ' + R.load.runtimeScript.join(', ') : 'no (the player drives window.__timelines directly)'}`);
+async function open(base) {
+  const page = await browser.newPage();
+  await page.setViewport({ width: W, height: H, deviceScaleFactor: 1 });
+  const o = { page, errors: [], netFails: [], externalReqs: [] };
+  page.on('pageerror', (e) => o.errors.push(String(e && e.message || e)));
+  page.on('console', (m) => { if (m.type() === 'error') o.errors.push(m.text()); });
+  await confine(page, srv.url, (u) => o.externalReqs.push(u)); // aborted unfetched, still reported as external
+  page.on('requestfailed', (q) => { const f = q.failure() && q.failure().errorText; if (f !== 'net::ERR_ABORTED' && f !== 'net::ERR_BLOCKED_BY_CLIENT') o.netFails.push(`${q.url()} ${f}`); });
+  const t0 = Date.now();
+  await page.goto(srv.url + base + 'index.html', { waitUntil: 'load', timeout: 300000 });
+  await page.waitForFunction(() => { const p = document.querySelector('hyperframes-player'); return p && p.ready && p.duration > 0; }, { timeout: 300000, polling: 100 });
+  o.tReady = Date.now() - t0;
+  await page.waitForFunction(() => document.querySelector('hyperframes-player').assetsReady, { timeout: 300000, polling: 100 }).catch(() => {});
+  o.tAssets = Date.now() - t0;
+  o.cf = page.frames().find((f) => f.url().includes('/composition/'));
+  if (!o.cf) throw new Error(`composition iframe not found in the player (/${base})`);
+  await page.waitForFunction(() => { try { const w = document.querySelector('hyperframes-player').iframeElement.contentWindow; return !!(w.__hf || w.__player); } catch { return false; } }, { timeout: 20000, polling: 100 }).catch(() => {});
+  await page.evaluate(() => document.querySelector('hyperframes-player').removeAttribute('controls'));
+  return o;
+}
+let P;
+try { P = await open(''); } catch (e) { console.error(String(e.message || e)); await browser.close(); await srv.close(); process.exit(1); }
+const { page, cf, errors, netFails, externalReqs } = P;
+const rt = await cf.evaluate(() => ({ runtime: !!(window.__hf || window.__player), scripts: [...document.scripts].map((s) => s.src).filter((s) => /hyperframe.runtime/.test(s)), lazy: !!window.__hfLazy }));
+R.load = { readyMs: P.tReady, assetsReadyMs: P.tAssets, runtimeLoaded: rt.runtime, runtimeScript: rt.scripts.map((s) => s.replace(srv.url, '/')), lazyMedia: rt.lazy };
+say(`load: player ready ${(P.tReady / 1000).toFixed(1)} s, assets ready ${(P.tAssets / 1000).toFixed(1)} s; HyperFrames runtime injected: ${rt.runtime ? 'yes, ' + R.load.runtimeScript.join(', ') : 'no (the player drives window.__timelines directly)'}${rt.lazy ? '; lazy media: yes' : ''}`);
+const REF = REF_PKG ? await open('__ref/') : null;
 
 // ---------- 3. frames
-await page.evaluate(() => document.querySelector('hyperframes-player').removeAttribute('controls'));
 await sleep(300);
-const settle = () => cf.evaluate(() => new Promise((done) => {
+// a lazy-media package loads the files of time t first (and waits); then the on-screen media must have decoded
+const settle = (frame) => frame.evaluate(() => new Promise((done) => {
   const t0 = performance.now();
   const root = document.querySelector('[data-composition-id]'), Rr = root.getBoundingClientRect();
-  const pending = () => [...document.querySelectorAll('video')].filter((v) => {
+  const pending = () => [...document.querySelectorAll('video, img')].filter((v) => {
     if (!v.isConnected || (v.checkVisibility && !v.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }))) return false;
     const r = v.getBoundingClientRect(); if (!(r.width > 0 && r.height > 0 && r.right > Rr.left && r.left < Rr.right && r.bottom > Rr.top && r.top < Rr.bottom)) return false;
-    return v.seeking || v.readyState < 2;
+    if (v.hasAttribute('data-hf-lazy')) return true; // parked by the lazy loader but on screen
+    return v.tagName === 'IMG' ? !v.complete : v.seeking || v.readyState < 2;
   });
   (function poll() {
     const p = pending();
-    if (!p.length || performance.now() - t0 > 15000) requestAnimationFrame(() => requestAnimationFrame(() => done(p.map((v) => (v.currentSrc || v.src).split('/').pop()))));
+    if (!p.length || performance.now() - t0 > 15000) requestAnimationFrame(() => requestAnimationFrame(() => done(p.map((v) => (v.currentSrc || v.src || v.getAttribute('data-hf-lazy')).split('/').pop()))));
     else setTimeout(poll, 20);
   })();
 }));
+async function capture(o, t) {
+  await o.page.evaluate((t) => document.querySelector('hyperframes-player').seek(t), t);
+  await o.cf.evaluate((t) => window.__hfLazy ? window.__hfLazy.until(t, t + 0.05, 30000) : true, t);
+  let pend = await settle(o.cf);
+  await sleep(120); pend = await settle(o.cf); // a second pass catches media the first seek only revealed
+  return { shot: await o.page.screenshot({ type: 'png' }), pend };
+}
 const res = [];
-for (const i of frames) {
-  const t = i / FPS;
-  await page.evaluate((t) => document.querySelector('hyperframes-player').seek(t), t);
-  let pend = await settle();
-  await sleep(120); pend = await settle(); // a second pass catches media the first seek only revealed
-  const shot = await page.screenshot({ type: 'png' });
-  const A = rgb(shot, W, H), B = rgb(RENDER, W, H, Math.max(0, startPts + (i - 0.25) / FPS).toFixed(4));
-  let sad = 0, se = 0; for (let k = 0; k < A.length; k++) { const d = A[k] - B[k]; sad += d < 0 ? -d : d; se += d * d; }
+for (const t of frames) {
+  const i = Math.round(t * FPS);
+  const { shot, pend } = await capture(P, t);
+  const ref = REF ? await capture(REF, t) : null;
+  const A = rgb(shot, W, H), B = REF ? rgb(ref.shot, W, H) : rgb(RENDER, W, H, Math.max(0, startPts + (i - 0.25) / FPS).toFixed(4));
+  let sad = 0, se = 0, diff = 0; for (let k = 0; k < A.length; k++) { const d = A[k] - B[k]; sad += d < 0 ? -d : d; se += d * d; if (d) diff++; }
   const mad = sad / A.length / 255 * 100, mse = se / A.length, psnr = mse === 0 ? 99 : 10 * Math.log10(255 * 255 / mse);
   const name = `cmp-${t.toFixed(3)}.jpg`;
+  const bad = mad > MAX_MAD || psnr < MIN_PSNR;
   writeFileSync(join(REPORT, 'ours.png'), shot);
-  execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', join(REPORT, 'ours.png'), '-ss', Math.max(0, startPts + (i - 0.25) / FPS).toFixed(4), '-i', RENDER,
+  if (REF) writeFileSync(join(REPORT, 'ref.png'), ref.shot);
+  if (!REF || bad) execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', join(REPORT, 'ours.png'), ...(REF ? ['-i', join(REPORT, 'ref.png')] : ['-ss', Math.max(0, startPts + (i - 0.25) / FPS).toFixed(4), '-i', RENDER]),
     '-filter_complex', `[1:v]scale=${W}:${H}[r];[0:v][r]hstack=inputs=2,scale=1600:-2`, '-frames:v', '1', '-q:v', '4', join(REPORT, name)]);
-  res.push({ t: +t.toFixed(3), frame: i, madPct: +mad.toFixed(3), psnr: +psnr.toFixed(2), pendingMedia: pend, image: name });
-  say(`  t=${t.toFixed(3).padStart(8)}  MAD ${mad.toFixed(2).padStart(5)} %  PSNR ${psnr.toFixed(1).padStart(5)} dB${pend.length ? '  pending: ' + pend.join(',') : ''}`);
+  const pendAll = [...pend, ...(ref ? ref.pend.map((x) => 'ref:' + x) : [])];
+  res.push({ t: +t.toFixed(3), frame: i, madPct: +mad.toFixed(3), psnr: +psnr.toFixed(2), differingSamples: diff, pendingMedia: pendAll, image: !REF || bad ? name : undefined });
+  say(`  t=${t.toFixed(3).padStart(8)}  MAD ${mad.toFixed(2).padStart(5)} %  PSNR ${psnr.toFixed(1).padStart(5)} dB${REF ? (diff ? `  ${diff} samples differ` : '  identical') : ''}${pendAll.length ? '  pending: ' + pendAll.join(',') : ''}`);
 }
+if (REF) { R.reference = { package: REF_PKG, identical: res.filter((x) => !x.differingSamples).length, of: res.length }; R.lazy = await cf.evaluate(() => window.__hfLazy ? window.__hfLazy.stats() : null); await REF.page.close(); }
 R.frames = res;
 
 // ---------- 4. playback
@@ -129,9 +165,10 @@ await srv.close();
 
 // ---------- 5. requests
 const probed = new Set((M.missing_in_source || []).map((m) => '/composition/' + m.path));
-const httpErr = srv.log.filter((r) => r.status >= 400);
+const LOG = srv.log.filter((r) => !r.path.startsWith('/__ref/')); // the reference package's requests are not ours
+const httpErr = LOG.filter((r) => r.status >= 400);
 R.requests = {
-  total: srv.log.length, bytes: srv.log.reduce((s, r) => s + r.bytes, 0),
+  total: LOG.length, bytes: LOG.reduce((s, r) => s + r.bytes, 0),
   failed: httpErr.filter((r) => !probed.has(r.path)).map((r) => `${r.status} ${r.method} ${r.path}`),
   expectedMissing: httpErr.filter((r) => probed.has(r.path)).map((r) => `${r.status} ${r.method} ${r.path}`),
   networkFailures: netFails, external: [...new Set(externalReqs)], pageErrors: [...new Set(errors)],
@@ -141,6 +178,7 @@ R.summary = { frames: res.length, madPctMean: +avg('madPct').toFixed(3), madPctM
 const badFrames = res.filter((x) => x.madPct > MAX_MAD || x.psnr < MIN_PSNR).map((x) => x.t), pendingFrames = res.filter((x) => x.pendingMedia.length).map((x) => x.t);
 R.thresholds = { maxMadPct: MAX_MAD, minPsnr: MIN_PSNR, failedFrames: badFrames, pendingMediaFrames: pendingFrames };
 writeFileSync(join(REPORT, 'verify.json'), JSON.stringify(R, null, 1));
+if (REF) say(`identical frames: ${R.reference.identical} of ${R.reference.of}${R.lazy ? ` (lazy loader at the end: ${JSON.stringify(R.lazy)})` : ''}`);
 say(`frames vs ${RENDER}: ${res.length} times, MAD mean ${R.summary.madPctMean} % (max ${R.summary.madPctMax}), PSNR mean ${R.summary.psnrMean} dB (min ${R.summary.psnrMin})`);
 say(`requests: ${R.requests.total}, failed: ${R.requests.failed.length ? R.requests.failed.join(', ') : 'none'}; expected-missing probes: ${R.requests.expectedMissing.length}; network failures: ${netFails.length || 'none'}; external: ${R.requests.external.length || 'none'}; page errors: ${R.requests.pageErrors.length ? R.requests.pageErrors.slice(0, 3).join(' | ') : 'none'}`);
 if (badFrames.length) say(`FAIL frames above MAD ${MAX_MAD} % or below PSNR ${MIN_PSNR} dB at t = ${badFrames.join(', ')}`);

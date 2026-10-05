@@ -12,9 +12,11 @@
 //   A version is immutable; a save appends one and moves `current`; a restore appends a copy. Line ids are stable
 //   across versions (a changed line keeps its id, so its timings and notes follow it); song.json lines use the same
 //   ids. A project without the file reads as one version derived from song.json (ids = the song's line ids).
-// scenes.json (stage 2, the script draft): js/scenes.js. breakdown.json (stage 3): js/breakdown.js.
+// scenes.json (stage 2, the script draft): js/scenes.js. breakdown.json (stage 3): js/breakdown.js. storyboard.json
+// (stage 6): js/storyboard.js.
 import { currentScript, gaps as scriptGaps, intakeOpen } from './scenes.js';
 import { currentBreakdown, PROMOTABLE } from './breakdown.js';
+import { currentBoard } from './storyboard.js';
 
 export const STAGES = [
   { id: 'lyrics', title: 'Lyrics', n: 1, does: 'the poem: lines, sections, notes, versions; the song file when you have it' },
@@ -30,7 +32,7 @@ export const STATUS_LABEL = { empty: 'empty', in_progress: 'in progress', needs_
 export const stageById = (id) => STAGES.find(s => s.id === id);
 
 // what the project files already hold (the page passes its store, the server reads the files)
-export function projectFacts({ song, script, shots, entities, lyrics, scenes, breakdown }) {
+export function projectFacts({ song, script, shots, entities, lyrics, scenes, breakdown, storyboard }) {
   const ents = entities || [];
   const bitems = (currentBreakdown(breakdown)?.items || []).filter(i => !i.dropped);
   const sv = currentScript(scenes), dur = song?.duration_ms || 0;
@@ -46,12 +48,16 @@ export function projectFacts({ song, script, shots, entities, lyrics, scenes, br
     items: bitems.length, itemsToPromote: bitems.filter(i => PROMOTABLE.includes(i.kind) && !breakdown?.states?.[i.id]?.entity_id).length,
     sceneryToPromote: bitems.filter(i => (i.kind === 'location' || i.kind === 'prop') && !breakdown?.states?.[i.id]?.entity_id).length,
     breakdownAsks: (breakdown?.notes || []).filter(n => n.status === 'open' && n.to === 'agent').length,
+    // stage 6: the storyboard (a project without storyboard.json reads its shots from shots.json)
+    ...(() => { const bs = currentBoard(storyboard)?.shots || [];
+      return { boardShots: bs.length, scenesNoShots: sv && storyboard ? sv.scenes.filter(s => !bs.some(x => x.scene === s.id)).length : 0, shotsNoFrame: bs.filter(s => !s.sketch && !s.thumb).length,
+        boardAsks: (storyboard?.notes || []).filter(n => n.status === 'open' && n.to === 'agent').length }; })(),
   };
 }
 // a project without stages.json: a stage counts as done when its files already hold content (existing productions)
 export function deriveStages(f) {
   const has = { lyrics: f.lines > 0, script: f.script > 0 || f.scenes > 0, breakdown: (f.items || 0) + f.characters + f.locations + f.props > 0, characters: f.characters > 0,
-    scenery: f.locations + f.props > 0, storyboard: f.shots > 0, final: false };
+    scenery: f.locations + f.props > 0, storyboard: f.shots > 0 || (f.boardShots || 0) > 0, final: false };
   return { rev: 0, derived: true, stages: STAGES.map(s => ({ id: s.id, status: has[s.id] ? 'done' : 'empty', ...(has[s.id] ? { done_by: 'derived' } : {}), blockers: [] })) };
 }
 // any stages.json (or none) -> all seven stages in order, unknown statuses read as empty
@@ -70,7 +76,7 @@ export function autoBlockers(stages, f) {
       ...(f.scenes ? (f.gapMs >= 1000 ? [`${Math.round(f.gapMs / 1000)} s unscripted`] : []) : ['no scenes yet']),
       ...(f.sceneAsks ? [`${f.sceneAsks} open ask${f.sceneAsks > 1 ? 's' : ''} for the agent`] : [])],
     breakdown: [...need('script'), ...(f.items || f.characters + f.locations + f.props ? [] : ['no items yet']), ...(f.breakdownAsks ? [`${f.breakdownAsks} open ask${f.breakdownAsks > 1 ? 's' : ''} for the agent`] : [])],
-    characters: [...need('breakdown'), ...(f.itemsToPromote ? [`${f.itemsToPromote} breakdown item${f.itemsToPromote > 1 ? 's' : ''} not yet entities`] : [])], scenery: [...need('breakdown'), ...(f.sceneryToPromote ? [`${f.sceneryToPromote} location / prop item${f.sceneryToPromote > 1 ? 's' : ''} not yet entities`] : [])], storyboard: need('script'),
+    characters: [...need('breakdown'), ...(f.itemsToPromote ? [`${f.itemsToPromote} breakdown item${f.itemsToPromote > 1 ? 's' : ''} not yet entities`] : [])], scenery: [...need('breakdown'), ...(f.sceneryToPromote ? [`${f.sceneryToPromote} location / prop item${f.sceneryToPromote > 1 ? 's' : ''} not yet entities`] : [])], storyboard: [...need('script'), ...(f.scenesNoShots ? [`${f.scenesNoShots} scene${f.scenesNoShots > 1 ? 's' : ''} without shots`] : []), ...(f.shotsNoFrame ? [`${f.shotsNoFrame} shot${f.shotsNoFrame > 1 ? 's' : ''} without a frame`] : []), ...(f.boardAsks ? [`${f.boardAsks} open ask${f.boardAsks > 1 ? 's' : ''} for the agent`] : [])],
     final: stages.filter(s => s.id !== 'final' && s.status !== 'done').length ? [`${stages.filter(s => s.id !== 'final' && s.status !== 'done').length} stages not done`] : [],
   };
 }

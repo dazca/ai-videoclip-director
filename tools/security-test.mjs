@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Security regressions for the workbench server, the data layer and the page (audit F01-F15, NV1, NV2, the guided flow
-// stages 1-5; the exporter's
+// stages 1-6; the exporter's
 // F07/F08/F12 are in tools/security-exporter.mjs). Runs on a SCRATCH copy of data/demo with scratch media and config,
 // on free ports; never touches data/. Uses headless Chromium when one is found (tools/chrome.mjs), else skips the
 // browser checks.   node tools/security-test.mjs   (npm run test:security runs both files)
@@ -405,6 +405,32 @@ try {
     } else check('stage 5 LAN checks skipped: no LAN address', true);
   }
 
+  {
+  // ---------------------------------------------------------------- stage 6 (storyboard): ids, the page-only shot approval, page saves of storyboard.json
+  const sIds = {};
+  for (const [k, a] of Object.entries({ shotId: { upsert: [{ id: '../evil', t0: 0, t1: 1000 }] }, shotIdBs: { shots: [{ id: '..\\evil', t0: 0, t1: 1000 }] }, sketch: { upsert: [{ id: 's2-wall', sketch: '../../evil' }] },
+    cast: { upsert: [{ id: 's2-wall', cast: ['../x'] }] }, scene: { upsert: [{ id: 's2-wall', scene: '../x' }] }, variant: { upsert: [{ id: 's2-wall', variants: { '../x': 'y' } }] }, clip: { upsert: [{ id: 's2-wall', clips: ['<script>'] }] },
+    kind: { upsert: [{ id: 's2-wall', kind: '<b>' }] }, statusKey: { status: { '../x': 'review' } }, removeId: { remove: ['../x'] }, notAList: { shots: 'x' } })) sIds[k] = (await op('shots_update', a)).status;
+  check('shots_update: bad shot / sketch / entity / scene / variant / clip ids, kinds, status keys and shapes refused (400); nothing written', Object.values(sIds).every(x => x === 400) && !fs.existsSync(path.join(D, 'storyboard.json')), sIds);
+  const apBefore = readP('approvals.json').items['shot:s2-wall']?.state;
+  const stA = await op('shots_update', { status: { 's2-wall': 'approved' }, director_approved: true }), stL = await op('shots_update', { status: { 's2-wall': 'locked' } });
+  let offA = null; try { S.ops.shots_update(P, { status: { 's2-wall': 'approved' } }); } catch (e) { offA = e.code; }
+  check('an agent cannot approve or lock a shot: shots_update 403 (over HTTP, with a claimed director_approved, and offline); approvals.json unchanged',
+    stA.status === 403 && stL.status === 403 && offA === 403 && readP('approvals.json').items['shot:s2-wall']?.state === apBefore, { stA: stA.status, stL: stL.status, offA });
+  await op('shots_update', { upsert: [{ id: 's2-wall', text: 'sec: agent text' }], message: 'sec' });   // v2 (v1 derived from shots.json)
+  const sn6 = (await op('shot_note_add', { shot: 's2-wall', text: 'sec: agent note' })).body;
+  const bp6 = await pageSave('storyboard.json', (d) => { d.versions[1].shots.find(s => s.id === 's2-wall').text = 'FORGED'; const a = d.notes.find(x => x.id === sn6.id); a.by = 'director'; a.via = 'page';
+    d.notes.push({ id: 'sbn99', shot: null, text: 'sec: page note claiming the agent', by: 'agent', via: 'agent', status: 'open', replies: [] }); });
+  const SBF = readP('storyboard.json'), bads = {};
+  for (const [k, fn] of Object.entries({ id: (d) => { d.versions.at(-1).shots[0].id = '../x'; }, times: (d) => { d.versions.at(-1).shots[0].t1 = -5; }, sketch: (d) => { d.versions.at(-1).shots[0].sketch = '../../x'; },
+    thumb: (d) => { d.versions.at(-1).shots[0].thumb = '../../../secret.jpg'; }, cast: (d) => { d.versions.at(-1).shots[0].cast = ['<img>']; }, current: (d) => { d.current = 'nope'; }, notes: (d) => { d.notes = 'x'; } })) {
+    const cur = structuredClone(SBF); fn(cur); bads[k] = (await post(`/api/save/storyboard.json?project=${P}`, { base_rev: SBF.rev, data: cur })).status;
+  }
+  check('storyboard.json from the page: a saved version and a note author cannot be forged; a new note is stamped director / page; malformed files (bad ids, times, sketch / thumb paths, current, notes) refused (400)',
+    bp6.status === 200 && SBF.versions[1].shots.find(s => s.id === 's2-wall')?.text === 'sec: agent text' && SBF.notes.find(x => x.id === sn6.id)?.via === 'agent' && SBF.notes.find(x => x.id === 'sbn99')?.via === 'page' && SBF.notes.find(x => x.id === 'sbn99').by === 'director'
+    && Object.values(bads).every(x => x === 400), { bp: bp6.status, text: SBF.versions[1].shots.find(s => s.id === 's2-wall')?.text, bads });
+  }
+
   // ---------------------------------------------------------------- F09: the EDL extractor's server (source check: it needs the owner's render page)
   const edl = fs.readFileSync(path.join(WB, 'importers/azemar_extract_edl.mjs'), 'utf8');
   check('F09 EDL extractor server: 127.0.0.1, decode in try/catch, confined to ROOT', /listen\(\d+, '127\.0\.0\.1'/.test(edl) && /try \{ p = inside\(ROOT,/.test(edl) && /if \(!p\) \{ r\.writeHead\(403\)/.test(edl));
@@ -504,6 +530,22 @@ try {
     check('F02 stored payloads in the scenery stage (location / prop names and descriptions, variant names and notes, scene notes, request kind / text, pins) render as text',
       sInert && !sv.length, { sInert, sv: sv.slice(0, 2) });
     await sp.close();
+    // the same for the storyboard stage: payloads in shot titles, text, camera, notes, version messages, an asset name
+    const Z = (n) => `<img src=x onerror="window.__sb=${n}">`;
+    await op('shots_update', { upsert: [{ id: 's2-wall', title: Z(1), text: Z(2), camera: Z(3), locations: ['sec-xloc'] }], message: Z(4) });
+    await op('shot_note_add', { shot: 's2-wall', text: Z(5), by: Z(6) });
+    const bpg = await browser.newPage(); const bv = [];
+    bpg.on('console', m => { if (/Content Security Policy|Refused to/i.test(m.text())) bv.push(m.text()); });
+    await bpg.goto(`${A.base}/?project=${P}`, { waitUntil: 'domcontentloaded' });
+    await bpg.waitForFunction('document.body.dataset.ready === "1"', { timeout: 30000 });
+    await bpg.evaluate(() => window.WB.stages.open('storyboard')); await wait(700);
+    await bpg.evaluate(() => window.WB.storyboard.focus('s2-wall')); await wait(300);
+    for (const t of ['shot', 'gaps', 'notes', 'versions']) { await bpg.evaluate((x) => document.querySelector(`.sbside .lytabs [data-side=${x}]`)?.click(), t); await wait(200); }
+    await bpg.evaluate(() => window.WB.app.show('timeline')); await wait(700);
+    const bInert = await bpg.evaluate(() => window.__sb === undefined && window.__c === undefined && !document.querySelector('.sbws img[src="x"], .col-shots img[src="x"]') && document.querySelectorAll('.col-shots .shot').length >= 5);
+    check('F02 stored payloads in the storyboard stage (shot titles, text, camera, notes, version messages, asset names; board, Shot / Gaps / Notes / Versions, the timeline shots column) render as text',
+      bInert && !bv.length, { bInert, bv: bv.slice(0, 2) });
+    await bpg.close();
   }
 } catch (e) { check('test ran to the end', false, String(e.stack || e)); }
 finally {

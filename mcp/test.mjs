@@ -8,7 +8,8 @@
 // flow (stages_get / stage_update, lyrics_* on a derived and on a new lyrics-only project, song_attach; stage 2: intake_*,
 // script_get / scenes_update (derived from script.json, versions, snap, restore, diff, status rules), scene notes, sketches; stage 3: breakdown_* (versions, statuses, notes, the page-only promotion); stage 4: character_* and look_create; stage 5: asset_* and variant_create (the
 // page-only base / choices / approvals, requests linked to a tree, nodes from approved runs only, locks, looks, notes, an
-// agent restore)),
+// agent restore); stage 6: storyboard_get / shots_update (derived from shots.json, versions, tiling on the beat grid, statuses,
+// warnings, restore, diff), shot notes and asks, gaps_get (draft requests, the estimate vs the cap)),
 // resources, the director-session prompt, the guard rules (edit voids approval, director-only approvals, media kind,
 // CSRF / Host / token checks, path traversal and the PRIVATE rule) and the offline (files only) mode. The temp folder
 // is removed at the end, whatever happens; data/demo must be byte-identical afterwards.
@@ -112,7 +113,8 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     'stages_get', 'stage_update', 'lyrics_get', 'lyrics_update', 'lyrics_versions', 'lyrics_note_add', 'lyrics_note_resolve', 'song_attach',
     'script_get', 'scenes_update', 'scene_note_add', 'scene_note_resolve', 'intake_get', 'intake_answer', 'sketch_save', 'sketch_get', 'sketch_list',
     'breakdown_get', 'breakdown_update', 'breakdown_note_add', 'breakdown_note_resolve', 'character_get', 'character_iteration_add', 'character_note_add', 'look_create',
-    'asset_get', 'asset_iteration_add', 'asset_note_add', 'variant_create'];
+    'asset_get', 'asset_iteration_add', 'asset_note_add', 'variant_create',
+    'storyboard_get', 'shots_update', 'shot_note_add', 'shot_note_resolve', 'gaps_get'];
   check('tools/list has every tool', EXPECT.every(t => tools.includes(t)), { count: tools.length, missing: EXPECT.filter(t => !tools.includes(t)) });
   const schemaOk = (await mcp.listTools()).tools.every(t => t.description?.length > 40 && t.inputSchema?.type === 'object');
   check('every tool has a description and a JSON schema', schemaOk);
@@ -621,6 +623,83 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
     { kept: rs.kept_since_snapshot, uses: E2.uses, tree: E2.iter?.trees?.['variant:reverse-night-rain'] });
 }
 
+// 11g. stage 6 (the storyboard): shots per scene as versions (derived from shots.json until the first write), tiling on
+// the beat grid, statuses (approval is the page's), notes and asks, the gaps with the draft requests and the estimate
+{
+  const SB = path.join(D, 'storyboard.json');
+  const sb0 = await call(mcp, 'storyboard_get');
+  const all0 = [...(sb0.scenes || []).flatMap(s => s.shots), ...(sb0.outside_script || [])];
+  const s2 = all0.find(s => s.id === 's2-wall');
+  check('storyboard_get without storyboard.json: v1 derived from shots.json (the same ids, thumbs, cast, clip uses), each shot in the scene at its middle; the beat grid; the gaps; nothing written',
+    sb0.current === 'v1' && sb0.derived === true && all0.length === 5 && s2?.clips?.includes('C1@4000') && !!s2.frame?.thumb && s2.cast?.includes('ada') && !!s2.scene && sb0.grid?.beat_ms === 500 && typeof sb0.gaps?.total === 'number' && !fs.existsSync(SB)
+    && s2.assets?.some(a => a.type === 'location' && a.id === 'studio'),
+    { current: sb0.current, derived: sb0.derived, shots: all0.map(s => `${s.id}@${s.scene}`), assets: s2?.assets?.map(a => `${a.type}:${a.id}:${a.approved}`) });
+  // upsert: text / camera / kind on a shot; a new shot inside the same scene snapped to the grid; the scene stays tiled
+  const sc = sb0.scenes.find(s => s.id === s2.scene);
+  const u1 = await call(mcp, 'shots_update', { upsert: [{ id: 's2-wall', text: 'mcp: Ada at the wall, the pattern breathing', camera: 'slow push in', kind: 'medium' }, { scene: sc.id, t0: s2.t0 + 1334, t1: s2.t1, kind: 'close', text: 'mcp: close on the hum', cast: ['ada'], locations: ['studio'], gen: 'still' }], snap: 'beats', message: 'mcp: shots' });
+  const F1 = JSON.parse(fs.readFileSync(SB, 'utf8')), v = F1.versions.at(-1), nw = v.shots.find(s => s.id === 'sh01'), w2 = v.shots.find(s => s.id === 's2-wall');
+  const grp = v.shots.filter(s => s.scene === sc.id).sort((a, b) => a.t0 - b.t0);
+  check('shots_update: a NEW version (v1 from shots.json kept, via import); text / camera / kind changed; a new shot sh01 in the scene, its start snapped to a beat (5500), s2-wall now ends where it starts; the scene is tiled from its start to its end',
+    u1.version === 'v2' && F1.versions.length === 2 && F1.versions[0].via === 'import' && v.via === 'agent' && w2?.camera === 'slow push in' && w2.kind === 'medium' && nw?.t0 === 5500 && w2.t1 === 5500 && nw.kind === 'close' && nw.gen === 'still'
+    && grp[0].t0 === sc.t0 && grp.at(-1).t1 === sc.t1 && grp.every((s, i) => !i || grp[i - 1].t1 === s.t0),
+    { u1, s2: w2 && [w2.t0, w2.t1], nw: nw && [nw.t0, nw.t1], grp: grp.map(s => [s.id, s.t0, s.t1]), scene: [sc.t0, sc.t1] });
+  // statuses: review is fine (approvals.json, via agent); approved / locked are the director's (403)
+  const st1 = await call(mcp, 'shots_update', { status: { 's2-wall': 'review', sh01: 'changes' } });
+  const stA = await call(mcp, 'shots_update', { status: { sh01: 'approved' } }), stL = await call(mcp, 'shots_update', { status: { sh01: 'locked' } });
+  const AP = JSON.parse(fs.readFileSync(path.join(D, 'approvals.json'), 'utf8'));
+  check('shots_update status: review / changes written to approvals.json (shot:<id>, via agent); approved and locked refused (403)',
+    st1.status?.['s2-wall'] === 'review' && AP.items['shot:s2-wall']?.state === 'review' && AP.items['shot:s2-wall'].via === 'agent' && AP.items['shot:sh01']?.state === 'changes' && /403/.test(stA.error || '') && /403/.test(stL.error || ''),
+    { st1: st1.status || st1.error, stA: stA.error, stL: stL.error });
+  // bad input: ids, sketch ids, entity ids, variants, times, removing what is not there: 400 / 404, nothing written
+  const nV = F1.versions.length, bad = {};
+  for (const [k, a] of Object.entries({ shotId: { upsert: [{ id: '../x', t0: 0, t1: 1000 }] }, sketch: { upsert: [{ id: 'sh01', sketch: '../evil' }] }, cast: { upsert: [{ id: 'sh01', cast: ['<b>x</b>'] }] },
+    variant: { upsert: [{ id: 'sh01', variants: { ada: '../y' } }] }, times: { upsert: [{ id: 'sh01', t0: 9000, t1: 2000 }] }, noTimes: { upsert: [{ scene: sc.id, text: 'no times' }] }, kind: { upsert: [{ id: 'sh01', kind: '<script>' }] },
+    removeNone: { remove: ['nope'] }, gen: { upsert: [{ id: 'sh01', gen: 'film' }] }, both: { shots: [], upsert: [] } })) bad[k] = (await call(mcp, 'shots_update', a)).error || 'accepted';
+  const nV2 = JSON.parse(fs.readFileSync(SB, 'utf8')).versions.length;
+  check('shots_update refuses bad shot / sketch / entity / variant ids, bad times, kinds and gens (400, or the tool schema), unknown removals (404), two modes at once (400); nothing written',
+    Object.entries(bad).every(([k, e]) => (k === 'removeNone' ? /404/ : /400|-32602/).test(e)) && nV2 === nV, bad);
+  // warnings: an unknown entity and a sketch without files; remove, restore, diff
+  const u2 = await call(mcp, 'shots_update', { upsert: [{ id: 'sh01', cast: ['ada', 'nobody'], sketch: 'nosuch-frame' }], message: 'mcp: warnings' });
+  const u3 = await call(mcp, 'shots_update', { remove: ['sh01'], message: 'mcp: remove' });
+  const F3 = JSON.parse(fs.readFileSync(SB, 'utf8')), w3 = F3.versions.at(-1).shots.find(s => s.id === 's2-wall');
+  const rs = await call(mcp, 'shots_update', { restore: 'v2' }), df = await call(mcp, 'storyboard_get', { diff: ['v1', 'v2'] });
+  check('shots_update warns about an unknown entity and a sketch without files; remove gives the time back to the neighbour (tiled again); restore copies an old version as a new one; diff lists the shots added / changed',
+    u2.warnings?.some(w => /no character "nobody"/.test(w)) && u2.warnings.some(w => /nosuch-frame/.test(w)) && /^v\d+$/.test(u3.version || '') && w3?.t1 === s2.t1 && rs.version && JSON.parse(fs.readFileSync(SB, 'utf8')).versions.at(-1).from === 'v2'
+    && df.shots?.added?.includes('sh01') && df.shots.changed.includes('s2-wall') && /\{\+/.test(df.diff || ''),
+    { warn: u2.warnings, u3: u3.version, w3: w3 && w3.t1, rs, df: df.shots });
+  // notes: on a shot, a reply, resolve; an ask from the page (its own save, stamped director / page) shows in asks_for_agent
+  const n1 = await call(mcp, 'shot_note_add', { shot: 's2-wall', text: 'mcp: the push-in should land on the downbeat' });
+  const n2 = await call(mcp, 'shot_note_add', { reply_to: n1.id, text: 'mcp: a reply' });
+  const nb = await call(mcp, 'shot_note_add', { shot: 'nope', text: 'x' }), nb2 = await call(mcp, 'shot_note_add', { shot: '../x', text: 'x' });
+  const cur = JSON.parse(fs.readFileSync(SB, 'utf8'));
+  cur.notes.push({ id: 'sbn99', shot: null, text: 'mcp: page ask: storyboard the chorus', to: 'agent', kind: 'storyboard', status: 'open', by: 'agent', via: 'agent', replies: [] });
+  const ps = await post(`/api/save/storyboard.json?project=${PROJECT}`, { base_rev: cur.rev, data: cur }, { origin: URL_ });
+  const g1 = await call(mcp, 'storyboard_get'), ask = g1.asks_for_agent?.find(a => a.id === 'sbn99');
+  const rv = await call(mcp, 'shot_note_resolve', { id: 'sbn99', reply: 'mcp: done' });
+  const SBF = JSON.parse(fs.readFileSync(SB, 'utf8'));
+  check('shot notes: on a shot (sbn01, via agent), a reply, an unknown or bad shot refused; a page ask (stamped director / page whatever it claims) is an ask for the agent; resolved with a reply',
+    n1.id === 'sbn01' && n1.via === 'agent' && n1.shot === 's2-wall' && n2.reply?.id === 'sbn01.1' && /404/.test(nb.error || '') && /400/.test(nb2.error || '') && ps.status === 200 && ask?.kind === 'storyboard'
+    && SBF.notes.find(n => n.id === 'sbn99')?.via === 'page' && SBF.notes.find(n => n.id === 'sbn99').by === 'director' && rv.status === 'resolved' && rv.replies?.[0]?.text === 'mcp: done',
+    { n1: n1.id || n1.error, ask, rv: rv.status });
+  // gaps: the rows, the draft requests (refs = the approved base image of the studio), the estimate against the cap; a
+  // request on a shot takes it off the list
+  // s1-intro's scene uses a studio variant the director picked (no longer approved after the 11f restore): the shot
+  // overrides it with the base (null), which is approved
+  const ov = await call(mcp, 'shots_update', { upsert: [{ id: 's1-intro', locations: ['studio'], variants: { studio: null } }], message: 'mcp: s1 on the studio base' });
+  const gp = await call(mcp, 'gaps_get');
+  const p1 = gp.proposals?.find(x => x.shot === 's1-intro'), q1 = p1?.requests?.[0];
+  const studio = JSON.parse(fs.readFileSync(path.join(D, 'entities/locations/studio.json'), 'utf8')), baseImg = studio.iter.nodes.find(n => n.id === studio.iter.trees.base.approved)?.image;
+  const rq = await call(mcp, 'request_create', { kind: q1.kind, target: q1.target, prompt: q1.prompt, refs: q1.refs, est_cost: q1.est_cost, tool: q1.tool });
+  const gp2 = await call(mcp, 'gaps_get');
+  check('gaps_get: the groups (counts), a shot without a request (its studio overridden to the approved base) gets its draft requests (a start frame then the video: kind shot-still first, target shot:<id>, refs = the approved studio base image, Kontext $0.08, the video priced per second), the estimate against the cap; request_create on the shot takes it off the list',
+    /^v\d+$/.test(ov.version || '') && typeof gp.counts?.no_request === 'number' && gp.no_request.some(x => x.shot === 's1-intro') && q1?.kind === 'shot-still' && q1.target === 'shot:s1-intro' && q1.refs.includes(baseImg) && q1.est_cost === 0.08 && p1.requests[1]?.kind === 'shot-video' && p1.requests[1].est_cost >= 0.25
+    && typeof gp.estimate.over_cap === 'boolean' && gp.estimate.total_usd >= gp.estimate.usd && rq.status === 'draft' && !gp2.no_request.some(x => x.shot === 's1-intro') && gp2.estimate.usd < gp.estimate.usd,
+    { p1: p1 && { gen: p1.gen, reqs: p1.requests.map(r => [r.kind, r.est_cost, r.refs]) }, baseImg, est: gp.estimate, est2: gp2.estimate?.usd });
+  const tq = await call(mcp, 'timeline_query', { t0: 4000, t1: 6000 }), sbs = await call(mcp, 'storyboard_get', { scene: sc.id });
+  check('timeline_query lists the storyboard shots in the range (board); storyboard_get filters by scene', tq.board?.some(x => x.id === 's2-wall' && x.camera === 'slow push in') && sbs.scenes?.length === 1 && sbs.scenes[0].id === sc.id && !sbs.outside_script.length,
+    { board: tq.board?.map(x => x.id), scenes: sbs.scenes?.map(s => s.id) });
+}
+
 // 12. offline: the server is unreachable -> the same tools work on the files; ui_focus explains
 {
   const off = await connect({ WORKBENCH_URL: 'http://localhost:9' });
@@ -628,9 +707,9 @@ mcp = await connect({ WORKBENCH_URL: URL_ });
   const tq = await call(off, 'timeline_query', { t0: 4000, t1: 8000 });
   const ui = await call(off, 'ui_focus', { t: 1000 });
   const sg = await call(off, 'stages_get'), lu = await call(off, 'lyrics_update', { project: 'mcp-lyrics', text: '[Verse 1]\noffline line', message: 'offline' });
-  const so = await call(off, 'scenes_update', { upsert: [{ id: 'sc01', title: 'offline title' }], message: 'offline' }), sko = await call(off, 'sketch_get', { id: 'mcp-sk1' }), bo = await call(off, 'breakdown_get', { with_script: false });
+  const so = await call(off, 'scenes_update', { upsert: [{ id: 'sc01', title: 'offline title' }], message: 'offline' }), sko = await call(off, 'sketch_get', { id: 'mcp-sk1' }), bo = await call(off, 'breakdown_get', { with_script: false }), sbo = await call(off, 'storyboard_get'), gpo = await call(off, 'gaps_get');
   check('offline mode: files directly (stages, lyrics, scenes, sketches, breakdown too), ui_focus refuses politely', st.mode === 'files' && tq.shots?.[0]?.id === 's2-wall' && /not running/.test(ui.error || '') && sg.stages?.length === 7 && lu.version === 'v4'
-    && /^v\d+$/.test(so.version || '') && sko.pins?.length === 1 && bo.current === 'v3' && bo.items?.length === 6,
+    && /^v\d+$/.test(so.version || '') && sko.pins?.length === 1 && bo.current === 'v3' && bo.items?.length === 6 && /^v\d+$/.test(sbo.current || '') && !sbo.derived && Array.isArray(gpo.proposals),
     { mode: st.mode, shots: tq.shots?.map(s => s.id), ui: ui.error, stages: sg.stages?.length, lyrics: lu.version || lu.error, scenes: so.version || so.error });
   await off.close();
 }

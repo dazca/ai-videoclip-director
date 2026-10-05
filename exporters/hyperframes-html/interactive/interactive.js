@@ -39,7 +39,7 @@
 
   let W = null, doc = null, root = null, A = null, CW = 1280, CH = 720, DUR = 0;
   let fit = { s: 1, ox: 0, oy: 0 };
-  let ready = false, paused = false, inspect = true, drive = null;
+  let ready = false, paused = false, inspect = true, drive = null, holding = false;
   let manifest = null, project = null;
   const ptr = { x: -1, y: -1, in: false, moved: -1e9, inWin: false };
   let zoneLeft = -1e9, keyUntil = -1e9, hudShown = null;
@@ -58,7 +58,7 @@
   const clock = {
     t: () => A ? A.currentTime : wallT(),
     playing: () => A ? !A.paused && !A.ended : wall.since !== null && !(DUR && wallT() >= DUR),
-    play: () => { if (A) return A.play().catch(() => setMode(true)); if (DUR && wallT() >= DUR) { wall.t = 0; wall.since = null; } if (wall.since === null) wall.since = performance.now(); },
+    play: () => { if (A) return A.play().catch((e) => { if (!(e && e.name === 'AbortError')) setMode(true); }); if (DUR && wallT() >= DUR) { wall.t = 0; wall.since = null; } if (wall.since === null) wall.since = performance.now(); },
     pause: () => { if (A) return A.pause(); wall.t = wallT(); wall.since = null; },
     seek: (t) => {
       t = Math.max(0, Math.min(DUR - 0.01, t));
@@ -112,6 +112,8 @@
     if (!DUR && A) DUR = A.duration || 0;
     if (!DUR && drive && drive.duration) DUR = drive.duration();
     scrub.max = String(DUR);
+    // a package exported with lazy media (lazy/lazy-media.js): the opening's files first, then ready
+    if (W.__hfLazy) await W.__hfLazy.until(clock.t(), clock.t() + W.__hfLazy.first, 120000);
     copyFonts();
     hookFilm();
     fetch('manifest.json').then((r) => r.ok ? r.json() : null).then((j) => { manifest = j; }).catch(() => {});
@@ -155,6 +157,7 @@
   // ------------------------------------------------------------------ modes
   const modeLog = [];
   function setMode(wantPaused, fromClock) {
+    if (!fromClock) setHold(false);
     modeLog.push({ paused: wantPaused, t: clock.t(), wall: performance.now(), byClock: !!fromClock });
     if (!fromClock) { if (wantPaused) clock.pause(); else clock.play(); }
     paused = wantPaused;
@@ -181,8 +184,11 @@
     requestAnimationFrame(tick);
     now = performance.now();
     const dt = (now - lastWall) / 1000; lastWall = now;
-    const t = clock.t(), playing = clock.playing();
-    if (playing === paused) setMode(!playing, true); // ended, autoplay refused, or the film paused itself
+    const t = clock.t(), playing = clock.playing(), lazy = W.__hfLazy, intent = playing || holding;
+    // lazy media: while the files at the playhead are still loading the clock waits (a seek, a slow network), then
+    // goes on by itself; the viewer's play / pause state does not change
+    if (lazy) { if (holding && lazy.ready(t)) { setHold(false); clock.play(); } else if (!holding && playing && !lazy.ready(t)) { setHold(true); clock.pause(); } }
+    if (intent === paused) setMode(!intent, true); // ended, autoplay refused, or the film paused itself
     if (drive) driveFilm(t, playing);
     if (!scrubbed) liveT = t; else if (playing) liveT = Math.min(DUR, liveT + dt);
     if (scrubbed && Math.abs(liveT - t) < 0.3) scrubbed = false;
@@ -199,6 +205,7 @@
     if (!paused && h && inspect && now - ptr.moved < STILL) showHover(h); else hideHover();
     hudTick(now, t);
   }
+  function setHold(on) { if (on !== holding) { holding = on; document.body.classList.toggle('ix-wait', on); } }
   // ------------------------------------------------------------------ HUD: bottom edge / keys / always / never
   function hudTick(now, t) {
     if (ptr.in && ptr.y >= innerHeight - HUD_ZONE) zoneLeft = now;
@@ -646,7 +653,8 @@
   // ------------------------------------------------------------------ test / scripting API
   window.IX = {
     ready: false,
-    t: () => clock.t(), playing: () => clock.playing(), paused: () => paused, audio: () => A, film: () => W,
+    t: () => clock.t(), playing: () => clock.playing() || holding, holding: () => holding, paused: () => paused,
+    lazy: () => (W && W.__hfLazy ? W.__hfLazy.stats() : null), audio: () => A, film: () => W,
     play: () => setMode(false), pause: () => setMode(true), back: () => btnLive.click(), modes: () => modeLog.slice(), closeAll: () => closeAll(true),
     seek: (t, asLive) => { if (asLive) { clock.seek(t); scrubbed = false; liveT = t; } else seekTo(t); },
     cards: () => cards.map((c) => ({ id: c.id, kind: c.h.kind, name: c.name, t: c.t, pinned: c.pinned, z: c.z, el: c.card })),

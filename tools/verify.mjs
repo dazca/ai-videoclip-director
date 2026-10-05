@@ -10,7 +10,9 @@
 // node, an edit with sketch + mask + pins, A/B compare, keep / branch / revert, approve identity, looks, the agent's
 // limits, the private export, the CSP, the toast stack), and (v8, tools/verify-scenery.mjs) stage 5: locations and props on the
 // same asset workspace (list, location base, edit, approve, variants from axes as trees, a prop state variant, the per-scene
-// variant picker, the characters stage still working).
+// variant picker, the characters stage still working), and (v9, tools/verify-storyboard.mjs) stage 6: the storyboard (shots from
+// beats, tiling, edits, frame sketches, copy / paste, a per-shot variant, the gaps and the estimate vs the cap, the asks, the
+// agent's side, the timeline shots column).
 //   node tools/verify.mjs [--project <id>] [outDir]     (default project: the server's default; npm run verify = demo)
 // Copies data/<project> (and data/_template) into a scratch data folder under the OS temp dir and starts serve.mjs
 // on free ports with WORKBENCH_DATA = that folder, so nothing under data/ is written and several runs (or a running
@@ -1120,6 +1122,12 @@ catch (e) { v7.checks.aborted = blockFailed('v7', e); v7.pass = false; }
 const v8 = report.v8 = { checks: {} };
 try { const { verifyScenery } = await import('./verify-scenery.mjs'); Object.assign(v8, await verifyScenery({ browser, BASE, DATA, OUT, post, writeHeaders })); }
 catch (e) { v8.checks.aborted = blockFailed('v8', e); v8.pass = false; }
+
+// ---------------------------------------------------------------- v9: the guided flow, phase 6 (stage 6: the storyboard and the gaps)
+// tools/verify-storyboard.mjs (also runnable alone). Screenshots v9_*.png.
+const v9 = report.v9 = { checks: {} };
+try { const { verifyStoryboard } = await import('./verify-storyboard.mjs'); Object.assign(v9, await verifyStoryboard({ browser, BASE, DATA, OUT, post, writeHeaders })); }
+catch (e) { v9.checks.aborted = blockFailed('v9', e); v9.pass = false; }
 // write path: approve/needs-changes + a note, on another scratch copy (_verify, its own server), then a stale-rev POST must get 409
 try {
   const TMP = path.join(DATA, '_verify');
@@ -1146,8 +1154,8 @@ report.project = P;
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 1));
 const w = report.writes || {};
 const writesOk = w.noteSaved && w.noteShownInColumn && w.staleStatus === 409 && w.newState !== undefined && w.newState !== w.stateBefore && w.approvalsRev > w.approvalsRevBefore;
-console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· v7 (characters stage):', report.v7?.pass ? 'all PASS' : 'FAIL', '· v8 (scenery stage):', report.v8?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
-process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && report.v7?.pass && report.v8?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
+console.log(`project ${P} · all aligned:`, report.configs.every(c => c.align.pass), '· v2 checks:', report.v2?.pass ? 'all PASS' : 'FAIL', '· v4 (guided flow):', report.v4?.pass ? 'all PASS' : 'FAIL', '· v5 (script stage):', report.v5?.pass ? 'all PASS' : 'FAIL', '· v6 (breakdown stage):', report.v6?.pass ? 'all PASS' : 'FAIL', '· v7 (characters stage):', report.v7?.pass ? 'all PASS' : 'FAIL', '· v8 (scenery stage):', report.v8?.pass ? 'all PASS' : 'FAIL', '· v9 (storyboard stage):', report.v9?.pass ? 'all PASS' : 'FAIL', '· part B checks:', OWNER ? (report.partB?.pass ? 'all PASS' : 'FAIL') : 'skipped (owner data only)', '· writes:', writesOk ? 'PASS' : 'FAIL');
+process.exitCode = report.configs.every(c => c.align.pass) && report.v2?.pass && report.v4?.pass && report.v5?.pass && report.v6?.pass && report.v7?.pass && report.v8?.pass && report.v9?.pass && (!OWNER || report.partB?.pass) && writesOk ? 0 : 1;
 await browser.close();
 for (const c of procs) c.kill();
 await new Promise(r => setTimeout(r, 300));   // let the servers release the scratch folder; cleanup() removes it on exit

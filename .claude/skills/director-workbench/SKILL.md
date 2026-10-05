@@ -84,9 +84,20 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
    scene text: "at night in the rain" -> a night / rain variant for that scene). The director picks the variant each
    scene uses in the page; the storyboard reads `asset_get` `scenes`. A missing look, angle or state becomes a
    variant + a generation request, not a guess.
-5. **Storyboard**: cut into shots on downbeats / section starts (`shots.json`); each shot gets kind, title, cast,
-   locations, and later the clip uses that fill it (`timeline_query` shows what a cut crosses); one frame per shot
-   (thumbs), reviewed in the page; `ui_focus` to walk the director through it.
+5. **Storyboard** (stage 6, the page's Storyboard stage; `storyboard.json`, read as v1 from `shots.json` until the
+   first write): `storyboard_get` gives the scenes in song time with their beats, what each needs (the breakdown's
+   assets and the variant the scene uses) and their shots. Cut each scene into shots from its beats (one shot per beat
+   or group of beats) with `shots_update` (a new version each time; `snap: "beats"`; the shots of a scene tile it):
+   kind (wide / medium / close / insert / performance / xp-desktop), the action, camera / motion, `cast` / `locations`
+   / `props` as entity ids, `variants` only where a shot differs from the scene's pick, `gen` still or video. Draw a
+   frame where it helps (`sketch_save` with `links.shots`, then `sketch` on the shot). Status `review` asks the
+   director to look (`shot_note_add` says why); approving a shot is theirs. Asks of kind `storyboard` (propose shots)
+   and `fill_gaps` (draft requests) arrive in `storyboard_get` / `gaps_get` `asks_for_agent`; answer with
+   `shot_note_resolve` + reply when done. `gaps_get` lists what is still missing across the stages (unscripted time,
+   scenes without shots, shots without a frame, assets not approved, shots without a request or clip) and, per shot,
+   the draft requests to propose (`shot-still` first, `shot-video` from its output; target `shot:<id>`; refs = the
+   approved variant / look images + the frame sketch) with the total against the cap: propose the missing asset
+   sheets first, keep the total under the cap (prefer stills when it is tight), and say so in the reply.
 6. **Generation requests**: `request_create` drafts with a concrete prompt, refs, tool and an honest `est_cost`.
    The director approves in Review > Queue (show it with `ui_focus` view "queue"). Only if the owner enabled
    `agent_approvals` may you pass `director_approved: true`, and only when they said so in the conversation.
@@ -112,6 +123,8 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
 - Never choose keep / branch / revert, approve an identity, a base, a look or a variant, pick the variant a scene
   uses, or write an asset's `iter` / `base` / `uses` by hand: those are the director's, in the page. Register only
   outputs of approved, done requests.
+- Never approve or lock a shot (`shots_update` refuses it), never rewrite `storyboard.json` by hand, and never create a
+  request a shot does not need: `gaps_get` says what is missing and what it costs.
 
 ## Handy patterns
 
@@ -120,3 +133,6 @@ decide, blockers); only the director marks a stage done, in the page. Show them 
   `character:X`, refs = the look's base images), wait for approval.
 - "Try another take" -> `shot_get` the shot (lists every take per clip use), `shot_update` take/in_ms, state `review`.
 - Before risky edits: `snapshot_save`; undo with `snapshot_restore`.
+- "Storyboard the chorus" -> `storyboard_get` {scene}, `shots_update` upsert one shot per beat (snap beats), a frame
+  sketch for the key shot, then `ui_focus` view "stage" and a `shot_note_add` asking for review.
+- "What is left before we can render?" -> `gaps_get`: the groups, the draft requests and the estimate vs the cap.

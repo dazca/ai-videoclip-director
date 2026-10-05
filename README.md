@@ -39,7 +39,7 @@ re-timed over the song (LRC tags win, else estimated as above).
 `/media/<path>`, e.g. a renders folder), `private_media` (regex of PRIVATE paths: local only, never exported).
 
 **Tests**: `npm run test:mcp` (MCP end to end on the demo) · `npm run verify` (headless UI suite on the demo:
-screenshots + alignment + perf + writes + commands + the guided flow -> `shots/`; `node tools/verify.mjs --project <id>`
+screenshots + alignment + perf + writes + commands + the guided flow, stages 1-6 -> `shots/`; `node tools/verify.mjs --project <id>`
 for another) · `npm run test:security`. All of them work on scratch copies of the data, never on `data/`.
 
 **Example importer**: `importers/azemar_import.py` + `importers/azemar_extract_edl.mjs` built the owner's own production
@@ -74,7 +74,9 @@ Tools: `status`, `projects` (list/create/duplicate/open), `snapshot_save` / `sna
 `character_iteration_add`, `character_note_add`, `look_create` (generations are `request_create` drafts with a `char`
 link to the character's tree); stages 4 and 5, any asset (characters, locations, props): `asset_get`,
 `asset_iteration_add`, `asset_note_add`, `variant_create` (generations carry an `asset` link; the `character_*` tools
-are the same code for a character). Resources: the README, `CLAUDE.md`, the file formats, the
+are the same code for a character); stage 6: `storyboard_get`, `shots_update` (a new version each time), `shot_note_add` /
+`shot_note_resolve`, `gaps_get` (what is still missing, the draft requests per shot and the estimate against the cap).
+Resources: the README, `CLAUDE.md`, the file formats, the
 skill, and each project's JSON files. Prompt: `director-session`. Rules the tools enforce: an agent cannot approve on
 its own, a request runs only after the director approved it, queueing is refused above the cost cap, and `done` needs
 the output files and the actual cost (recorded in `costs.json`, outputs indexed as media). The agent guide is
@@ -174,6 +176,36 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
   the variant's image and the scene text; add any other scene. The pick is saved in the entity (`uses`), page only,
   and is what the storyboard reads. **Notes**: on the asset, a tree, a node or a scene. Commands: palette "Scenery: …",
   Ctrl+Enter sends the open edit request.
+- **Storyboard stage** (stage 6): the script's scenes in song time (unscripted stretches as amber rows), each a strip of
+  **shot cards** that **tile** the scene: the first starts with it, each ends where the next starts, the last ends with
+  it. A 6 px rail above each strip shows the cuts (alternating shades), the bars (ticks) and the scene's beats (dots).
+  A card: id, start, length, kind, the status chip, the **frame** (the frame sketch, the shots.json render frame, or
+  "no frame · draw"), ▶ video / ▣ still, the action, ⌖ camera / motion, the **asset chips** (C / L / P, green = the
+  variant it needs is approved, amber = not yet; the variant name when it is not the root) and the generation request
+  or clip (or "no request · ~$ est"). **Shots from beats** proposes, for every scene without shots, one shot per scene
+  beat or group of beats closer than a bar, cut on the beat grid (a long stretch is cut again every ~4 bars), with a
+  kind guessed from the words (sings -> performance, hands / letter -> insert, face -> close, the first -> wide), the
+  beats' text as the action and the breakdown's cast / locations / props (an item linked to given beats only on the
+  shots holding them); a scene's own **from beats** redoes it. **Shot** panel (click a card; ← / → step): status
+  (draft / review / changes / **approve**, the director's, in `approvals.json` as `shot:<id>`), from / to (snapped to
+  beats or bars with the bar's `snap`; ◂ ▸ nudge a boundary by a beat; a boundary moves both shots), kind, still /
+  video with its estimate, title, action, camera / motion, the **frame** (`+ draw` opens the sketch tool inline under
+  the scene, 16:9, over the shot's location image when it has one; `window`, `copy`, `paste` into another shot), the
+  **assets** with a per-shot variant picker ("scene's: …" = the Scenery / Characters pick, or the root, or any
+  variant) and a link to an asset that is not approved, quick "+ Name" adds for what the scene needs, the generation
+  requests (Approve / Reject drafts here) and **Request still / start frame / video** (a DRAFT request, target
+  `shot:<id>`, refs = the approved variant images + the frame sketch, honest estimate), **Split at beat**, **Merge with
+  next**, **◂ Move / Move ▸** (swap, lengths kept), **Delete** (its time goes to the neighbour). **Gaps** panel:
+  everything still missing across the stages, each row a jump link: unscripted time (-> the script), scenes without
+  shots, shots without a frame, assets the shots need that are not approved (-> the characters / scenery stage on that
+  asset), shots without a request or clip; and the **estimate** of generating those shots against the cap (a meter:
+  spent, committed, this estimate, other drafts, the cap mark; a warning over the cap or with a $0 cap). **Fill the
+  gaps** and **Ask the agent to storyboard** write asks the agent reads (`storyboard_get` / `gaps_get`); **Notes**
+  (per shot, threads, Ask the agent) and **Versions** (A/B diff, restore). Edits are a draft until **Save version**
+  (Ctrl+Enter); a new frame on a clean draft is saved as a version by itself. The timeline **shots** column shows the
+  storyboard's shots (frame thumbnails), and the cast / status columns follow them. Commands: palette "Storyboard: …",
+  right-click a shot (board or timeline): open in the storyboard, frame, split, merge, move, copy / paste frame,
+  request, note, delete.
 - **Top bar** (18 px; `` ` `` hides / shows it; **Esc never hides it**: Esc only closes menus, dialogs, the palette and
   the cheat sheet): menu bar (File Edit View Timeline Generate Window Help; F10 opens it from the keyboard), the
   **page tabs**, project name, transport, `⌘` = command palette, `⌃` = hide the bar, `⚙` = Settings (far right).
@@ -237,9 +269,9 @@ the output files and the actual cost (recorded in `costs.json`, outputs indexed 
 | energy | lane | on | RMS (24 fps) + amber target overload ladder 0-10 per section |
 | script | text, drive | on | W/S/B + action per lyric line (TREATMENT §2), approval dot |
 | scenes | text, follow | on | stage 2 (`scenes.json`): each scene (title, text, sketch count, status colour; stage 3: its characters and locations from `breakdown.json`, + the count of other items) on the left, its beats on the right, each at its own time; double-click = open it in the script stage |
-| shots | text, follow | on | storyboard shot, frame of the v1 render, kind (screen/split/world), status dot |
+| shots | text, follow | on | stage 6 (`storyboard.json`, else `shots.json`): each storyboard shot, its frame sketch (else the render frame), kind, status dot |
 | clips | text, follow | on | world-clip uses (clip.take +in-point), frame at the in-point, location colour; overlaps share width |
-| cast | text, follow | on | D, H, A1-A8 chips + location letters per shot |
+| cast | text, follow | on | cast chips + location letters per storyboard shot |
 | status | text, follow | on | approval chips for the shot and each clip use inside it |
 | cost | text, drive | hidden | $ per generation job at its first use, running Σ / cap |
 | notes | text, drive | on | Dani's and the director's notes pinned to time |
@@ -276,6 +308,7 @@ are relative to `media_base` and served read-only at `/media/<path>`; other path
 | `lyrics.json` | `{rev, current: "v3", seq, versions[{id, n, created, by, via, message, from?, sections[{id, label, lines[{id, text, t?}]}]}], notes[{id, line, w: [first, last word] \| null, quote, text, by, via, to?: "agent", kind?, status, at, version, replies[{id, text, by, via, at}]}]}`: stage 1. Versions are immutable (a save appends one and moves `current`; the server keeps its copy of every saved version); line ids are stable across versions and are the `song.json` line ids (a missing file reads as v1 derived from `song.json`). The server re-syncs `song.json` lines on every new current version |
 | `scenes.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, scenes[{id: "sc03", t0, t1, title, text, line_ids[], beats[{id: "b1", t, text}], sketches[ids]}]}], states{<scene>: {status: draft/needs_you/ok, by, via, at}}, notes[{id: "sn01", scene \| null, beat?, text, by, via, to?: "agent", kind?: request/fill_gaps, gaps?, status, at, version, replies[]}], intake{<question>: {text, by, via, at, asked?}}}`: stage 2, the script draft (shared with the page). Versions are immutable (a save appends; restore copies); statuses and intake answers live outside them; only the page sets a scene `ok`. A missing file reads as v1 derived from `script.json` (`stages` -> scenes, `lines` -> beats), which is never rewritten. Shapes and logic: `js/scenes.js` |
 | `breakdown.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, script?, items[{id: "bi03", kind: character/location/prop/wardrobe/fx, name, description, links[{scene, beats[], note?}], source: agent/director, aliases?, for? (wardrobe: the character item), dropped?}]}], states{<item>: {status: draft/review/ok, entity_id?, look_id?, by, via, at}}, notes[{id: "bn01", item \| null, scene?, text, by, via, to?: "agent", kind?: request/extract, status, at, version, replies[]}]}`: stage 3, the breakdown (shared with the page). Versions are immutable (a save appends; restore copies); statuses and entity links live outside them; only the page sets an item `ok` or links it to an entity ("Create entity": a draft entity in `entities/`, or a look on a character). Links name scene / beat ids of `scenes.json`. Shapes and logic: `js/breakdown.js` |
+| `storyboard.json` | `{rev, current, versions[{id, n, created, by, via, message, from?, script?, shots[{id: "sh03", scene, t0, t1, kind: wide/medium/close/insert/performance/xp-desktop/…, title, text, camera, sketch, beats[], cast[], locations[], props[], variants{<entity>: <variant / look> \| null}, gen: still/video/null, clips[], thumb?, section?}]}], notes[{id: "sbn01", shot, scene?, text, by, via, to?: "agent", kind?: request/storyboard/fill_gaps, gaps?, status, at, version, replies[]}]}`: stage 6, the storyboard. A version is immutable (a save appends one); the shots of a scene tile it; the variant each asset needs is the scene's (entity `uses`) unless `variants` overrides it. The shot's approval is `approvals.json` `shot:<id>`. Missing = v1 derived from `shots.json` (never rewritten; its readers keep working). Logic: `js/storyboard.js` |
 | `sketches/<id>.json` / `.png` / `.mask.png` | a sketch: `{id, w, h, paper, underlay{src, opacity, fit}, strokes[], mask[], pins[{n, x, y, text}], title?, created, updated, by, via}` (format: `core/sketch/sketch.js`), the flattened image and the edit mask; written by `sketch_save`, registered in `media.json` (`kind: "sketch"`, `sketch`, `mask`, `scenes[]`, `pins`); under `private/sketches/` when drawn over a private image; not snapshotted |
 | `.snapshots/<yyyymmdd-hhmmss>-<slug>/` | copies of the small JSON files (no peaks, thumbs, `_src`, settings) + `.meta.json {id, at, message, auto, files}` |
 
@@ -387,6 +420,12 @@ small files are served in one read so no handle stays open.
   locked tree), and cannot pick a scene's variant: `entity_upsert` ignores `iter`, `base` and `uses` and refuses to
   approve a variant (403). A request carries one link (`asset`, else `char`). An agent's snapshot restore brings back no
   variant approval that is not the current one (the variant back to `review`) and keeps the director's current picks.
+- Stage 6 (storyboard): every `shots_update` is a new version; shot, scene, entity, variant, sketch, clip and beat ids are
+  checked (400 otherwise; a sketch id can never leave `sketches/`, a `thumb` never `..`); a shot's approval is
+  `approvals.json` `shot:<id>`: an agent may set draft / review / changes, `approved` and `locked` are refused (403, also
+  with a claimed `director_approved` and offline; the director approves in the page). A page save of `storyboard.json`
+  cannot rewrite a saved version or a note's author; new versions, notes and replies are stamped director / page; a
+  malformed file is refused (400). Nothing in the stage generates or spends: requests are drafts the director approves.
 - Entity thumbnails and copies made from private media stay private (`thumbs/priv_*`, `private/<kind>/`).
 - The HyperFrames exporter runs a composition's script with every request outside its own package server blocked
   (and no workbench token), and keeps backslash references inside the composition folder.

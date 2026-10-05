@@ -5,6 +5,7 @@ import { el, fmt, secColor, upperBound } from './timeline.js';
 import { mediaUrl, esc } from './store.js';
 import { currentScript, sceneStatus } from './scenes.js';
 import { currentBreakdown, KINDS, KIND_COLOR } from './breakdown.js';
+import { shotEstimate } from './storyboard.js';
 
 const LH = 14;              // lyric visual line height (px), 12 px type
 const RAMP = Array.from({ length: 32 }, (_, i) => { const a = i / 31; const l = 14 + a * 70; return `hsl(210, ${12 + a * 20}%, ${l}%)`; });
@@ -19,7 +20,12 @@ export function makeColumns(tl, store) {
   const chip = (k, label) => `<span class="chip s-${esc(st(k))}" data-act="st" data-k="${esc(k)}" title="${esc(k)}: ${esc(st(k))} (click: approve / needs changes / draft)">${esc(label)}</span>`;
   const seekAct = (c, a) => { if (a.dataset.act === 'seek') tl.seek(Number(a.dataset.t)); if (a.dataset.act === 'st') store.cycle(a.dataset.k); };
   const refreshChips = (c, what) => { if (what !== 'approvals') return false; for (const ch of c.body.querySelectorAll('.chip[data-k], .st[data-k]')) { const s = st(ch.dataset.k); ch.className = ch.className.replace(/\bs-\w+/, 's-' + s); ch.title = `${ch.dataset.k}: ${s}`; } return false; };
-  const shotSpans = store.shots.map(s => ({ t0: s.t0, t1: s.t1, s }));
+  // the storyboard's shots (storyboard.json; a project without it reads shots.json): shots, cast and status columns
+  const shotSpans = () => store.boardShots().map(s => ({ t0: s.t0, t1: s.t1, s }));
+  const onBoard = (fn) => function (c, what) { if (what === 'board') { this.build(c); return true; } return fn ? fn(c, what) : false; };
+  // a shot's frame: its frame sketch (the flattened PNG, cache-busted by its media entry), else the shots.json thumbnail
+  const frameSrc = (s) => { if (s.sketch) { const m = store.mediaById?.['sketch-' + s.sketch]; return `${mediaUrl(m?.path || `sketches/${s.sketch}.png`)}?v=${encodeURIComponent(m?.updated || '')}`; } return s.thumb ? mediaUrl(s.thumb) : ''; };
+  const short = (id) => { const e = store.entityById?.[id] || store.entities.find(x => x.kind === 'location' && x.letter === id); return e?.letter || e?.short || (e ? String(e.name || id).split(/[\s·-]+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase() : id); };
 
   function addItems(c, list, html, cls = '') {
     c.body.innerHTML = ''; c.items = [];
@@ -181,11 +187,12 @@ export function makeColumns(tl, store) {
       refresh(c, what) { if (what !== 'scenes' && what !== 'breakdown') return false; this.build(c); return true; },
       dblclick(c, t) { const s = currentScript(store.scenes)?.scenes.find(x => x.t0 <= t && t < x.t1); window.WB?.stages?.open('script').then(() => s && window.WB.script?.focus(s.id)); } },
 
-    // ---------------------------------------------------------------- shots (storyboard, render frame)
+    // ---------------------------------------------------------------- shots (the storyboard: frame sketch, else the render frame)
     { id: 'shots', title: 'shots', kind: 'text', w: 104, mode: 'follow', stripColor: '#c9ccd1',
       build(c) {
-        addItems(c, store.shots, (s) => `<div class="shot k-${esc(s.kind)}" data-act="seek" data-sel="shot:${esc(s.id)}" data-t="${num(s.t0)}" title="${esc(s.id)} · ${esc(s.kind)} · ${fmt(s.t0, true)}–${fmt(s.t1, true)} · ${esc(s.title)}"><div class="cap">${chip('shot:' + s.id, '')}<b>${esc(s.id)}</b> <i>${esc(s.kind)}</i></div><img loading="lazy" src="${esc(mediaUrl(s.thumb))}" alt=""></div>`);
-      }, act: seekAct, refresh: refreshChips,
+        addItems(c, store.boardShots(), (s) => { const src = frameSrc(s), g = s.gen || (s.thumb ? '' : shotEstimate(s).gen);
+          return `<div class="shot k-${esc(s.kind)}${s.sketch ? ' skf' : ''}" data-act="seek" data-sel="shot:${esc(s.id)}" data-t="${num(s.t0)}" title="${esc(s.id)}${s.scene ? ' · ' + esc(s.scene) : ''} · ${esc(s.kind)}${g ? ' · ' + g : ''} · ${fmt(s.t0, true)}–${fmt(s.t1, true)} · ${esc(s.title || s.text || '')}${s.camera ? '\ncamera: ' + esc(s.camera) : ''}"><div class="cap">${chip('shot:' + s.id, '')}<b>${esc(s.id)}</b> <i>${esc(s.kind)}</i></div>${src ? `<img loading="lazy" src="${esc(src)}" alt="">` : `<span class="nofr">${esc(s.title || s.text || 'no frame')}</span>`}</div>`; });
+      }, act: seekAct, refresh: onBoard(refreshChips),
       dblclick(c, t) { if (!tl.player.video) tl.player.toggleVideo(); tl.seek(t); } },
 
     // ---------------------------------------------------------------- world clips (EDL uses: clip, take, in-point)
@@ -207,14 +214,14 @@ export function makeColumns(tl, store) {
     // ---------------------------------------------------------------- cast per shot
     { id: 'cast', title: 'cast', kind: 'text', w: 40, mode: 'follow', stripColor: '#ff7ab8',
       build(c) {
-        addItems(c, shotSpans, ({ s }) => (s.cast || []).map(id => { const e = store.entityById[id]; const lab = e?.short || String(e?.name || id).split(/[\s·-]+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase(); return `<span class="cast" data-id="${esc(id)}" style="--cc:${cssColor(e?.color)}" title="${esc(e?.name || id)}: ${esc(e?.role || '')}">${esc(lab)}</span>`; }).join('') + (s.locations?.length ? `<span class="loc">${esc(s.locations.join(''))}</span>` : ''));
-      } },
+        addItems(c, shotSpans(), ({ s }) => (s.cast || []).map(id => { const e = store.entityById[id]; const lab = e?.short || String(e?.name || id).split(/[\s·-]+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase(); return `<span class="cast" data-id="${esc(id)}" style="--cc:${cssColor(e?.color)}" title="${esc(e?.name || id)}: ${esc(e?.role || '')}">${esc(lab)}</span>`; }).join('') + (s.locations?.length ? `<span class="loc" title="${esc(s.locations.join(', '))}">${esc(s.locations.map(short).join(''))}</span>` : ''));
+      }, refresh: onBoard() },
 
     // ---------------------------------------------------------------- status / approval per shot (+ the clip uses in it)
     { id: 'status', title: 'status', kind: 'text', w: 60, mode: 'follow', stripColor: '#7fbf8f',
       build(c) {
-        addItems(c, shotSpans, ({ s }) => chip('shot:' + s.id, s.id.replace(/^c\d-/, '')) + (s.clips || []).map(u => chip('use:' + u, String(u).split('@')[0])).join(''));
-      }, act: seekAct, refresh: refreshChips },
+        addItems(c, shotSpans(), ({ s }) => chip('shot:' + s.id, s.id.replace(/^c\d-/, '')) + (s.clips || []).map(u => chip('use:' + u, String(u).split('@')[0])).join(''));
+      }, act: seekAct, refresh: onBoard(refreshChips) },
 
     // ---------------------------------------------------------------- cost
     { id: 'cost', title: 'cost $', kind: 'text', w: 80, mode: 'drive', hidden: true, stripColor: '#cfae80',

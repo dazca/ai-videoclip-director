@@ -76,7 +76,7 @@ export class Timeline {
 
   onData(what) {
     if (what === 'all') { const t = this.timeAtRead(); this.destroy(); this.build(); this.scrollToTime(t); return; }
-    if (what === 'approvals' || what === 'notes' || what === 'scenes' || what === 'breakdown') {
+    if (what === 'approvals' || what === 'notes' || what === 'scenes' || what === 'breakdown' || what === 'board') {
       for (const c of this.cols) if (c.def.refresh && c.def.refresh(c, what)) c.dirty = true;
       this.relayout({});
     }
@@ -140,7 +140,7 @@ export class Timeline {
     const anchors = [];
     for (const s of song.sections) anchors.push(s.t0, s.t1);
     for (const l of song.lines) anchors.push(l.t0);
-    for (const s of store.shots) anchors.push(s.t0, s.t1);
+    for (const s of store.boardShots()) anchors.push(s.t0, s.t1);   // the storyboard's shots (else shots.json's)
     const folds = this.foldRanges();
     const inFold = (t) => folds.some(f => t >= f.t0 && t < f.t1);
     const cons = [];

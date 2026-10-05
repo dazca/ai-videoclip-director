@@ -50,13 +50,14 @@ function scrub(v) {
 export const exporter = {
   // everything exported goes through scrub(): private media (crops of real photos) never leave the machine
   bundleData() {
-    const { song, events, energy, script, scenes, shots, uses, costs, notes, approvals, requests, overrides, entities, media } = store;
-    return scrub({ project: PROJECT, exported: new Date().toISOString(), song, events, energy, script, scenes, shots: { shots, uses }, costs, notes, approvals, requests, overrides, entities, media: (media || []).filter(m => !m.private) });
+    const { song, events, energy, script, scenes, shots, uses, costs, notes, approvals, requests, overrides, entities, media, board } = store;
+    return scrub({ project: PROJECT, exported: new Date().toISOString(), song, events, energy, script, scenes, shots: { shots, uses }, storyboard: board, costs, notes, approvals, requests, overrides, entities, media: (media || []).filter(m => !m.private) });
   },
   bundle() { download(`${PROJECT}-bundle.json`, JSON.stringify(this.bundleData(), null, 1)); },
   shotList() {
-    const rows = [['id', 't0', 't1', 'start', 'end', 'section', 'kind', 'title', 'cast', 'locations', 'clips', 'state']];
-    for (const s of store.shots) rows.push([s.id, s.t0, s.t1, fmt(s.t0), fmt(s.t1), s.section, s.kind, s.title, s.cast.join(' '), s.locations.join(' '), s.clips.join(' '), store.state('shot:' + s.id)]);
+    // the storyboard's shots (storyboard.json, else shots.json)
+    const rows = [['id', 'scene', 't0', 't1', 'start', 'end', 'section', 'kind', 'gen', 'title', 'text', 'camera', 'cast', 'locations', 'props', 'clips', 'frame', 'state']];
+    for (const s of store.boardShots()) rows.push([s.id, s.scene || '', s.t0, s.t1, fmt(s.t0), fmt(s.t1), s.section || '', s.kind, s.gen || '', s.title || '', s.text || '', s.camera || '', (s.cast || []).join(' '), (s.locations || []).join(' '), (s.props || []).join(' '), (s.clips || []).join(' '), s.sketch || '', store.state('shot:' + s.id)]);
     download(`${PROJECT}-shots.csv`, rows.map(r => r.map(csv).join(',')).join('\n'), 'text/csv');
   },
   storyboard() {
@@ -69,7 +70,8 @@ export const exporter = {
       .g{display:grid;grid-template-columns:repeat(4,1fr);gap:6px} .s{break-inside:avoid;border:1px solid #bbb;padding:3px}
       .s img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block;background:#eee} .s b{font-size:11px} .s i{color:#666;font-style:normal}
       @page{size:A4 landscape;margin:8mm}</style>
-      <h1>${esc(PROJECT)} · storyboard · ${store.shots.length} shots · ${new Date().toISOString().slice(0, 10)}</h1><div class="g">${store.shots.map(s => `<div class="s">${pub(s.thumb) ? `<img src="${esc(abs(s.thumb))}">` : '<img alt="">'}<b>${esc(s.id)}</b> <i>${fmt(s.t0)}–${fmt(s.t1)} · ${esc(s.kind)} · ${esc(store.state('shot:' + s.id))}</i><div>${esc(s.title)}</div></div>`).join('')}</div>`;
+      <h1>${esc(PROJECT)} · storyboard · ${store.boardShots().length} shots · ${new Date().toISOString().slice(0, 10)}</h1><div class="g">${store.boardShots().map(s => { const f = s.sketch ? store.mediaById?.['sketch-' + s.sketch]?.path || `sketches/${s.sketch}.png` : s.thumb;
+        return `<div class="s">${pub(f) ? `<img src="${esc(abs(f))}">` : '<img alt="">'}<b>${esc(s.id)}</b> <i>${fmt(s.t0)}–${fmt(s.t1)}${s.scene ? ' · ' + esc(s.scene) : ''} · ${esc(s.kind)} · ${esc(store.state('shot:' + s.id))}</i><div>${esc(s.title && s.text ? `${s.title}: ${s.text}` : s.title || s.text || '')}</div>${s.camera ? `<div><i>${esc(s.camera)}</i></div>` : ''}</div>`; }).join('')}</div>`;
     const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
     const w = window.open(url, '_blank'); if (!w) { URL.revokeObjectURL(url); download(`${PROJECT}-storyboard.html`, html, 'text/html'); return; }
     setTimeout(() => URL.revokeObjectURL(url), 60000);

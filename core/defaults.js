@@ -298,8 +298,9 @@ export function contextArgs(target, clientX, clientY) {
       if (line) { names.push('lyric'); args.line = line; const w = target.closest('span[data-t]'); args.t = w ? Number(w.dataset.t) : line.t0; }
       const section = k === 'section' && song().sections.find(s => s.id === id);
       if (section) { names.push('section'); args.section = section; }
-      const shot = k === 'shot' && store.shots.find(s => s.id === id);
-      if (shot) { names.push('shot'); args.shot = shot; }
+      // a shot of the storyboard (storyboard.json) or of shots.json
+      const shot = k === 'shot' && (store.shots.find(s => s.id === id) || store.boardShots().find(s => s.id === id));
+      if (shot) { names.push('shot'); args.shot = shot; args.shotId = id; }
       const use = k === 'use' && store.uses.find(u => u.id === id);
       if (use) { names.push('clip'); args.use = use; args.shot = shotOfUse(use); }
       const note = k === 'note' && store.notes.notes.find(n => n.id === id);
@@ -318,6 +319,8 @@ export function contextArgs(target, clientX, clientY) {
   if (cn?.dataset.node) { names.push('chnode'); args.nodeId = cn.dataset.node; }
   const bi = target.closest('.bdws [data-item]');   // an item in the breakdown stage (tabs/breakdown.js)
   if (bi?.dataset.item) { names.push('bditem'); args.itemId = bi.dataset.item; }
+  const sh = target.closest('.sbws [data-shot]');   // a shot in the storyboard stage (tabs/storyboard.js)
+  if (sh?.dataset.shot) { names.push('shot'); args.shotId = sh.dataset.shot; args.item = 'shot:' + sh.dataset.shot; args.shot = store.boardShots().find(s => s.id === sh.dataset.shot) || null; }
   const sc = target.closest('.scws [data-scene], .bdws [data-scene]');   // a scene in the script stage (tabs/script.js) or a breakdown matrix column
   if (sc?.dataset.scene) { names.push('scene'); args.sceneId = sc.dataset.scene; }
   if (target.closest('.stagews')) { names.push('stage'); args.stageId = WB().stages?.current(); }

@@ -44,6 +44,7 @@ import * as S from './lib/store.mjs';
 import { checkLyrics } from './js/flow.js';
 import { checkScenes, SCENE_STATUSES } from './js/scenes.js';
 import { checkBreakdown, ITEM_STATUSES } from './js/breakdown.js';
+import { checkBoard } from './js/storyboard.js';
 
 const { CFG, DATA_ROOT, WB_DIR: WB } = S;
 const ARGS = process.argv.slice(2);
@@ -161,7 +162,8 @@ function readBody(req, limit) {
 // versions, notes and replies; a changed scene status or intake answer is stamped director / page (an unchanged one keeps
 // its author); a malformed file is refused (400). breakdown.json (stage 3): versions and note authors the same; a changed
 // item status is stamped director / page; entity_id / look_id are never taken from a page save (only the page's
-// "Create entity" op, breakdown_promote, sets them).
+// "Create entity" op, breakdown_promote, sets them). storyboard.json (stage 6): versions and note authors the same; a
+// malformed file is refused (400). A shot's approval is approvals.json (stamped above), never storyboard.json.
 function stampPage(name, data, cur) {
   const at = new Date().toISOString().slice(0, 19);
   if (name === 'requests.json' && Array.isArray(data.items)) {
@@ -246,6 +248,16 @@ function stampPage(name, data, cur) {
     }
     for (const [k, c] of Object.entries(cur.states || {})) if (c?.entity_id && !st[k]) st[k] = { ...c };
     data.states = st;
+  }
+  if (name === 'storyboard.json') {
+    try { checkBoard(data); } catch (e) { throw new S.WbError(400, e.message); }
+    const cv = new Map((cur.versions || []).map(v => [v.id, v])), cn = new Map((cur.notes || []).map(n => [n.id, n]));
+    data.versions = data.versions.map(v => cv.get(v.id) || { ...v, created: at, ...(v.via === 'import' && !cur.versions ? {} : { by: 'director', via: 'page' }) });
+    data.notes = (data.notes || []).filter(n => n && typeof n === 'object').map(n => {
+      const c = cn.get(n.id), cr = new Map((c?.replies || []).map(r => [r.id, r]));
+      const replies = (Array.isArray(n.replies) ? n.replies : []).filter(r => r && typeof r === 'object').map(r => cr.get(r.id) ? { ...r, by: cr.get(r.id).by, via: cr.get(r.id).via, at: cr.get(r.id).at } : { ...r, by: 'director', via: 'page', at });
+      return c ? { ...n, by: c.by, via: c.via, at: c.at, replies } : { ...n, by: 'director', via: 'page', at, replies };
+    });
   }
   return data;
 }

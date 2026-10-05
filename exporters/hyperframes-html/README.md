@@ -3,8 +3,9 @@
 Packages a [HyperFrames](https://github.com/heygen-com/hyperframes) composition **as itself**: the same HTML, CSS,
 JS, fonts, images, videos and audio, byte for byte, in the same relative layout, plus the official
 `<hyperframes-player>` to play it. It plays like the MP4 render because it is the same composition the renderer
-captures. Nothing is trimmed, re-encoded, re-timed or wrapped in a custom loader. Making it smaller is a separate,
-later step that reads `manifest.json`.
+captures. Nothing is trimmed, re-encoded or re-timed. The one optional addition is lazy media (`--lazy-media`, on by
+default with `--interactive`): a small inline loader that decides *when* each file loads, never what a frame shows.
+Making it smaller is a separate, later step that reads `manifest.json`.
 
 Works on any composition folder (not tied to one project). Needs Node 22+, `ffmpeg`/`ffprobe` on PATH, and a
 Chrome with H.264/AAC: `$CHROME_PATH`, else the Chrome for Testing that puppeteer/HyperFrames keep in
@@ -13,10 +14,13 @@ Chrome with H.264/AAC: `$CHROME_PATH`, else the Chrome for Testing that puppetee
 ```
 node exporters/hyperframes-html/export.mjs <compositionDir> <outDir> [--entry index.html] [--sample-fps 10]
 node exporters/hyperframes-html/verify.mjs <outDir> --against <render.mp4> [--n 12 | --times 4,18.5] [--play 6]
+node exporters/hyperframes-html/verify.mjs <outDir> --against <otherPackageDir> --every 2 --seams   # pixel identity
 node exporters/hyperframes-html/serve.mjs  <outDir> [port]      # any static server with byte ranges works
 node exporters/hyperframes-html/export.mjs <compositionDir> <outDir> --interactive [--project <workbench project dir>]
 node exporters/hyperframes-html/interactive/build.mjs <outDir> [--project <dir>]   # add the layer to an existing package
 node exporters/hyperframes-html/interactive/verify-interactive.mjs <outDir>        # headless test of the layer
+node exporters/hyperframes-html/export.mjs <compositionDir> <outDir> --interactive [--no-lazy-media] [--lazy-lead 15] [--lazy-first 10] [--lazy-budget-mb 150]
+node exporters/hyperframes-html/lazy/build.mjs <outDir> [--lead 15 ...] | --off   # add / remove lazy media on an existing package
 ```
 
 ## What `export.mjs` does
@@ -77,6 +81,59 @@ still reference it. The interactive layer drops private clip/start-image paths f
 Report: `<outDir>-verify/verify.json` plus `cmp-<t>.jpg` (package | render) for each time. The exit code is non-zero
 on integrity, request, external-request or page-error failures, on media still decoding at a capture, and on a frame
 above `--max-mad` (% of 255, default 5) or below `--min-psnr` (dB, default 20).
+
+Against another package (`--against <dir>` with a `manifest.json`, for example the same export without lazy media)
+both are opened from one server and sent the same exact frame times (multiples of 1/fps, 30 when unknown: the player
+drives the timeline directly or through the runtime, which snaps to frames, depending on how fast the timeline
+registers). The thresholds default to exact (`--max-mad 0 --min-psnr 99`) and every differing frame is saved.
+`--every s` takes a frame every s seconds; `--seams` adds 0.05 s after the start and before the end of every visible
+range in the manifest (where a lazily loaded file first appears). Before each capture it waits for
+`window.__hfLazy.until(t)` and for on-screen images and videos (including any still parked).
+
+## Lazy media (`--lazy-media`)
+
+Without it the package behaves like the composition: every shot builds its `<img>` and `<video preload=auto>` at
+mount, so the browser fetches the whole media set before the opening is safe to play. For *azemar.exe*, the
+interactive player became ready only after about 194 MB (70 s at 20 Mbps). With it, only what the opening needs
+loads first: 15.7 MB, 6.1 s at 20 Mbps.
+
+What it changes: `lazy/build.mjs` puts `lazy/lazy-media.js` and its schedule inline, first in `<head>` of the
+**package's** entry HTML. Static `<img|video src>` of scheduled files there become `data-hf-lazy`. No other file
+changes. The composition sources are never touched. `manifest.rewrites` lists it, the entry asset carries
+`lazy_from_sha256` (the exported file), and `manifest.lazy_media` holds the settings, the scheduled files and the
+unobserved ones. `lazy/build.mjs <outDir> --off` restores the exported file byte for byte.
+
+How it works (runtime, in the film document):
+- **Hooks**, no file edits: `Element.setAttribute('src')`, the `src` setters of img/video, and `innerHTML` /
+  `insertAdjacentHTML` strings. A scheduled file's `src` is parked in `data-hf-lazy` and put back later.
+- **Schedule**: images and videos >= `--lazy-min-kb` (256 KB). A `<video data-start data-duration>` is scheduled by
+  its own HyperFrames timing, one unit per element. An image is one unit per file, because all its `<img>` share one
+  request. Its windows are `usage.visible` from the export pass, padded 0.25 s.
+- **Clock**: the master `<audio>` in standalone mode, else the registered timeline (`__hfLazy.clock` overrides it).
+- **Order**: first, whatever is needed at the playhead or by a waiter, plus any parked element found on screen. Then
+  up to 3 loads at a time, soonest first, up to `lead` s ahead (15). Nothing past `first` s (10) starts while something
+  before it is missing, and no look-ahead starts while the playhead's own files are missing. After a seek, loads that
+  are no longer near the playhead are dropped.
+- **Release**: over `--lazy-budget-mb` (150) of resident files, units with no window within [t - 5 s, t + lead] are
+  parked again, farthest first (videos are unloaded). This is seek-safe: a seek moves the window and the files load
+  again.
+- **Ready**: an image unit is ready when decoded. A video is ready when its media range is buffered, or when the
+  browser stopped preloading it with HAVE_FUTURE_DATA.
+- **API** (`window.__hfLazy` in the film): `ready(t0, t1)`, `until(t0, t1)` (loads that range first, resolves when it is
+  in), `t()`, `stats()`.
+
+The interactive layer waits for `until(0, first)` before `IX.ready`. While playing, if the playhead's files are not
+in yet (a seek, a slow line), it holds the audio clock and resumes by itself. `IX.playing()` stays true and the page
+gets `body.ix-wait`. Paused, the loader still loads what the paused frame needs. Frames stay a pure function of time:
+the loader only decides when a file is fetched.
+
+Limits:
+- Files never seen on screen during the export pass (`lazy_media.unobserved`) load only when one is found on screen.
+- CSS `url()` backgrounds are not parked. They load when drawn, as before, and the loader also preloads the scheduled
+  ones ahead.
+- Seeking needs a server with byte ranges. A plain-200 server cannot seek the master audio with or without lazy media.
+- The plain player (`index.html`) does not hold during playback: it plays on, and seeks show files as they arrive.
+  `verify.mjs` waits for them.
 
 ## Interactive layer (`--interactive`)
 
